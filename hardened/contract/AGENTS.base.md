@@ -43,7 +43,8 @@ If your role is not declared at the start of a session, ask. Do not assume.
 | `Ops/Views/` | user (rarely), agents (never without permission) | Bases files (not published) |
 | `Ops/Followups/` | planner, capture, user | ticklers |
 | `Agents/` | all agents | jobs, runs, prompts (paste-able), approvals |
-| `05_Outputs/` | executors | generated artifacts (drafts, code, reports) |
+| `Drafts/` | executors, librarian, user | git-tracked staging area for finalize-later text drafts (LLM prose, code, reports). Text is committed; heavy binaries are gitignored. Promote finished drafts into typed `Atlas/` notes, then archive/delete the draft. |
+| `outputs/` | executors | generated **binary** artifacts (report PDFs, letterhead `.docx`, CV PDFs). Folder + `README.md` tracked; contents (`outputs/**`) gitignored — don't commit binaries. |
 | `_schemas/` | user, with agent proposals via PR | edits are governance changes |
 | `_templates/` | user, agents (propose-only) | one per type |
 | `_workflows/` | user, agents (propose-only) | step-by-step workflow prompts |
@@ -166,7 +167,7 @@ The site is not yet deployed to the public internet. To deploy: set `baseUrl` in
 - Send email, post to Slack, commit calendar events, make purchases, or call external services *unless* the active agent_job lists those tools in `allowed_tools:` and `human_approval_required: true` has been satisfied by an entry in `Agents/Approvals/`.
 - Modify `Raw/` content.
 - Delete files. Use `_archive/` instead.
-- Quote `private` notes in `05_Outputs/` files that are intended to leave the vault.
+- Quote `private` notes in `Drafts/` or `outputs/` artifacts that are intended to leave the vault.
 - Lower a note's `sensitivity` without explicit user instruction.
 - Mark your own work `done`. Set `status: needs_review` and let the user (or an auditor) close it.
 

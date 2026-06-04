@@ -17,7 +17,7 @@ started_at: YYYY-MM-DDTHH:MM:SS-04:00
 ended_at:
 status: completed         # in_progress | completed | failed | aborted
 outputs:
-  - "05_Outputs/..."
+  - "Drafts/..."
 notes_modified: []
 log_entries_appended: 0
 sensitivity: normal       # inherits strictest of inputs

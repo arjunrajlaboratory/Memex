@@ -39,7 +39,7 @@ Recommended (not required) optional subsections within an entry:
 
 ## Rules
 
-- Default `sensitivity: private`. Journal entries are first-person reflective; do not quote them in `05_Outputs/` files or external comms without explicit user instruction.
+- Default `sensitivity: private`. Journal entries are first-person reflective; do not quote them in `Drafts/` or `outputs/` artifacts or external comms without explicit user instruction.
 - Author defaults to `me`. If a journal entry is being captured *from* someone else (e.g. a transcribed conversation reflection), set `author` to the relevant `[[<Name>]]` link and confirm the person consents to having the entry in the vault.
 - Journals are append-only within a day. Do not edit a prior day's journal entries without leaving an audit note (a `## EDIT YYYY-MM-DD HH:MM — <reason>` subsection).
 - The auditor lints for journal entries with no `date:` or with `date:` outside the file's date-named filename (e.g. `2026-01-15.md` containing `date: 2026-01-16` is a flag).

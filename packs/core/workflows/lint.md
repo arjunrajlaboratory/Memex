@@ -21,7 +21,7 @@ For each, produce a list of offending notes (wiki-linked).
 11. **Lapsed people.** Person `next_touch < today` AND `status: active`.
 12. **Broken trackers.** Tracker `status: broken` — needs URL/feed repair.
 13. **Quiet trackers.** Tracker `miss_count >= 5` — propose cadence lengthening.
-14. **Sensitivity leaks.** Any note that links a `sensitive` note from a file under `05_Outputs/`.
+14. **Sensitivity leaks.** Any note that links a `sensitive` note from a file under `Drafts/` or `outputs/`.
 15. **Schema drift.** Any note missing a required field per its `type:` schema.
 16. **Schema enum violations.** Any field whose value is outside the schema's declared enum. Spot the common offenders:
     - `type: source` notes with `status:` not in `[new, unprocessed, processing, processed, needs_review]` (e.g., `status: ingested` is a frequent miscoding).
