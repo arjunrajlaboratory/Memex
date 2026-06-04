@@ -26,6 +26,13 @@ no_unbaked() {  # $1 = dir
 [ -f "$TMP/core/CLAUDE.md" ] || fail "CLAUDE.md missing"
 [ -f "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/"
 [ -f "$TMP/core/scripts/launchd/com.memex.quartz.plist" ] || fail "launchd plist missing/misnamed"
+# sources config seed: present, default streams (email+slack on, calendar off), local git
+[ -f "$TMP/core/_config/sources.md" ] || fail "_config/sources.md seed missing"
+grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email stream not enabled by default"
+grep -q "slack: { enabled: true" "$TMP/core/_config/sources.md" || fail "slack stream not enabled by default"
+grep -q "calendar: { enabled: false" "$TMP/core/_config/sources.md" || fail "calendar should default off"
+grep -q "git_mode: local" "$TMP/core/_config/sources.md" || fail "default git_mode should be local"
+[ -d "$TMP/core/.git" ] || fail "local git mode should init a repo"
 grep -q "memex-quartz" "$TMP/core/.claude/settings.json" 2>/dev/null && fail "settings.json should reference hooks not launchd" || true
 no_unbaked "$TMP/core"
 grep -rq "jane@example.com" "$TMP/core/.claude/skills" || fail "owner email not baked into skills"
@@ -42,7 +49,14 @@ no_unbaked "$TMP/pi"
 # pi port baked distinctly
 grep -q "8182" "$TMP/pi/quartz/package.json" || fail "pi QUARTZ_PORT not baked"
 
+# ---------- git mode none + calendar stream ----------
+"$ENG/bin/memex-init" --target "$TMP/nogit" --packs core --answers "$ENG/tests/fixtures/answers.nogit.json" >/dev/null
+[ -f "$TMP/nogit/_config/sources.md" ] || fail "_config/sources.md missing (nogit)"
+grep -q "calendar: { enabled: true" "$TMP/nogit/_config/sources.md" || fail "calendar stream not enabled when requested"
+grep -q "git_mode: none" "$TMP/nogit/_config/sources.md" || fail "git_mode none not recorded"
+[ ! -d "$TMP/nogit/.git" ] || fail "git mode none should NOT init a repo"
+
 # ---------- guards ----------
 "$ENG/bin/memex-init" --target "$TMP/core" --packs core --answers "$ENG/tests/fixtures/answers.core.json" 2>/dev/null && fail "should refuse non-empty target" || true
 
-echo "PASS: memex-init core + pi + guards"
+echo "PASS: memex-init core + pi + sources/git + guards"

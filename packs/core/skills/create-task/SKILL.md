@@ -85,7 +85,7 @@ If and only if `status: scheduled`, create a Google Calendar event on the user's
 - Description: a one-sentence outcome statement + a link to the Task file path. Example: `Exercise the data pipeline integration end-to-end on a real public dataset before advertising the feature. Linked vault task: Ops/Tasks/Test data pipeline integration in ExampleProject.md`
 - Don't add attendees, don't ask for a Meet link, don't set reminders unless the user said to.
 
-Capture the calendar event ID if the API returns one and stash it in the Task's `# Work log` line so the bidirectional link is recoverable.
+Capture the calendar event ID if the API returns one: write it to the Task's `calendar_event_id:` frontmatter (and the event summary to `calendar_event_title:`) **and** mention it in the `# Work log` line so the bidirectional link is recoverable. The frontmatter field is what lets the daily briefing's calendar loop-closing later ask "this event's time has passed — close the task?" (gated on the `calendar` stream in `_config/sources.md`).
 
 If the user didn't time-block, skip this step entirely — don't ask whether they want a calendar event. A `status: next` Task is a list item; the calendar belongs to time-blocked work.
 

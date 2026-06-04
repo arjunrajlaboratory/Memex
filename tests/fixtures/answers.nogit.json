@@ -1,0 +1,20 @@
+{
+  "OWNER_NAME": "Jane Roe",
+  "OWNER_PRIMARY_EMAIL": "jane@example.com",
+  "OWNER_FORWARDING_EMAIL": "",
+  "FRAMING": "CSO at Example Bio",
+  "VAULT_PATH": "/tmp/example-vault",
+  "USER_HOME": "/Users/jane",
+  "DRIVE_MOUNT": "",
+  "LETTERS_DRIVE_ID": "",
+  "LETTERHEAD_TEMPLATE_ID": "",
+  "QUARTZ_PORT": "8181",
+  "QUARTZ_WS_PORT": "3101",
+  "CC_PROJECT_SLUG": "-tmp-example-vault",
+  "GITHUB_ORG": "exampleorg",
+  "LAB_WEBSITE_PATH": "",
+  "TIMEZONE": "America/Los_Angeles",
+  "VAULT_NAME": "example-vault",
+  "STREAMS": "email,slack,calendar",
+  "GIT_MODE": "none"
+}

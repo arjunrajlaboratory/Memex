@@ -4,6 +4,16 @@
 **Trigger:** `Ops/Briefings/<today>.md` does not exist; or explicit user request
 **Output:** `Ops/Briefings/<today>.md`
 
+## Default loop-closing pass (Step 1b)
+
+Before gathering the inputs below, run the default multi-source loop-closing pass (the
+skill version automates this; pasting the prompt, do it by hand): read `_config/sources.md`
+for enabled streams, run `capture-comms` (sent + received email/Slack) then
+`reconcile-from-comms` for today. Tier-A reversible bookkeeping auto-applies; Tier-B task
+closes (plus passed calendar-event closes if the `calendar` stream is enabled) become the
+numbered `## 0. State confirmation needed` section, confirmed in one batch. Skip this pass
+for backfilled briefings more than ~2 days old.
+
 ## Inputs to read
 
 - `log.md` since the last briefing

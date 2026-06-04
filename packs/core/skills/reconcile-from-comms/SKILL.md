@@ -18,9 +18,11 @@ pre-flight — it relied on the user remembering; this reads the captured signal
 
 ## Hard rules (non-negotiable)
 
-- **The `## Action items` sections are the only input.** Parse the phase-1 checkbox + `↳` blocks
+- **The `## Action items` sections are the primary input.** Parse the phase-1 checkbox + `↳` blocks
   from `Inbox/comms/<date>/*.md`. The prose sections (`## Summary`, `## Threads worth routing`,
-  `## Filtered as noise`) are context, not instructions.
+  `## Filtered as noise`) are context, not instructions. (One addition: the optional
+  **calendar loop-closing** pass below contributes Tier-B proposals from vault Tasks whose linked
+  calendar event has passed, when the `calendar` stream is enabled in `_config/sources.md`.)
 - **Two tiers, and the line between them is firm** (see table). Auto-apply ONLY reversible CRM
   bookkeeping. Everything consequential, irreversible, sensitive, or needing a narrative is
   **proposed and held for explicit confirmation** — apply nothing in that tier until the user says
@@ -48,6 +50,7 @@ pre-flight — it relied on the user remembering; this reads the captured signal
 | **B — confirm first** | Letter `drafting → submitted` (+ set `submitted:` date) | Confirm → `Edit` the Letter note | Asserts an external state; consequential |
 | **B — confirm first** | Capture a Decision the comms imply | Confirm → [[capture-decision]] | Needs rationale/alternatives; often sensitive |
 | **B — confirm first** | Create a new Task / Followup / Person / Source from a routing suggestion | Confirm → [[create-task]] / [[ingest-person]] / [[ingest-source]] | New entities are commitments |
+| **B — confirm first** | Close a Task whose linked calendar event has passed | Confirm → [[close-task]] | External state; agents never self-close (calendar pass below) |
 | **B — always** | Anything `[sensitive]` or any p0/p1 Task | Confirm only — never auto | Sensitivity + stakes |
 
 When a Tier-A change is uncertain (confidence `low`, or no clean note match), demote it to Tier B
@@ -113,6 +116,42 @@ job, and the mark is the idempotency key. For each reconciled item:
    skill, and what was skipped (with the sensitive/uncertain reason). Offer the obvious follow-ons
    (e.g. "want me to run [[capture-decision]] on the leadership meeting now?") but don't act unprompted.
 
+## Calendar loop-closing (gated on the `calendar` stream)
+
+A minimal, opt-in pass that runs **only** when `_config/sources.md` has
+`streams.calendar.enabled: true` (default off). It catches the common lag where a
+meeting happened but its prep/follow-up Task is still open.
+
+1. Find open Tasks (`status` not in `[done, canceled]`) carrying a `calendar_event_id:`.
+2. Determine whether the linked event's end-time has passed. Prefer a live lookup via
+   the Calendar MCP (`mcp__claude_ai_Google_Calendar__get_event`) so you also see if
+   the event was **canceled/declined**; if the MCP is unavailable, fall back to the
+   Task's `scheduled_end` / `calendar_event_title` and the current time.
+3. For an event that **occurred** and is past: propose a **Tier-B** close —
+   `Close [[<Task>]] — its calendar event "<title>" ended <when>. Done?` Confirm → [[close-task]].
+4. For an event that was **canceled/declined**: propose **Tier-B** instead as
+   "reschedule or drop?" — never auto-close (the work may still be owed). Surface it; let
+   the user decide.
+
+No attendee matching and no `last_contact` bumping — that's deliberately out of scope
+(the "minimal" choice). These proposals merge into the same Tier-B batch as the comms
+items and obey the same confirm-then-`close-task` rule.
+
+## When invoked by daily-briefing
+
+`daily-briefing` runs this skill as Step 0c of generating the morning briefing. In that
+context:
+
+- **Apply Tier-A exactly as normal** (reversible bookkeeping — bump `last_contact`, mark
+  a Followup `acted_on`) and update the ledger.
+- **Do NOT run the interactive Step 6 prompt.** Instead, hand the Tier-B proposals (comms
+  closes + the calendar pass above) back to the briefing. The briefing renders them in its
+  **§0 "State confirmation needed"** and owns the single batched confirmation in its
+  report-back. When the user later confirms ("yes to 1,3,4"), route each through
+  [[close-task]] / the owning skill and update this skill's ledger + checkboxes then.
+
+Run standalone (direct `/reconcile-from-comms`), Step 6 stays interactive as written.
+
 ## What this skill never does
 
 - Send / draft / react-to / schedule any email or Slack message.
@@ -130,5 +169,6 @@ job, and the mark is the idempotency key. For each reconciled item:
 
 - [[capture-comms]] — phase 1; produces the `Inbox/comms/<date>/` files this consumes.
 - [[close-task]] / [[create-task]] / [[capture-decision]] / [[ingest-person]] / [[ingest-source]] — the owning skills it delegates consequential changes to.
-- [[daily-briefing]] — its §0 "State confirmation needed" pre-flight; this skill is the signal-driven upgrade.
+- [[daily-briefing]] — runs this skill as Step 1b by default; its §0 "State confirmation needed" is this skill's Tier-B output (see "When invoked by daily-briefing" above).
+- `_config/sources.md` — gates the calendar loop-closing pass (`streams.calendar.enabled`).
 - `Daily comms digest and automated loop-closing` (idea) — the full two-phase design + the "major item" threshold rationale.
