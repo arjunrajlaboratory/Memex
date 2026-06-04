@@ -1,0 +1,4 @@
+#!/bin/zsh
+# Thin wrapper so users run `memex-init` instead of the python module path.
+ENG="$(cd "$(dirname "$0")/.." && pwd)"
+exec python3 "$ENG/tools/memex_init.py" --eng "$ENG" "$@"

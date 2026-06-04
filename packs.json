@@ -1,0 +1,139 @@
+{
+  "core": {
+    "skills": [
+      "triage-inbox",
+      "ingest-source",
+      "ingest-person",
+      "ingest-project",
+      "create-task",
+      "close-task",
+      "daily-briefing",
+      "weekly-review",
+      "lint",
+      "log-mutation",
+      "session-start",
+      "capture-decision",
+      "promote-idea",
+      "flesh-out-idea",
+      "capture-comms",
+      "reconcile-from-comms",
+      "run-trackers",
+      "shutdown-review",
+      "email",
+      "revisit-decisions",
+      "observe-manual-patterns",
+      "observe-skill-corrections",
+      "observe-task-actuals"
+    ],
+    "schemas": [
+      "_types",
+      "_privacy",
+      "area",
+      "project",
+      "task",
+      "person",
+      "organization",
+      "source",
+      "concept",
+      "decision",
+      "idea",
+      "tracker",
+      "tracker_digest",
+      "followup",
+      "interaction",
+      "commitment",
+      "ask",
+      "journal",
+      "relationship",
+      "implementation",
+      "review",
+      "effort",
+      "agent_job",
+      "agent_run",
+      "briefing"
+    ],
+    "templates": [
+      "area",
+      "project",
+      "task",
+      "person",
+      "organization",
+      "source",
+      "concept",
+      "decision",
+      "tracker",
+      "tracker_digest",
+      "followup",
+      "interaction",
+      "commitment",
+      "ask",
+      "journal",
+      "relationship",
+      "implementation",
+      "review",
+      "effort",
+      "agent_job",
+      "agent_run",
+      "briefing"
+    ],
+    "workflows": [
+      "capture-triage",
+      "source-ingest",
+      "daily-briefing",
+      "weekly-review",
+      "run-tracker",
+      "lint"
+    ],
+    "prompts": [
+      "triage-inbox",
+      "ingest-source",
+      "daily-briefing",
+      "weekly-review",
+      "run-trackers",
+      "lint",
+      "shutdown-review",
+      "new-tracker",
+      "idea-research",
+      "_task-starter",
+      "_agent-handoff"
+    ]
+  },
+  "pi": {
+    "skills": [
+      "draft-letter",
+      "ingest-letters",
+      "cv-scan",
+      "cv-build"
+    ],
+    "schemas": [
+      "letter",
+      "grant"
+    ],
+    "prompts": [
+      "draft-letter",
+      "ingest-letters"
+    ],
+    "cv": true,
+    "scripts": [
+      "merge_letterhead.py"
+    ]
+  },
+  "hardened": {
+    "hooks": [
+      "session-start-context.sh",
+      "bump-updated.sh",
+      "log-mutation.sh"
+    ],
+    "contract": [
+      "AGENTS.md",
+      "CLAUDE.md"
+    ],
+    "quartz": true,
+    "launchd": [
+      "serve_quartz.sh",
+      "com.you.memex-quartz.plist"
+    ],
+    "settings": true,
+    "gitignore": true
+  }
+}

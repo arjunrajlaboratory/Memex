@@ -1,0 +1,52 @@
+# Obsidian workspace state (per-machine; do not sync)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/workspaces.json
+.obsidian/graph.json
+
+# Obsidian community plugin data that is per-machine
+.obsidian/plugins/*/data.json
+
+# macOS
+.DS_Store
+
+# Editor scratch
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local-only secrets / credentials
+.env
+.env.local
+secrets/
+
+# Legacy dashboard generator output (removed 2026-05-18 — kept gitignored in
+# case anyone resurrects the script). Dashboards are now emitted by Quartz.
+_dashboards/
+
+# Local Python venv (kept ignored in case scripts/ comes back).
+.venv/
+
+# Quartz build artifacts (re-installed/regenerated via npm install + quartz build)
+quartz/node_modules/
+quartz/public/
+quartz/.quartz-cache/
+quartz/tsconfig.tsbuildinfo
+quartz/prof/
+
+# Drop zone — the folder and its README are tracked, but everything
+# else dropped here stays local. The triage workflow reads from this
+# folder, moves binaries into Raw/<subfolder>/ (which IS tracked),
+# extracts text into typed notes, and leaves the originals untracked.
+Inbox/*
+!Inbox/README.md
+
+# Obsidian Daily Notes auto-creates these at root; keep them out of git
+# so they don't drift into the commit log.
+/today.md
+/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+
+# Generated letter artifacts (mail-merged docx, intermediate md) — content is local-only
+outputs/**
+!outputs/README.md

@@ -1,0 +1,4 @@
+{
+  "_comment": "Plain from->to replacements applied by derive.py AFTER the placeholder token-swap. For third-party PII and instance-flavored strings that appear in skill EXAMPLES (illustrative text, not owner instance-facts) and so should be genericized in the shipped template rather than interview-prompted. Distinct from placeholders.json (interview-prompted owner facts) and audit_allowlist.json (hits we accept as-is).",
+  "scrub": []
+}

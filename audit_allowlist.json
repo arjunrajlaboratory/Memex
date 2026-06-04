@@ -1,0 +1,20 @@
+{
+  "_comment": "Detector hits that are NOT owner instance-facts and are acceptable to ship as-is. Three groups: (1) vendored Quartz strings; (2) institution names + already-fake examples in illustrative skill text; (3) generic example content. NOTE for distribution: the pi-pack/CV items were genericized before any third-party distribution per the spec §5 privacy-as-failsafe pre-distribution gate.",
+  "allow": [
+    "noreply@anthropic.com",
+
+    "j.zhao2k19@gmail.com",
+    "Example U",
+    "exampleu",
+    "seas.exampleu",
+    "List_of_ISO_639_language_codes",
+    "MDEwOlJlcG9zaXRvcnkzODcyMTMyMDg",
+
+    "bob@x.com",
+    "colleague@example.edu",
+    "you-secondary@example.edu",
+    "chair@example.edu",
+    "help@example.com",
+    "service@example.org"
+  ]
+}

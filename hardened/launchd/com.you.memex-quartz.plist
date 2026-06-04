@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.memex.quartz</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{VAULT_PATH}}/scripts/serve_quartz.sh</string>
+  </array>
+
+  <!-- Start at login, and keep it alive: launchd respawns the server within
+       seconds if it ever exits (crash, or a sleep/wake that killed it). -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>WorkingDirectory</key>
+  <string>{{VAULT_PATH}}/quartz</string>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/quartz-serve.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/quartz-serve.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

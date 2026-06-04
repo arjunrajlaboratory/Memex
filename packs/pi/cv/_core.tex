@@ -1,0 +1,102 @@
+\documentstyle[margin,line,pifont,palatino,courier]{res}
+
+\topmargin .5in
+\oddsidemargin -.5in
+\evensidemargin -.5in
+\textwidth=6.0in
+\textheight=8.5in
+\itemsep=0in
+\parsep=0in
+
+\newenvironment{list1}{
+  \begin{list}{\ding{113}}{%
+      \setlength{\itemsep}{0in}
+      \setlength{\parsep}{0in} \setlength{\parskip}{0in}
+      \setlength{\topsep}{0in} \setlength{\partopsep}{0in}
+      \setlength{\leftmargin}{0.17in}}}{\end{list}}
+\newenvironment{list2}{
+  \begin{list}{$\bullet$}{%
+      \setlength{\itemsep}{0in}
+      \setlength{\parsep}{0in} \setlength{\parskip}{0in}
+      \setlength{\topsep}{0in} \setlength{\partopsep}{0in}
+      \setlength{\leftmargin}{0.2in}}}{\end{list}}
+
+
+\let\origitem\item
+\renewcommand{\item}{\normalfont\origitem}
+
+%\newcommand{\bolditem}{\normalfont\bfseries\origitem}
+
+\newcommand{\bolditem}{\normalfont\origitem}
+
+
+\begin{document}
+
+\name{{{OWNER_NAME}} \vspace*{.1in}}
+\hfill{January 1, 2025}
+
+\begin{resume}
+
+\section{\sc Contact Information}
+
+\vspace{.05in}
+\begin{tabular}{@{}p{2.75in}p{4in}}
+Department of Example Science & Citizenship: Example Country \\
+Example University              & \verb+http://lab.example.edu+\\
+123 Example Boulevard                          &\verb+{{OWNER_FORWARDING_EMAIL}}+\\
+Example Building               & Office Phone: 555-000-0000\\
+Example City, EX 00000   & \\
+\end{tabular}
+
+\section{\sc Education}
+
+{\bf Example Graduate University}\\
+ Example City, Example State USA\\
+ Ph.D., Example Field, 2000-2005\\
+ \vspace*{-.1in}
+ \begin{list2}
+\item Dissertation Topic:  ``An Example Dissertation on Example Topics''
+\item Advisor: Example Advisor
+\end{list2}
+
+\vspace*{-.1in}
+
+
+{\bf Example Undergraduate University}\\
+ Example City, Example State USA\\
+\vspace*{-.1in}
+\begin{list2}
+\item BA in Example Field, 1996-2000
+\end{list2}
+
+
+\section{\sc Positions}
+{\bf Example Named Professor, 2024-present, Department of Example Science}\\
+{\bf Professor, 2020-present, Department of Example Science}\\
+{\bf Associate Professor, 2016-2020, Department of Example Science}\\
+{\bf Assistant Professor, 2010-2016, Department of Example Science}\\
+Department of Example Science, School of Engineering and Applied Sciences\\
+Example University\\
+Example City, Example State, USA
+
+{\bf Postdoctoral Fellow, 2005-2009}\\
+Laboratory of Example Mentor, Department of Example Science\\
+Example Institute of Technology\\
+Example City, Example State USA\\
+\vspace*{-.1in}
+
+\section{\sc Research Interests}
+
+Our lab's goal is to build a quantitative understanding of example systems through the development and application of new measurement tools. Our interests include various aspects of example biology, including example regulation, cell type transformations, and example biology.
+
+\section{\sc Fellowships and Awards}
+
+\begin{tabular}{@{}p{0.2in}p{6in}}
+2024& Example Faculty Award for Excellence in Research, Example University\\
+2019& Example Director's Transformative Award\\
+2014& Example CAREER Award\\
+2011& Example Director's New Innovator Award\\
+2008& Example Fund Career Award at the Scientific Interface\\
+2006& Example Mathematical Sciences Postdoctoral Research Fellow\\
+2000& {\it Summa Cum Laude}, Example University\\
+\end{tabular}
