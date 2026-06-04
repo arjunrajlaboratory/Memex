@@ -21,9 +21,14 @@ class TestBake(unittest.TestCase):
         self.assertEqual(bake("{{A}}", {"A": "{{B}}", "B": "z"}), "{{B}}")
 
 class TestParseStreams(unittest.TestCase):
-    def test_none_and_empty_fall_back_to_default(self):
+    def test_none_means_not_answered_falls_back_to_default(self):
+        # key absent in answers.json -> use the default
         self.assertEqual(parse_streams(None), DEFAULT_STREAMS)
-        self.assertEqual(parse_streams(""), DEFAULT_STREAMS)
+
+    def test_explicit_empty_stays_empty(self):
+        # answered-but-empty (interview opt-out, or "STREAMS": "") -> no streams
+        self.assertEqual(parse_streams(""), [])
+        self.assertEqual(parse_streams([]), [])
 
     def test_comma_string(self):
         self.assertEqual(parse_streams("email,calendar"), ["email", "calendar"])
@@ -35,8 +40,9 @@ class TestParseStreams(unittest.TestCase):
         self.assertEqual(parse_streams("calendar,bogus,email,email"),
                          ["calendar", "email"])
 
-    def test_all_unknown_falls_back_to_default(self):
-        self.assertEqual(parse_streams("notion,linear"), DEFAULT_STREAMS)
+    def test_present_but_all_unknown_yields_empty(self):
+        # a provided value is taken literally; unknown names drop to empty
+        self.assertEqual(parse_streams("notion,linear"), [])
 
 class TestGitMode(unittest.TestCase):
     def test_defaults_and_valid(self):

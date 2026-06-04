@@ -27,17 +27,20 @@ STREAM_MCP = {
 VALID_GIT_MODES = ["local", "none", "remote"]
 
 def parse_streams(raw):
-    """Normalize a STREAMS answer (list, comma-string, or None/"") into an ordered,
-    de-duplicated list of valid stream names. Unknown names are dropped; an empty
-    result falls back to the default (email + slack)."""
-    if raw is None or raw == "":
+    """Normalize a STREAMS answer into an ordered, de-duplicated list of valid
+    stream names. `None` means 'not answered' (the key was absent) and falls back
+    to the default (email + slack). Any other value is taken literally — an
+    explicit empty selection stays empty, so the user can opt out of all comms
+    scanning; unknown names are dropped. (The daily briefing supports a
+    zero-stream config: it just skips the comms pass.)"""
+    if raw is None:
         return list(DEFAULT_STREAMS)
     items = raw.split(",") if isinstance(raw, str) else list(raw)
     seen, out = set(), []
     for s in (str(x).strip().lower() for x in items):
         if s in VALID_STREAMS and s not in seen:
             seen.add(s); out.append(s)
-    return out or list(DEFAULT_STREAMS)
+    return out
 
 def normalize_git_mode(raw):
     """Coerce a GIT_MODE answer to one of local|none|remote (default local)."""
@@ -147,7 +150,7 @@ def ask_streams():
         on = (v in ("y", "yes")) if v else on_by_default
         if on:
             chosen.append(s)
-    return chosen or list(DEFAULT_STREAMS)
+    return chosen  # may be empty — an explicit opt-out of all comms scanning
 
 def ask_git_mode():
     """Privacy-aware version-control mode. local (default) | none | remote."""
