@@ -13,6 +13,23 @@ no_unbaked() {  # $1 = dir
   done
 }
 
+# General optional-token regression gate: a blank optional answer must drop its
+# surrounding prose via {{?TOKEN}}…{{/TOKEN}} sections, NOT bake an empty `` pair
+# (or a dangling clause). Scans for empty inline-code that is not part of a ```
+# fence. Uses python3 (already a test dep) since BSD grep lacks lookarounds.
+no_empty_inline_code() {  # $1 = dir
+  python3 - "$1" <<'PY'
+import sys, pathlib, re
+root, pat, bad = pathlib.Path(sys.argv[1]), re.compile(r"(?<!`)``(?!`)"), []
+for fp in root.rglob("*.md"):
+    for i, ln in enumerate(fp.read_text(errors="ignore").splitlines(), 1):
+        if pat.search(ln):
+            bad.append(f"{fp}:{i}: {ln.strip()}")
+if bad:
+    print("\n".join(bad)); sys.exit(1)
+PY
+}
+
 # ---------- core-only init ----------
 "$ENG/bin/memex-init" --target "$TMP/core" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
 
@@ -35,6 +52,10 @@ grep -q "git_mode: local" "$TMP/core/_config/sources.md" || fail "default git_mo
 [ -d "$TMP/core/.git" ] || fail "local git mode should init a repo"
 grep -q "memex-quartz" "$TMP/core/.claude/settings.json" 2>/dev/null && fail "settings.json should reference hooks not launchd" || true
 no_unbaked "$TMP/core"
+# blank OWNER_FORWARDING_EMAIL: optional-token prose must DROP, not bake empties
+no_empty_inline_code "$TMP/core/.claude/skills" || fail "empty inline-code (optional token baked blank) in core skills"
+grep -qF "forwards into it" "$TMP/core/.claude/skills/email/SKILL.md" && fail "blank-forwarding clause not dropped from email skill" || true
+grep -qF "searchable Gmail is **complete**" "$TMP/core/.claude/skills/email/SKILL.md" || fail "blank-forwarding hedge should read 'complete'"
 grep -rq "jane@example.com" "$TMP/core/.claude/skills" || fail "owner email not baked into skills"
 [ ! -e "$TMP/core/.claude/skills/draft-letter" ] || fail "pi skill leaked into core init"
 grep -qi "draft-letter" "$TMP/core/AGENTS.md" && fail "pi content in core contract" || true
@@ -46,6 +67,9 @@ grep -q "PI_CONTRACT_FRAGMENT" "$TMP/core/AGENTS.md" "$TMP/core/CLAUDE.md" && fa
 [ -f "$TMP/pi/.claude/skills/draft-letter/SKILL.md" ] || fail "pi skill missing in pi init"
 grep -qi "draft-letter\|letter" "$TMP/pi/CLAUDE.md" || fail "pi fragment not merged into contract"
 no_unbaked "$TMP/pi"
+# set OWNER_FORWARDING_EMAIL: the optional clause + hedge bake in (the kept branch)
+grep -qF '`jane@example.edu` **forwards into it**' "$TMP/pi/.claude/skills/email/SKILL.md" || fail "forwarding clause not baked when set"
+grep -qF "searchable Gmail is **near-complete**" "$TMP/pi/.claude/skills/email/SKILL.md" || fail "set-forwarding hedge should read 'near-complete'"
 # pi port baked distinctly
 grep -q "8182" "$TMP/pi/quartz/package.json" || fail "pi QUARTZ_PORT not baked"
 

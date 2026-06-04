@@ -20,6 +20,58 @@ class TestBake(unittest.TestCase):
         # an answer value containing a token is NOT re-processed (single pass)
         self.assertEqual(bake("{{A}}", {"A": "{{B}}", "B": "z"}), "{{B}}")
 
+
+class TestBakeSections(unittest.TestCase):
+    """Optional-token PROSE: {{?TOKEN}}…{{/TOKEN}} keeps its span only when the
+    answer is non-blank; {{^TOKEN}}…{{/TOKEN}} only when blank. This lets a blank
+    optional answer drop the surrounding clause, not just the token (which would
+    leave empty `` pairs / dangling words baked into the new vault)."""
+
+    def test_positive_section_dropped_when_blank(self):
+        tmpl = "`{{OWNER_PRIMARY_EMAIL}}` is primary{{?OWNER_FORWARDING_EMAIL}}; `{{OWNER_FORWARDING_EMAIL}}` forwards in{{/OWNER_FORWARDING_EMAIL}}."
+        out = bake(tmpl, {"OWNER_PRIMARY_EMAIL": "a@b.com", "OWNER_FORWARDING_EMAIL": ""})
+        self.assertEqual(out, "`a@b.com` is primary.")
+
+    def test_positive_section_kept_and_baked_when_set(self):
+        tmpl = "`{{OWNER_PRIMARY_EMAIL}}` is primary{{?OWNER_FORWARDING_EMAIL}}; `{{OWNER_FORWARDING_EMAIL}}` forwards in{{/OWNER_FORWARDING_EMAIL}}."
+        out = bake(tmpl, {"OWNER_PRIMARY_EMAIL": "a@b.com", "OWNER_FORWARDING_EMAIL": "a@b.edu"})
+        self.assertEqual(out, "`a@b.com` is primary; `a@b.edu` forwards in.")
+
+    def test_negative_section_kept_when_blank(self):
+        # the {{^TOKEN}} alternative — kept only when the token IS blank
+        self.assertEqual(bake("{{^OWNER_FORWARDING_EMAIL}}complete{{/OWNER_FORWARDING_EMAIL}}",
+                              {"OWNER_FORWARDING_EMAIL": ""}), "complete")
+
+    def test_negative_section_dropped_when_set(self):
+        self.assertEqual(bake("{{^OWNER_FORWARDING_EMAIL}}complete{{/OWNER_FORWARDING_EMAIL}}",
+                              {"OWNER_FORWARDING_EMAIL": "a@b.edu"}), "")
+
+    def test_paired_hedge_picks_one_branch(self):
+        # the adjacent ?/^ pattern used for the "near-complete" / "complete" hedge
+        tmpl = "**{{?OWNER_FORWARDING_EMAIL}}near-complete{{/OWNER_FORWARDING_EMAIL}}{{^OWNER_FORWARDING_EMAIL}}complete{{/OWNER_FORWARDING_EMAIL}}**"
+        self.assertEqual(bake(tmpl, {"OWNER_FORWARDING_EMAIL": ""}), "**complete**")
+        self.assertEqual(bake(tmpl, {"OWNER_FORWARDING_EMAIL": "a@b.edu"}), "**near-complete**")
+
+    def test_whitespace_only_answer_counts_as_blank(self):
+        self.assertEqual(bake("{{?X}}keep{{/X}}", {"X": "   "}), "")
+        self.assertEqual(bake("{{^X}}keep{{/X}}", {"X": "   "}), "keep")
+
+    def test_unknown_token_section_passes_through(self):
+        # a section whose token is absent from answers survives intact, same rule
+        # as bake()'s unknown-token pass-through (don't drop note-creation prose)
+        self.assertEqual(bake("a{{?MYSTERY}}body{{/MYSTERY}}z", {"OWNER_NAME": "x"}),
+                         "a{{?MYSTERY}}body{{/MYSTERY}}z")
+
+    def test_section_body_can_span_newlines(self):
+        tmpl = "{{^X}}line one\nline two{{/X}}"
+        self.assertEqual(bake(tmpl, {"X": ""}), "line one\nline two")
+        self.assertEqual(bake(tmpl, {"X": "v"}), "")
+
+    def test_multiple_independent_sections(self):
+        tmpl = "{{?X}}X{{/X}}-{{?Y}}Y{{/Y}}"
+        self.assertEqual(bake(tmpl, {"X": "1", "Y": ""}), "X-")
+        self.assertEqual(bake(tmpl, {"X": "", "Y": "1"}), "-Y")
+
 class TestParseStreams(unittest.TestCase):
     def test_none_means_not_answered_falls_back_to_default(self):
         # key absent in answers.json -> use the default
