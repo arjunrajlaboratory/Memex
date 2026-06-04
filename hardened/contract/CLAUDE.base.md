@@ -75,7 +75,9 @@ In addition to the paste-able prompts above, the vault ships **Claude Code skill
 | `create-task` | "add a task to ...", "create a task for ...", "block 30 min tomorrow for ...", "put time on for ..." | Writes one schema-conformant Task with a sequential `task-YYYYMMDD-NNN` id, picks the parent Project/Area, optionally creates a matching Google Calendar event when the capture includes a time block, and appends the log line. Invoked by `triage-inbox` and `promote-idea`. |
 | `close-task` | "close [[X]]", "mark this task done", "I finished the X task" | Takes a Task to `status: done` (or `needs_review` / `canceled`) with the required final `# Work log` entry, removes it from the parent Project's `# Current next actions`, surfaces any downstream Tasks the close unblocks, and logs. Agents never set their own work to `done` — that's the user's call. |
 | `capture-decision` | "I've decided to ...", "we're going with X over Y", "record this decision", "decision: ..." | Writes `Decision - <Title>.md` per `_schemas/decision.md` (the six body sections), links it from the parent Project/Area's `# Key decisions`, and handles the supersede chain when a new decision overrides a prior one. Decisions are append-only — never silently rewritten. |
-| `daily-briefing` | "generate the daily briefing", "today's briefing", "morning briefing" | Auto-triggering version of `Agents/Prompts/daily-briefing.md`. Synthesizes the full 13-section briefing into `Ops/Briefings/<date>.md` and refuses to silently overwrite an existing briefing (especially one that already has `## Shutdown notes` appended). |
+| `daily-briefing` | "generate the daily briefing", "today's briefing", "morning briefing" | Auto-triggering version of `Agents/Prompts/daily-briefing.md`. **By default first runs `capture-comms` + `reconcile-from-comms` (Step 1b)** to close loops from your sent/received email + Slack (and calendar if enabled in `_config/sources.md`), then synthesizes the full 13-section briefing into `Ops/Briefings/<date>.md`. The §0 "State confirmation needed" batch is the reconcile Tier-B output. Refuses to silently overwrite an existing briefing (especially one that already has `## Shutdown notes` appended). |
+| `capture-comms` | "capture today's comms", "summarize my email and slack", "what loops did my comms close" | **Phase 1 (capture-only).** Pulls the day's Gmail (sent + received) and Slack (sent + received) — only the streams enabled in `_config/sources.md` — into `Inbox/comms/<date>/` as structured action items. Read-only against Gmail/Slack (never sends/drafts/reacts). Applies nothing; proposes targets for phase 2. |
+| `reconcile-from-comms` | "reconcile my comms", "close the loops from today's comms", "apply the comms digest" | **Phase 2 (loop-closing).** Reads the `Inbox/comms/<date>/` action items, auto-applies reversible Tier-A bookkeeping (bump `last_contact`, mark Followups `acted_on`), and proposes consequential Tier-B changes (close a Task, flip a Letter to submitted, close a passed calendar-linked Task) for explicit batched confirmation. Never auto-closes a Task to `done`; routes confirmed closes through `close-task`. |
 | `shutdown-review` | "shutdown review", "wrap up the day", "end-of-day notes" | Auto-triggering version of `Agents/Prompts/shutdown-review.md`. Walks the five reflection questions, appends `## Shutdown notes — <today>` to today's briefing, and cascades to every touched Task's `# Work log`. Queues learnings as Decisions for capture tomorrow rather than doing them inline. |
 | `run-trackers` | "run the trackers", "Monday tracker pass", "any new digests?" | Auto-triggering version of `Agents/Prompts/run-trackers.md`. Runs each active+due tracker per its `search_strategy`, writes the digest, applies or proposes `update_targets` (per `auto_update_wiki`), and updates tracker bookkeeping. Honors `forbidden_actions:` literally. |
 | `lint` | "run the lint", "audit the vault", "auditor pass" | Auto-triggering version of `Agents/Prompts/lint.md`. Runs the 15-check auditor pass and writes the report into the open weekly review (or a standalone `Lint - <date>.md`). Flag-only — proposes follow-on tasks but creates none. |
@@ -272,6 +274,30 @@ The vault was built against Obsidian Bases 1.7+ but the installed version has th
 - `create-task` may create a Google Calendar event on the user's primary calendar when the new Task carries a `scheduled_start`/`scheduled_end`. No other calendar writes.
 - No other Drive writes — the vault never writes to Drive without explicit per-session opt-in.
 
+## Source streams + git mode (`_config/sources.md`)
+
+Setup (`memex-init`) asks which **streams** the default daily loop-closing flow should
+check and writes the answer to `_config/sources.md` (a tracked, low-sensitivity note):
+
+```yaml
+streams:
+  email:    { enabled: true,  mcp: claude_ai_Gmail }
+  slack:    { enabled: true,  mcp: claude_ai_Slack }
+  calendar: { enabled: true,  mcp: claude_ai_Google_Calendar, mode: minimal }
+```
+
+`capture-comms` scans only enabled email/Slack streams; the `calendar` stream (default
+off) enables the minimal calendar loop-closing in `reconcile-from-comms` (a Task linked to a
+passed calendar event → "confirm close?"). Edit `enabled:` to turn a stream on/off — no
+re-init. If the file is absent, skills default to email + slack enabled, calendar
+planning-only. The connectors themselves are claude.ai MCP connectors you grant in your
+client; capture stays empty (never errors) until a stream is connected.
+
+Setup also offers a **git mode**: `local` (default — git, no remote), `none` (no git, no
+history), or `remote` (git + a remote you push to). With `remote`, note that raw comms under
+`Inbox/` are gitignored and never push, but reconciled facts (closed tasks, Person notes,
+Decisions) do — use a private repo.
+
 ## Out of scope (v0.1)
 
-External integrations not yet wired: email send, Slack capture, mobile voice notes, TaskNotes HTTP API, scheduled tracker daemon. (Google Calendar event creation for Tasks landed via `create-task` — see Authorized external writes above. Wider Drive sync still deferred.) See "Out of scope" in `IMPLEMENTATION_PLAN.md`.
+External integrations not yet wired: email send, mobile voice notes, TaskNotes HTTP API, scheduled tracker daemon. (Email/Slack **capture** landed via `capture-comms` + `reconcile-from-comms`, wired into the daily briefing by default — see the skills table. Google Calendar event creation for Tasks landed via `create-task`. Wider Drive sync still deferred.) See "Out of scope" in `IMPLEMENTATION_PLAN.md`.

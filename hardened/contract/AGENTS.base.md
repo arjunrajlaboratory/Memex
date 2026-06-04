@@ -45,6 +45,7 @@ If your role is not declared at the start of a session, ask. Do not assume.
 | `Agents/` | all agents | jobs, runs, prompts (paste-able), approvals |
 | `Drafts/` | executors, librarian, user | git-tracked staging area for finalize-later text drafts (LLM prose, code, reports). Text is committed; heavy binaries are gitignored. Promote finished drafts into typed `Atlas/` notes, then archive/delete the draft. |
 | `outputs/` | executors | generated **binary** artifacts (report PDFs, letterhead `.docx`, CV PDFs). Folder + `README.md` tracked; contents (`outputs/**`) gitignored — don't commit binaries. |
+| `_config/` | user (curated), setup wizard | instance config the skills read. `_config/sources.md` records which streams (`email`/`slack`/`calendar`) the default daily loop-closing flow checks + the git mode. Tracked, low-sensitivity; edit `enabled:` to turn a stream on/off. |
 | `_schemas/` | user, with agent proposals via PR | edits are governance changes |
 | `_templates/` | user, agents (propose-only) | one per type |
 | `_workflows/` | user, agents (propose-only) | step-by-step workflow prompts |
@@ -111,7 +112,7 @@ Given a raw source in `Raw/sources/`:
 
 ### Daily briefing — see [[_workflows/daily-briefing]]
 
-Generate `Ops/Briefings/<today>.md` per the briefing schema, including the People section and the tracker-digest section.
+Generate `Ops/Briefings/<today>.md` per the briefing schema, including the People section and the tracker-digest section. By default the briefing first runs the **loop-closing pass** (Step 1b): `capture-comms` then `reconcile-from-comms` over the streams enabled in `_config/sources.md` (sent + received email/Slack, and calendar if enabled), so state that lagged reality is reconciled before synthesis. Tier-A reversible bookkeeping auto-applies; Tier-B task closes are confirmed in one batch and routed through `close-task` (agents never self-close).
 
 ### Weekly review — see [[_workflows/weekly-review]]
 
