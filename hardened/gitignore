@@ -50,3 +50,29 @@ Inbox/*
 # Generated letter artifacts (mail-merged docx, intermediate md) — content is local-only
 outputs/**
 !outputs/README.md
+
+# Drafts — git-tracked staging area for finalize-later text/LLM drafts. Text
+# (markdown, code, notes) IS committed so drafts are versioned across sessions;
+# heavy binary types stay local-only — route real binary artifacts to outputs/.
+# The folder and its README are tracked by default; only the binaries below are
+# ignored.
+Drafts/**/*.pdf
+Drafts/**/*.doc
+Drafts/**/*.docx
+Drafts/**/*.ppt
+Drafts/**/*.pptx
+Drafts/**/*.xls
+Drafts/**/*.xlsx
+Drafts/**/*.png
+Drafts/**/*.jpg
+Drafts/**/*.jpeg
+Drafts/**/*.gif
+Drafts/**/*.mp3
+Drafts/**/*.mp4
+Drafts/**/*.mov
+Drafts/**/*.wav
+Drafts/**/*.zip
+Drafts/**/*.tar
+Drafts/**/*.gz
+Drafts/**/*.tgz
+Drafts/**/*.7z

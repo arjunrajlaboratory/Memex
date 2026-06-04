@@ -43,7 +43,7 @@ Per `_workflows/lint.md`:
 11. **Lapsed people** — `type: person`, `status: active`, AND `next_touch < today`.
 12. **Broken trackers** — `status: broken`.
 13. **Quiet trackers** — `miss_count >= 5`.
-14. **Sensitivity leaks** — anything in `05_Outputs/` that links to a note with `sensitivity: sensitive` or `sensitivity: private`.
+14. **Sensitivity leaks** — anything in `Drafts/` or `outputs/` that links to a note with `sensitivity: sensitive` or `sensitivity: private`.
 15. **Schema drift** — notes missing required fields per their type's schema in `_schemas/`.
 16. **Schema enum violations** — any field whose value is outside the schema's declared enum. Common offenders: Source with `status: ingested` (not in the source-status enum), Tasks with non-canonical statuses, Decisions with `status: pending` (not a valid decision-status). Flag both the offending value AND the correct enum.
 17. **Required-evidence gaps** — Sources with empty `raw_path:` or pointing at a missing file; accepted Decisions with empty `# Evidence`; Persons claiming `# Important personal context` items with no Interaction reference (per the schema's "never invent personal facts" rule).

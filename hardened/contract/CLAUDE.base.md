@@ -28,6 +28,18 @@ There is a **gitignored `outputs/` folder** at the repo root for generated binar
 
 The pattern: **typed vault notes hold metadata + reasoning; binary artifacts live in `outputs/` locally.** Don't paste artifact bodies into typed notes — and don't commit binaries to git.
 
+## Drafts (`Drafts/`)
+
+There is a **git-tracked `Drafts/` folder** at the repo root — a staging area for work-in-progress documents to finalize later: LLM-written prose, code, reports, anything you want to iterate on across sessions before it becomes a typed note. It's distinct from the other two drop/output folders:
+
+- `Inbox/` — *incoming* raw captures to triage (gitignored).
+- `outputs/` — generated *binary* artifacts, e.g. report PDFs (gitignored).
+- `Drafts/` — *outgoing text you're authoring*, and it **is committed** so drafts are versioned.
+
+The git policy (per `.gitignore`): text — markdown, code, notes — is tracked; heavy binary types (`*.pdf`, `*.docx`, `*.png`, `*.mp4`, `*.zip`, …) inside `Drafts/` are gitignored. If a draft produces a large binary, route that to `outputs/` (fully gitignored) and keep only the text/metadata in `Drafts/`.
+
+The lifecycle: draft in `Drafts/` → finalize → promote into a typed `Atlas/` note (or export the finished artifact) → archive or delete the draft. `Drafts/` is a workbench, not a permanent home — don't let finished work pile up there.
+
 <!-- PI_CONTRACT_FRAGMENT -->
 
 ## How prompts work here

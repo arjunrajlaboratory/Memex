@@ -100,7 +100,7 @@ Create `Ops/Reviews/Review - <ISO-week>.md` with the frontmatter from `_schemas/
   - **Stale scheduled tasks**: `status: scheduled`, `scheduled_end` >3 days in the past, no recent `# Work log` activity → propose `canceled` (didn't happen, not worth rescheduling) or `next` (slipped, still relevant).
   - **Old done tasks**: `status: done` AND `updated` >30 days ago → propose archive to `_archive/Ops/Tasks/`.
   - **Drift tasks**: `status: next` AND `updated` >30 days AND no `# Work log` entries in the period → propose `canceled` or someday/.
-  - **Empty primitives**: `Atlas/Efforts/`, `Atlas/Relationships/`, `Atlas/People/Asks/`, `Atlas/People/Commitments/`, `05_Outputs/` if still empty after 60+ days — keep dormant, introduce deliberately, or delete the folder.
+  - **Empty primitives**: `Atlas/Efforts/`, `Atlas/Relationships/`, `Atlas/People/Asks/`, `Atlas/People/Commitments/`, `Drafts/` if still empty after 60+ days — keep dormant, introduce deliberately, or delete the folder.
   - **Lapsed Followups**: `status: pending` AND `surface_on` >14 days past → propose `dismissed` or fresh surface.
   - **Stuck `needs_review` tasks**: `status: needs_review` >14 days → propose resolving in the review session itself.
 

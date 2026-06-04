@@ -29,7 +29,7 @@ Run all 15 checks defined in _workflows/lint.md in order:
 11. Lapsed people (next_touch < today, status: active)
 12. Broken trackers (status: broken)
 13. Quiet trackers (miss_count >= 5)
-14. Sensitivity leaks (05_Outputs/ files linking sensitive notes)
+14. Sensitivity leaks (Drafts/ or outputs/ files linking sensitive notes)
 15. Schema drift (notes missing required fields per their type: schema)
 
 Output a structured markdown report. For each check:

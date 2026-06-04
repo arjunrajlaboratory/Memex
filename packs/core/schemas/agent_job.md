@@ -27,7 +27,7 @@ human_approval_required: true
 risk_level: low           # low | medium | high
 input_paths: []           # files/notes the agent may read
 output_paths:             # where output must land
-  - "05_Outputs/drafts/..."
+  - "Drafts/..."
 constraints: []
 expected_output: ""
 acceptance_criteria: []

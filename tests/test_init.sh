@@ -17,6 +17,8 @@ no_unbaked() {  # $1 = dir
 "$ENG/bin/memex-init" --target "$TMP/core" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
 
 [ -d "$TMP/core/Atlas/Concepts" ] || fail "scaffold dirs missing"
+[ -d "$TMP/core/Drafts" ] || fail "Drafts/ scaffold dir missing"
+[ -f "$TMP/core/Drafts/README.md" ] || fail "Drafts/README.md seed missing"
 [ -f "$TMP/core/.claude/skills/triage-inbox/SKILL.md" ] || fail "core skill missing"
 [ -f "$TMP/core/.claude/settings.json" ] || fail "settings.json (hook wiring) missing"
 [ -f "$TMP/core/.gitignore" ] || fail "vault .gitignore missing"

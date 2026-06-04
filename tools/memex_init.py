@@ -41,7 +41,7 @@ SCAFFOLD_DIRS = [
     "Atlas/Trackers/Digests","Atlas/Efforts","Atlas/Relationships","Atlas/Interactions",
     "Ops/Tasks","Ops/Briefings","Ops/Reviews","Ops/Followups","Ops/Views",
     "Agents/Jobs","Agents/Runs","Agents/Approvals",
-    "Raw/sources","Inbox","outputs",
+    "Raw/sources","Inbox","outputs","Drafts",
 ]
 
 PORT_TOKENS = {"QUARTZ_PORT", "QUARTZ_WS_PORT"}
@@ -135,6 +135,17 @@ def main():
     (T/"log.md").write_text("# log\n")
     (T/"Inbox/README.md").write_text("# Inbox drop zone\n")
     (T/"outputs/README.md").write_text("# Generated artifacts\n\nGitignored content, tracked structure.\n")
+    (T/"Drafts/README.md").write_text(
+        "# Drafts\n\n"
+        "Git-tracked staging area for work-in-progress documents to finalize later — "
+        "LLM-written prose, code, reports, anything you want to iterate on across "
+        "sessions before it becomes a typed note.\n\n"
+        "Text (markdown, code, notes) is committed so drafts are versioned; heavy "
+        "binaries (`*.pdf`, `*.docx`, `*.png`, `*.mp4`, `*.zip`, …) are gitignored — "
+        "route real binary artifacts to `outputs/` instead.\n\n"
+        "Lifecycle: draft here → finalize → promote into a typed `Atlas/` note (or "
+        "export the artifact) → archive or delete the draft. This is a workbench, "
+        "not a permanent home.\n")
     owner = answers.get("OWNER_NAME", "").strip()
     (T/"index.md").write_text(
         f"# {owner + ' — ' if owner else ''}Memex\n\n"

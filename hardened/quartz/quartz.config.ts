@@ -41,8 +41,11 @@ const config: QuartzConfig = {
       "Agents/Jobs",
       "Agents/Runs",
       "Agents/Approvals",
-      // Generated artifacts and tooling
-      "05_Outputs",
+      // Drafts, generated artifacts, and tooling — not published
+      "Drafts",
+      "Drafts/**",
+      "outputs",
+      "outputs/**",
       "scripts",
       "todo",
       // LaTeX CV source — version-controlled but not published as wiki pages
