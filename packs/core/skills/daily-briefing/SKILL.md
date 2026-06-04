@@ -1,6 +1,6 @@
 ---
 name: daily-briefing
-description: Generate today's 13-section operating-dashboard briefing for the vault (Top 3 outcomes through End-of-day prompts), open it in the browser, and refuse silent overwrites. Use whenever the user wants today's operating dashboard generated — signaled by phrases like "generate the daily briefing", "today's briefing", "what's the briefing for today", "make today's briefing", "give me the morning briefing", "what's on for today (full version)", or direct invocation "/daily-briefing" / "/daily-briefing 2026-05-19". Synthesizes the vault's current state into `Ops/Briefings/<YYYY-MM-DD>.md` per `_schemas/briefing.md` and the full procedure in `_workflows/daily-briefing.md` — reads active projects, open tasks, waiting-for items, unprocessed inbox, calendar for today + next 7 days, agent jobs, due trackers and fresh digests, surfaced followups, people needing a touch — and produces the 13-section briefing body (Top 3 outcomes, Calendar / time map, Tasks due today, Waiting on others, Projects at risk, New captures needing triage, Agent opportunities, Trackers, People, Followups surfaced today, Decisions needed, Starter prompts, End-of-day review prompts). Refuses to overwrite an existing briefing without explicit confirmation. Use first thing in the morning before starting work, once per day; this skill is the auto-triggering counterpart to the paste prompt at `Agents/Prompts/daily-briefing.md`.
+description: Generate today's 13-section operating-dashboard briefing for the vault (Top 3 outcomes through End-of-day prompts), open it in the browser, and refuse silent overwrites. Use whenever the user wants today's operating dashboard generated — signaled by phrases like "generate the daily briefing", "today's briefing", "what's the briefing for today", "make today's briefing", "give me the morning briefing", "what's on for today (full version)", or direct invocation "/daily-briefing" / "/daily-briefing 2026-05-19". Synthesizes the vault's current state into `Ops/Briefings/<YYYY-MM-DD>.md` per `_schemas/briefing.md` and the full procedure in `_workflows/daily-briefing.md` — reads active projects, open tasks, waiting-for items, unprocessed inbox, calendar for today + next 7 days, agent jobs, due trackers and fresh digests, surfaced followups, people needing a touch — and produces the 13-section briefing body (Top 3 outcomes, Calendar / time map, Tasks due today, Waiting on others, Projects at risk, New captures needing triage, Agent opportunities, Trackers, People, Followups surfaced today, Decisions needed, Starter prompts, End-of-day review prompts). Refuses to overwrite an existing briefing without explicit confirmation. By default it first runs capture-comms + reconcile-from-comms to close loops from your sent/received email and Slack (and calendar if enabled in `_config/sources.md`) before synthesizing, so the briefing reflects work you did off-vault. Use first thing in the morning before starting work, once per day; this skill is the auto-triggering counterpart to the paste prompt at `Agents/Prompts/daily-briefing.md`.
 ---
 
 # Generate today's daily briefing
@@ -38,6 +38,22 @@ Wait for explicit confirmation. The standing rule is one briefing per day; regen
 
 If today's briefing already has a `## Shutdown notes` section appended (from `shutdown-review`), **never** silently overwrite — that's irreplaceable end-of-day content.
 
+(Regenerating is safe with respect to Step 1b: both [[capture-comms]] and [[reconcile-from-comms]] are idempotent — capture regenerates its files in place; reconcile's ledger blocks any double-apply.)
+
+## Step 1b — Close loops from comms (default loop-closing)
+
+This is the default multi-source pass that keeps vault state from lagging reality. It runs **before** synthesis so §0 and the task list reflect what actually happened off-vault (you answered an email, posted in Slack, a meeting ended).
+
+1. **Read `_config/sources.md`.** Determine which streams are `enabled: true`. If the file is absent (older vault), default to **email + slack enabled, calendar planning-only**. If no streams are enabled, skip to Step 2 — the §0 stale-state queries remain as the fallback safety net.
+
+2. **Backfill guard.** If `<date>` is more than ~2 days in the past (a backfilled briefing), **skip the comms refresh** — a comms scan only makes sense near today — and note `(comms refresh skipped — backfilled briefing for a past date)` in §0. Generate from vault state alone.
+
+3. **Run [[capture-comms]]** for `<date>`, enabled streams only. It is read-only against Gmail/Slack and handles a per-source MCP outage gracefully (writes a gap note, continues), so a missing connector never fails the briefing. This refreshes `Inbox/comms/<date>/`.
+
+4. **Run [[reconcile-from-comms]]** for `<date>` in its **briefing sub-mode** (see that skill's "When invoked by daily-briefing"): it auto-applies Tier-A reversible bookkeeping (bump `last_contact`, mark Followups `acted_on`) and **returns the Tier-B proposals** — task closes, Letter→submitted, and (if the `calendar` stream is enabled) passed-event closes — **without prompting**. Hold those proposals for §0 and the batched report-back (Step 6).
+
+Tasks that Tier-A already advanced will read correctly through the rest of the briefing. Tier-B proposals are **not** applied here — the user confirms them in one batch in Step 6, preserving the "agents never self-close" guardrail.
+
 ## Step 2 — Gather inputs (in parallel)
 
 Run these reads in parallel — one message, multiple tool calls. Read only what exists; skip gracefully if a folder is absent.
@@ -55,9 +71,14 @@ Run these reads in parallel — one message, multiple tool calls. Read only what
 
 Also pull yesterday's briefing's "## Shutdown notes" section if present — it carries the user's last signal about energy, surprises, and unresolved questions, which directly informs today's Top 3 outcomes.
 
-## Step 2b — Stale-state pre-flight (catch silent close-loop gaps)
+## Step 2b — Build § 0 "State confirmation needed"
 
-Before § 1, scan for vault items where state likely lags reality. The user does work off-vault (sends emails, uploads to portals, runs lints) without invoking the close-out skill, so notes silently rot at the previous status. The briefing is the natural daily checkpoint to surface these.
+§ 0 is populated from **two sources, merged and deduped**:
+
+- **(a) Reconcile Tier-B proposals** returned by [[reconcile-from-comms]] in Step 1b — real signal from your actual sent/received comms and (if enabled) calendar. These are the high-confidence items.
+- **(b) The four vault pre-flight queries below** — the safety net for state changes that *no* comm covered (e.g. a scheduled block that simply passed with no email/Slack about it).
+
+When (a) and (b) point at the same note, keep the reconcile proposal (it carries the signal) and drop the duplicate. If Step 1b was skipped (no streams enabled, or the backfill guard fired), § 0 is just (b).
 
 Four pre-flight queries (run in parallel):
 
@@ -66,20 +87,21 @@ Four pre-flight queries (run in parallel):
 3. **Tasks `in_progress` with stale work log** — `Ops/Tasks/*.md` where `status: in_progress` AND last `# Work log` entry older than 5 days. Either drift (should close) or genuine in-flight work (legitimate).
 4. **Scheduled tasks whose block has passed** — `Ops/Tasks/*.md` where `status: scheduled` AND `scheduled_end < now`. The single most common lag case: a time-blocked task came and went without being closed *or* rescheduled. Surfacing these is how the next morning's briefing catches "I had a full day and four blocks slipped." Multiple scheduled blocks can silently carry because the original three queries didn't cover scheduled-but-not-closed; this query is the fix.
 
-For each hit, render a line in a new **`## 0. State confirmation needed`** section at the very top of the briefing (above § 1) — exactly this format:
+For each item (from either source), render a line in a new **`## 0. State confirmation needed`** section at the very top of the briefing (above § 1) — exactly this format:
 
 ```markdown
 ## 0. State confirmation needed
 
 The vault thinks the following are still in progress. Were any of them already done?
 
-- [[<Letter or Task wikilink>]] — `status: <current>` (due <date>). If submitted/done: edit the note's `status:` + `submitted:`/Work log, then this lifts.
-- ...
+1. [[<Task or Letter wikilink>]] — `status: <current>` (due <date>).
+   ↳ signal: <e.g. "you emailed Alex the draft 2026-06-03" — present for reconcile-sourced items; omit for pure stale-state hits>
+2. ...
 
-Reply yes/no/partial in chat and the planner will close the loop.
+Reply with the numbers that are done (e.g. "yes to 1,3") and the planner will close them via [[close-task]].
 ```
 
-If no items hit any of the four queries, omit this section entirely. The signal of a healthy vault is that § 0 is absent.
+Number the items so the Step 6 batched confirm ("yes to 1,3,4") maps cleanly. If § 0 is empty (no reconcile proposals and no query hits), omit the section entirely — its absence is the signal of a healthy vault.
 
 **In the chat report-back (Step 6),** also surface this list above the Top 3 — see Step 6.
 
@@ -101,6 +123,7 @@ period_start: <date>
 period_end: <date>
 includes_calendar: true
 includes_agent_queue: true
+includes_comms: <true if Step 1b ran; false if skipped>
 open_tasks_count: <count>
 projects_reviewed: <count>
 sensitivity: private
@@ -188,11 +211,11 @@ Skip this step only if the user explicitly says "don't open it" or "just write t
 ```
 Briefing generated: Ops/Briefings/<date>.md (opened in browser at http://localhost:{{QUARTZ_PORT}}/Ops/Briefings/<date>).
 
-<IF Step 2b produced any items:>
-**State confirmation needed first** (vault may be lagging reality):
-- [[<item 1>]] — still <status>. Was this actually done?
-- [[<item 2>]] — ...
-Reply yes/no/partial and I'll close the loop.
+<IF § 0 has items:>
+**Confirm these closes** (vault may be lagging reality — from your comms/calendar + a vault scan):
+1. [[<item 1>]] — still <status>. <signal, if reconcile-sourced>
+2. [[<item 2>]] — ...
+Reply with the ones that are done (e.g. "yes to 1,3") and I'll close them.
 
 Top 3 outcomes:
 1. <outcome 1>
@@ -202,7 +225,13 @@ Top 3 outcomes:
 Notable: <one bullet for the most consequential at-risk project or surfaced followup, or "nothing surprising">.
 ```
 
-Surface the § 0 items at the top of the chat report-back if present — the user reads the chat before opening the briefing file, and closing stale state in the same session is the whole point of the pre-flight. If they reply "yes, all done" for any item, immediately edit the source note (`status:`/`submitted:`/Work log) and append a log entry. The user shouldn't have to re-invoke a separate closure skill for trivially obvious closures.
+Surface the § 0 items at the top of the chat report-back if present — the user reads the chat before opening the briefing file, and closing stale state in the same session is the whole point. This is the **single batched confirmation** for everything Step 1b proposed. When the user confirms ("yes to 1,3"):
+
+- **Task closes → route through [[close-task]]** (never hand-edit `status: done` — close-task enforces the final `# Work log` entry and the `unblocks:` cascade, and the "agents never self-close" guardrail means this confirmation is what authorizes it).
+- **Letter `drafting → submitted`** → the clean two-field edit (`status:` + `submitted:`), per [[reconcile-from-comms]].
+- Then **update [[reconcile-from-comms]]'s ledger + checkboxes** for each item so a later standalone reconcile run doesn't re-propose them, and append the `log.md` line(s).
+
+(Tier-A reversible bookkeeping was already applied in Step 1b — don't re-apply it here.)
 
 Don't recapitulate the whole briefing in chat — the file is the artifact.
 
@@ -222,6 +251,8 @@ Don't recapitulate the whole briefing in chat — the file is the artifact.
 - `Agents/Prompts/daily-briefing.md` — paste-able prompt equivalent.
 - `_workflows/daily-briefing.md` — the canonical procedure.
 - `_schemas/briefing.md` — the schema.
+- `capture-comms` / `reconcile-from-comms` — Step 1b runs these by default to close loops from your email/Slack (and calendar if enabled) before synthesis.
+- `_config/sources.md` — which streams Step 1b checks; edit it to turn a stream on/off.
 - `shutdown-review` — the end-of-day counterpart that appends to this briefing.
 - `session-start` — the lighter-weight pre-flight (5–10 seconds vs. several minutes here).
 - `log-mutation` — the canonical log-append helper.

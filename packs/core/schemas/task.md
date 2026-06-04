@@ -28,6 +28,8 @@ context:                  # tags that constrain where/when
 due: YYYY-MM-DD
 scheduled_start:          # ISO datetime if time-blocked
 scheduled_end:
+calendar_event_id:        # Google Calendar event id, set by create-task when it makes the block
+calendar_event_title:     # human-readable event summary (for the briefing's calendar loop-closing)
 follow_up_date:
 blocked_by: []
 unblocks: []
@@ -70,6 +72,7 @@ updated: YYYY-MM-DD
 - A task without a project is permitted only if `area:` is set. The auditor flags tasks with neither.
 - `status: waiting` requires `waiting_on:` to be populated.
 - `status: scheduled` requires `scheduled_start:` and `scheduled_end:`.
+- `calendar_event_id:` is optional; when `create-task` creates a Google Calendar block it records the event id here (and the summary in `calendar_event_title:`) so the daily briefing can later ask "this event's time has passed — close the task?" (calendar loop-closing, gated on the `calendar` stream in `_config/sources.md`).
 - `status: done` requires a final entry in `# Work log` with the outcome.
 - `agent_eligible: true` requires complete `acceptance_criteria` and a populated `# Agent handoff` section.
 - `actual_effort:` is optional but encouraged when known. If set, `actual_effort_source:` should record how the duration was derived (self-report or which observable signal). The `observe-task-actuals` skill populates these on closed Tasks where it can triangulate a signal, and surfaces remaining Tasks for sparse self-report at the weekly review.

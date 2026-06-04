@@ -102,6 +102,13 @@ received. Received comms more often *open* loops (someone asks you for something
 
 ## Steps
 
+0. **Read enabled streams.** Read `_config/sources.md` and look at `streams.*.enabled`.
+   Only scan streams marked `enabled: true`. If the file is absent (older vault),
+   default to **email + slack enabled** (calendar is not a capture stream — it has its
+   own loop-closing path in the briefing; see [[reconcile-from-comms]]). If a stream is
+   disabled, skip its scan entirely and don't write that source's file. This is the
+   per-stream gate the default daily-briefing flow relies on.
+
 1. **Resolve the date + scan window.** Date is today (or the date argument if given). Find the
    most recent prior `Inbox/comms/<date>/` folder to get the last run time; the window is
    (last run → now). If there's no prior run, default to the **last 36 hours** (overlap is safe
@@ -119,7 +126,7 @@ received. Received comms more often *open* loops (someone asks you for something
    proceed with the other source. This is exactly the partial-failure case the two-file split
    exists to handle.
 
-3. **Scan Gmail — both directions.** Use the [[email]] broad-search technique (don't start
+3. **Scan Gmail — both directions** (only if `email` is enabled per Step 0). Use the [[email]] broad-search technique (don't start
    narrow). Cover sent AND received in the window:
    - Received: `in:inbox newer_than:<window>` (and a wider `in:anywhere newer_than:<window>` for
      threads that skip the inbox).
@@ -129,7 +136,7 @@ received. Received comms more often *open* loops (someone asks you for something
    - Mailbox note: `{{OWNER_PRIMARY_EMAIL}}` is primary; `{{OWNER_FORWARDING_EMAIL}}` forwards in.
      A miss is usually a query miss, not an access gap (memory `feedback_gmail_search_technique`).
 
-4. **Scan Slack — both directions, including what I sent.**
+4. **Scan Slack — both directions, including what I sent** (only if `slack` is enabled per Step 0).
    - Resolve the user's own Slack identity first (`slack_read_user_profile` /
      `slack_search_users`) so you can recognize `from:<me>`.
    - Search messages **I sent** in the window (`slack_search_public_and_private` filtered to the
@@ -192,6 +199,7 @@ Phase 1 (this skill) **never** does step 2 or 3. It only produces step 1's input
 
 ## Related
 
+- `_config/sources.md` — the per-stream enable/disable config this skill reads in Step 0.
 - [[cv-scan]] — the propose-only-from-Gmail pattern this mirrors.
 - [[email]] — the broad-search technique + Gmail query cheat-sheet this reuses.
 - [[triage-inbox]] — consumes `Inbox/` items, including the `## Threads worth routing` entries.
