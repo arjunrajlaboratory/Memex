@@ -16,22 +16,45 @@ Instance-specific facts (your name, emails, paths, Drive IDs) live as `{{TOKENS}
 at setup. See the companion design docs in the source vault (the productization design blueprint and
 `MEMEX_SPECIFICATION.md`).
 
-## Stand up a new vault (user)
+## Quickstart
 
 ```bash
-bin/memex-init --target ~/code/my-vault --packs core --interview
-# (or --packs core,pi for the academic-PI example; or --answers answers.json for non-interactive)
+# 1. Get the engine
+git clone https://github.com/exampleorg/memex-engine.git
+cd memex-engine
 
+# 2. Stand up your own vault (interactive: asks your name, emails, paths, ports)
+bin/memex-init --target ~/code/my-vault --packs core --interview
+#    ...or --packs core,pi for the academic-PI example (letters / CV / grants)
+#    ...or --answers answers.json to run non-interactive
+
+# 3. Serve the local dashboard site
 cd ~/code/my-vault/quartz && npm install && npm run site:serve   # http://localhost:<your port>
+
+# 4. Open the vault with Claude Code (or your agent of choice) and start driving it
+cd ~/code/my-vault && claude
 ```
 
-The interview asks for your name, emails, framing, paths, Quartz port (use a distinct port per
-vault so several can run at once), and — if you chose `pi` — the letters Drive IDs. Everything is
-baked directly into your local, editable skill files. After init, the vault is yours: edit any
-skill to suit your flow.
-
-To durably serve the site (auto-start at login, survive sleep), install the LaunchAgent: see
+The interview bakes your answers directly into local, editable skill files — after init the vault is
+yours; edit any skill to suit your flow. Each vault uses a distinct Quartz port so several can run at
+once. To serve durably (auto-start at login, survive sleep), install the LaunchAgent in
 `<vault>/scripts/launchd/` (copy the plist to `~/Library/LaunchAgents/` and `launchctl bootstrap`).
+
+## First prompts to try
+
+Once the vault is open in your agent, these get you moving. Each works as plain language *or* as a
+slash command:
+
+- **`/session-start`** — or *"where did we leave off?"* — a 5-second pre-flight: log tail, open tasks, inbox state, and a recommended next move.
+- **`/daily-briefing`** — *"give me today's briefing"* — the flagship daily dashboard (top outcomes, calendar, tasks due, what's blocked, what needs triage), opened in the browser.
+- **`/ingest-source <url-or-path>`** — *"pull this paper into the vault: <url>"* — lands an article / PDF / URL as a typed Source note and updates the wiki pages it touches.
+- **`/create-task`** — *"add a task to email Alex by Friday"* — a schema-conformant Task with the right parent project, an id, and a calendar block when there's a time.
+- **`/triage-inbox`** — *"triage the inbox"* — walks every unfiled capture in `Inbox/` and routes each to the right typed note until the drop zone is empty.
+- **`/weekly-review`** — *"let's do the weekly review"* — zoom out: stale projects, slipping commitments, what to drop.
+- *(pi pack)* **`/draft-letter`** — *"draft a tenure letter for [[Alex Kim]]"* — drafts from prior letters + relationship context, to the Letter schema.
+
+The core loop: drop files into `Inbox/` whenever they show up, then run `/triage-inbox` later to file
+them — capture first, structure on demand.
 
 ## Maintain the engine (maintainer)
 
