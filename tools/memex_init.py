@@ -12,6 +12,11 @@ non-empty target unless --force (which overlays, it does not wipe).
 import argparse, datetime, json, pathlib, re, shutil, subprocess, sys
 
 TOKEN_RE = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
+# Conditional section around OPTIONAL-token prose. {{?TOKEN}}…{{/TOKEN}} keeps its
+# span iff the answer is non-blank; {{^TOKEN}}…{{/TOKEN}} iff blank. Non-greedy
+# body + DOTALL so a span may cross newlines. Same-token NESTING is unsupported
+# (the non-greedy body stops at the first matching {{/TOKEN}}); keep sections flat.
+SECTION_RE = re.compile(r"\{\{([?^])([A-Z0-9_]+)\}\}(.*?)\{\{/\2\}\}", re.DOTALL)
 
 # --- Source streams + git mode (behavior answers, NOT {{TOKEN}} placeholders) ---
 # These configure the default multi-source loop-closing flow and are read directly
@@ -85,12 +90,35 @@ planning-only.
 3. No `reconcile-from-comms` change needed — it reads the same `## Action items` API.
 """
 
+def strip_sections(text, answers):
+    """Resolve {{?TOKEN}}…{{/TOKEN}} / {{^TOKEN}}…{{/TOKEN}} conditional spans.
+
+    A `?` span is kept iff answers[TOKEN] is present and non-blank; a `^` span iff
+    present and blank. A section whose TOKEN is ABSENT from answers passes through
+    verbatim — same rule as bake()'s unknown-token pass-through, so note-creation
+    prose is never silently dropped. Kept spans keep their inner text (including
+    any {{TOKEN}}); bake()'s plain pass then substitutes it. Run before that pass."""
+    def repl(m):
+        sigil, token, body = m.group(1), m.group(2), m.group(3)
+        if token not in answers:
+            return m.group(0)                       # unknown token -> pass through
+        nonblank = str(answers[token]).strip() != ""
+        keep = nonblank if sigil == "?" else not nonblank
+        return body if keep else ""
+    return SECTION_RE.sub(repl, text)
+
 def bake(text, answers):
     """Replace {{TOKEN}} with answers[TOKEN]. Unknown tokens are left INTACT —
     template files legitimately contain note-creation placeholders (e.g.
     {{YYYYMMDD}} in journal.md) that must survive init. Only catalogued instance
     tokens get baked; the derive-time audit guarantees no instance fact remains
-    as a raw literal, so pass-through is safe."""
+    as a raw literal, so pass-through is safe.
+
+    Optional-token PROSE is handled first via conditional sections (see
+    strip_sections): a blank optional answer drops the whole surrounding clause,
+    not just the token — otherwise a blank {{OWNER_FORWARDING_EMAIL}} would bake
+    empty `` pairs and dangling words into the new vault."""
+    text = strip_sections(text, answers)
     return TOKEN_RE.sub(lambda m: answers.get(m.group(1), m.group(0)), text)
 
 TEXT_EXTS = {".md",".ts",".tsx",".sh",".json",".plist",".scss",".py",".tex",".sty",".yaml",".yml"}

@@ -51,7 +51,7 @@ Order of operations:
 | Restrict to inbox | `in:inbox` |
 | Group / OR | `{from:amy from:david}` or `from:amy OR from:david` |
 
-Notes: `search_threads` returns snippets + headers only — **not full bodies**. **Mailbox completeness:** `{{OWNER_PRIMARY_EMAIL}}` is the user's primary mailbox and is what the MCP searches; `{{OWNER_FORWARDING_EMAIL}}` **forwards into it**; the `you-secondary@example.edu` address is rarely checked and auto-responds telling people to use the Gmail. So the searchable Gmail is **near-complete** for real correspondence — if a thread isn't found, assume a **query miss, not an access gap** (search harder; don't tell the user it's "not in Gmail" until a content-keyword `in:anywhere` search is empty). See memory `feedback_gmail_search_technique`.
+Notes: `search_threads` returns snippets + headers only — **not full bodies**. **Mailbox completeness:** `{{OWNER_PRIMARY_EMAIL}}` is the user's primary mailbox and is what the MCP searches{{?OWNER_FORWARDING_EMAIL}}; `{{OWNER_FORWARDING_EMAIL}}` **forwards into it**{{/OWNER_FORWARDING_EMAIL}}. So the searchable Gmail is **{{?OWNER_FORWARDING_EMAIL}}near-complete{{/OWNER_FORWARDING_EMAIL}}{{^OWNER_FORWARDING_EMAIL}}complete{{/OWNER_FORWARDING_EMAIL}}** for real correspondence — if a thread isn't found, assume a **query miss, not an access gap** (search harder; don't tell the user it's "not in Gmail" until a content-keyword `in:anywhere` search is empty). See memory `feedback_gmail_search_technique`.
 
 ## Step 2 — Read the actual thread
 
