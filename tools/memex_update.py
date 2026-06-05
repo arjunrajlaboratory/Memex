@@ -731,7 +731,15 @@ def prepare_update(args: argparse.Namespace) -> int:
                 packs=packs,
             )
             if git_on and not args.no_git_branch:
-                commit_update(vault_dir, version, plan_update_paths(plan))
+                try:
+                    commit_update(vault_dir, version, plan_update_paths(plan))
+                except subprocess.CalledProcessError as exc:
+                    error = exc.stderr.strip() or str(exc)
+                    plan["status"] = "commit-failed"
+                    plan["commit_error"] = error
+                    write_json(plan_path, plan)
+                    print(error)
+                    return 1
             plan["status"] = "complete"
             write_json(plan_path, plan)
             strip_work_heavy(work_dir)

@@ -179,6 +179,27 @@ git -C "$CLEANVAULT" commit -m "init" >/dev/null
 grep -q "Update test marker: America/New_York" "$CLEANVAULT/.claude/skills/triage-inbox/SKILL.md" || fail "no-conflict update did not apply engine change"
 [ -z "$(git -C "$CLEANVAULT" status --porcelain)" ] || fail "no-conflict update left the worktree dirty"
 
+# ---------- failed prepare auto-commit reports cleanly, without traceback ----------
+NOCONFIGVAULT="$TMP/no-config-vault"
+NOHOME="$TMP/no-git-home"
+mkdir -p "$NOHOME"
+"$ENG/bin/memex-init" --target "$NOCONFIGVAULT" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
+git -C "$NOCONFIGVAULT" add .
+git -C "$NOCONFIGVAULT" -c user.email=test@example.com -c user.name="Memex Test" commit -m "init" >/dev/null
+NO_CONFIG_OUT="$TMP/no-config-update.out"
+if env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL -u EMAIL HOME="$NOHOME" GIT_CONFIG_NOSYSTEM=1 "$NEXT/bin/memex-update" --vault "$NOCONFIGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >"$NO_CONFIG_OUT" 2>&1; then
+  fail "prepare auto-commit should fail without git identity"
+fi
+grep -q "Author identity unknown\\|unable to auto-detect email address" "$NO_CONFIG_OUT" || fail "missing controlled git identity error"
+grep -q "Traceback" "$NO_CONFIG_OUT" && fail "prepare auto-commit failure should not traceback" || true
+NO_CONFIG_PLAN="$(ls "$NOCONFIGVAULT"/.memex/update-work/0.2.0-*/plan.json)"
+python3 - "$NO_CONFIG_PLAN" <<'PY'
+import json, pathlib, sys
+plan = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert plan["status"] == "commit-failed", plan["status"]
+assert plan.get("commit_error"), plan
+PY
+
 # ---------- finalized rejected rename with absent new path should not break scoped staging ----------
 RENAMEVAULT="$TMP/rename-vault"
 "$ENG/bin/memex-init" --target "$RENAMEVAULT" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
