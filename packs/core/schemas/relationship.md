@@ -2,7 +2,7 @@
 
 A **Relationship** note disambiguates a person's role *in a specific context*. The same person can be a friend, an advisor, and a co-investor; create separate relationship notes when the roles need different next-steps.
 
-File path: `Atlas/Relationships/<Person> - <Context slug>.md`
+File path: `Atlas/Relationships/<Person> - <Context slug>.md` — use the Person's `safe_title` name (see `_schemas/_types.md` → "Filenames and titles"): the `<Person>` component must match the Person note's filename/`[[wikilink]]` exactly; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

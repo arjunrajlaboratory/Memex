@@ -8,7 +8,7 @@
 
 For each, produce a list of offending notes (wiki-linked).
 
-1. **Broken wikilinks.** Every `[[X]]` resolves to a file.
+1. **Broken wikilinks.** Every `[[X]]` resolves to a file. Also flag any `[[X]]` whose target contains `/ : # | ^` even if a same-named file seems to exist: inside `[[...]]` Quartz parses `/` as a path separator and `#`/`^` as anchors, so `[[A / B]]` silently resolves to a bogus `/A-/-B` path and 404s. Such a link almost always means the target note's title was never run through `safe_title` (see check #20).
 2. **Stale active projects.** `status: active` AND no update in `next_review` window × 1.5.
 3. **Orphan tasks.** `type: task` AND no `project:` AND no `area:`.
 4. **Orphan projects.** `status: active` AND no `Current next actions` entries.
@@ -35,3 +35,4 @@ For each, produce a list of offending notes (wiki-linked).
 17. **Required-evidence gaps.** Sources with `raw_path:` empty or pointing at a non-existent file. Decisions with `# Evidence` empty when `status: accepted` is set. Person notes claiming `# Important personal context` items without an Interaction reference (per the schema's "never invent personal facts" rule).
 18. **Missing-entity queue gaps.** Per the `# Missing-entity queue convention` in AGENTS.md: when an ingest-* skill creates a wikilink to a missing entity, it should have spawned either the entity or a `Followup - Create <Type> - <Name> - <date>` tickler. Find broken wikilinks (check 1) that don't have a corresponding Followup in `Ops/Followups/` — those are the missed queue entries.
 19. **Planned-vs-done blur.** Person notes with `last_contact: <future-date>` — `last_contact:` should always be ≤ today (the date of the most recent *actual* bilateral exchange). Future-dated values usually indicate a queued/scheduled outreach was mis-coded as a completed contact. Flag for the user to revert (the convention is `last_contact:` updates only after the send confirms).
+20. **Title ↔ filename drift.** For every typed note, the filename stem must equal `safe_title(title:)` (per `_schemas/_types.md` → "Filenames and titles" and `AGENTS.md`/`CLAUDE.md`). Flag any note where the on-disk filename and the `title:` (or `name:`) field disagree — e.g. a `title:` containing `/` or `:` that the filesystem dropped or altered. This is the **upstream cause** of most check-#1 broken wikilinks: when the title drifts from the filename, every `[[title]]` written elsewhere points at the title form, not the file. Lean high-severity — it breaks links silently and fans out. For each hit, report the filename, the `title:`, and the `safe_title(title:)` the file *should* be named. (Date/id-derived filenames — journals, briefings, reviews, agent jobs/runs — are exempt; their names aren't title-derived.)

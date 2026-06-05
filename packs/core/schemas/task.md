@@ -2,7 +2,7 @@
 
 A **Task** is a first-class note representing one discrete commitment. One note per task (not inline checkboxes).
 
-File path: `Ops/Tasks/<title slug>.md`
+File path: `Ops/Tasks/<title slug>.md` — run the title through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = `title:` = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

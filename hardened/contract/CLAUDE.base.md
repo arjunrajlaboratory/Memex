@@ -105,6 +105,29 @@ cd quartz && npm run site:build   # output goes to quartz/public/
 
 The Quartz emitter is now the only dashboard generator. The older Python script (`scripts/build_dashboards.py`) and its `_dashboards/` HTML output were retired on 2026-05-18 once the plugin reached parity.
 
+### A note's title IS its filename — make the title filename-safe first
+
+The invariant that keeps wikilinks resolving: for any titled note,
+
+```
+filename stem  ==  title:  ==  every [[wikilink]] target
+```
+
+Skills derive the filename from the title and author wikilinks from the same string, so if the title contains a character that can't survive a filename, the file lands under a *different* name than the title and every `[[title]]` link 404s. `/` is the worst offender: it's a path separator on disk **and** inside `[[...]]` Quartz parses it as a path separator, so `[[A / B]]` resolves to a bogus top-level `/A-/-B` instead of the note. `:` is illegal on some filesystems and reads as a clause break. Nothing downstream repairs this — a single bad title fans out into broken links in the briefing, interactions, and `log.md`.
+
+So **before** a title is used as a filename or a wikilink target, run it through `safe_title` and store *that* string in `title:`:
+
+1. ` / ` (spaced slash) → ` and `; any remaining bare `/` → `-`
+2. `:` → drop it (collapse the doubled space it leaves)
+3. drop the rest of the filename/Quartz-hazardous set: `\ * ? " < > | # ^ [ ]`
+4. collapse repeated spaces; trim leading/trailing spaces, dots, and dashes
+
+Examples:
+- `Download early-embryo / iPSC ATAC-seq datasets` → `Download early-embryo and iPSC ATAC-seq datasets`
+- `Follow up with X re: ATAC-seq data collection` → `Follow up with X re ATAC-seq data collection`
+
+The result is what goes in `title:`, what names the file (`<result>.md`), and what every `[[<result>]]` points at — all three identical, nothing left to drift. This is distinct from the `id: <type>-<slug>` field (lowercase kebab-case) and from the URL slug below (a *display* transform applied on top of an already-safe filename).
+
 ### URL slugs — don't link the raw filename
 
 When opening a note in the browser (`open "http://localhost:8181/<path>"`), the path is **not** the raw filename — Quartz slugifies it, and using the raw name with spaces 404s. The transform (verified 2026-05-31):
@@ -113,6 +136,7 @@ When opening a note in the browser (`open "http://localhost:8181/<path>"`), the 
 - ` - ` (space-hyphen-space, the common `Type - Title` and date separators) → `---` (**three** dashes) — `Review - 2026-W22` → `Review---2026-W22`; `ExampleProject - Growth and Marketing` → `ExampleProject---Growth-and-Marketing`
 - `+` is preserved (with its surrounding spaces still becoming dashes) — `ExampleProject + ExampleCo` → `ExampleProject-+-ExampleCo`
 - The `.md` extension is dropped; no `.html` in the URL.
+- `/`, `:`, `#`, `|`, `^` are **hazards, not transforms** — a well-formed title never contains them (see `safe_title` above). Inside the URL `/` is a real path separator and `#` starts the fragment, so a stray one silently mis-routes the link. If you ever see one in a slug, the title needs fixing, not the URL.
 
 So `Ops/Reviews/Review - 2026-W22.md` opens at `http://localhost:8181/Ops/Reviews/Review---2026-W22`, **not** `…/Review - 2026-W22`. When unsure of a slug, either check `quartz/public/<path>.html` (the built filename IS the slug) or `curl -s -o /dev/null -w "%{http_code}"` the candidate URL before sending it.
 

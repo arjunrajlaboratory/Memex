@@ -2,7 +2,7 @@
 
 An **Effort** is a looser thread than a project: a research direction, an idea cluster, or a theme that may eventually become a project. Use efforts for "some related, some loosely related" threads that are not yet outcome-shaped.
 
-File path: `Atlas/Efforts/<Display Name>.md`
+File path: `Atlas/Efforts/<Display Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = title/name = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

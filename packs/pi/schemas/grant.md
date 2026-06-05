@@ -4,7 +4,7 @@ A **Grant** is a funding proposal, fellowship, award, or training grant — subm
 
 One note per **logical grant**: resubmissions, renewals, and revisions of the same proposal chain into a single note (via `prior_submission:` + the `# Status & history` section) rather than spawning a new note per cycle. Obvious `… copy` duplicate folders fold into the same note.
 
-File path: `Atlas/Grants/<Short title> - <Mechanism>.md` (cycle-agnostic for chained grants) or `Atlas/Grants/<folder-derived name>.md` (one-off submissions).
+File path: `Atlas/Grants/<Short title> - <Mechanism>.md` (cycle-agnostic for chained grants) or `Atlas/Grants/<folder-derived name>.md` (one-off submissions). Run the assembled title through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = `title:` = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 Examples:
 - `Atlas/Grants/CellModel A - R01.md`

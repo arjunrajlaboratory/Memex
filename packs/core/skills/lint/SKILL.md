@@ -1,11 +1,11 @@
 ---
 name: lint
-description: Run the 19-check vault hygiene audit (broken wikilinks, stale projects, orphan tasks, duplicate entities, broken trackers, sensitivity leaks, schema drift, schema enum violations, required-evidence gaps, missing-entity queue gaps, planned-vs-done blur, etc.) and write a flag-only report; proposes follow-on tasks but creates none. Use whenever the user wants the vault hygiene audit run — signaled by phrases like "run the lint", "audit the vault", "do a vault lint", "auditor pass", "vault hygiene check", "what's broken in the vault", "find the orphan tasks", "any broken wikilinks?", or direct invocation "/lint". Executes the 15-check auditor pass from `_workflows/lint.md` (broken wikilinks, stale active projects, orphan tasks / projects, unprocessed sources, duplicate entities, contradictory claims, overdue waiting-for, stuck agent jobs, draft asks, lapsed people, broken trackers, quiet trackers, sensitivity leaks, schema drift) and produces a structured markdown report with per-check counts, example wikilinks, and severity ratings. For each material finding, *proposes* (but does not create) a needs-review task with the suggested next action. Appends the report as a new `## Auditor findings — <YYYY-MM-DD>` section to the current weekly review if one is open, otherwise writes a standalone `Ops/Reviews/Lint - <date>.md`. Flags only — never changes file status, content, or frontmatter. Use weekly (Friday afternoon before the weekly review) or on demand when vault hygiene is in question. Skill is the auto-triggering counterpart to the paste prompt at `Agents/Prompts/lint.md`.
+description: Run the 20-check vault hygiene audit (broken wikilinks, title↔filename drift, stale projects, orphan tasks, duplicate entities, broken trackers, sensitivity leaks, schema drift, schema enum violations, required-evidence gaps, missing-entity queue gaps, planned-vs-done blur, etc.) and write a flag-only report; proposes follow-on tasks but creates none. Use whenever the user wants the vault hygiene audit run — signaled by phrases like "run the lint", "audit the vault", "do a vault lint", "auditor pass", "vault hygiene check", "what's broken in the vault", "find the orphan tasks", "any broken wikilinks?", or direct invocation "/lint". Executes the 20-check auditor pass from `_workflows/lint.md` (broken wikilinks, title↔filename drift, stale active projects, orphan tasks / projects, unprocessed sources, duplicate entities, contradictory claims, overdue waiting-for, stuck agent jobs, draft asks, lapsed people, broken trackers, quiet trackers, sensitivity leaks, schema drift) and produces a structured markdown report with per-check counts, example wikilinks, and severity ratings. For each material finding, *proposes* (but does not create) a needs-review task with the suggested next action. Appends the report as a new `## Auditor findings — <YYYY-MM-DD>` section to the current weekly review if one is open, otherwise writes a standalone `Ops/Reviews/Lint - <date>.md`. Flags only — never changes file status, content, or frontmatter. Use weekly (Friday afternoon before the weekly review) or on demand when vault hygiene is in question. Skill is the auto-triggering counterpart to the paste prompt at `Agents/Prompts/lint.md`.
 ---
 
 # Lint the vault
 
-You are running as **`agent:auditor`** for this skill. Your job: run the 19 checks defined in `_workflows/lint.md`, produce a structured report, and propose follow-on tasks — without changing any file's status, content, or frontmatter. The auditor flags; the user decides.
+You are running as **`agent:auditor`** for this skill. Your job: run the 20 checks defined in `_workflows/lint.md`, produce a structured report, and propose follow-on tasks — without changing any file's status, content, or frontmatter. The auditor flags; the user decides.
 
 ## Why this skill exists
 
@@ -16,21 +16,21 @@ The lint pass is the cheap, periodic defense. It doesn't fix anything (that's th
 ## Inputs
 
 - **Date** (optional, default today) — only used to label the output file.
-- **Scope** (rare) — the user can request a partial run: "just check broken wikilinks" or "skip the schema-drift check." Honor a scope hint; default is all 19.
+- **Scope** (rare) — the user can request a partial run: "just check broken wikilinks" or "skip the schema-drift check." Honor a scope hint; default is all 20.
 
 ## Step 0 — Orient
 
 Read these in full before doing anything:
 
 - `AGENTS.md`.
-- `_workflows/lint.md` — the canonical procedure with the 19 checks. Re-read every invocation.
+- `_workflows/lint.md` — the canonical procedure with the 20 checks. Re-read every invocation.
 - The most recent weekly review under `Ops/Reviews/` to see if one is currently open (i.e., dated this ISO week) — that's where the report will land if so.
 
-## Step 1 — Run the 19 checks (in order)
+## Step 1 — Run the 20 checks (in order)
 
 Per `_workflows/lint.md`:
 
-1. **Broken wikilinks** — `[[X]]` where no `X.md` (or matching note) exists.
+1. **Broken wikilinks** — `[[X]]` where no `X.md` (or matching note) exists. Also flag any `[[X]]` whose target contains `/ : # | ^`: Quartz parses `/` as a path separator inside `[[...]]`, so `[[A / B]]` resolves to a bogus `/A-/-B` and 404s even if a file exists. These are downstream of title↔filename drift (check #20).
 2. **Stale active projects** — `status: active` AND (no Task updates in >14 days OR `next_review < today`).
 3. **Orphan tasks** — `type: task` with neither `project:` nor `area:` set.
 4. **Orphan projects** — `status: active` with no Task referring back via `project:`.
@@ -49,6 +49,7 @@ Per `_workflows/lint.md`:
 17. **Required-evidence gaps** — Sources with empty `raw_path:` or pointing at a missing file; accepted Decisions with empty `# Evidence`; Persons claiming `# Important personal context` items with no Interaction reference (per the schema's "never invent personal facts" rule).
 18. **Missing-entity queue gaps** — per the missing-entity queue convention in `AGENTS.md`, broken wikilinks that don't have a corresponding `Followup - Create <Type> - <Name>` in `Ops/Followups/` are missed queue entries. Subset of check 1 with the convention overlay.
 19. **Planned-vs-done blur** — Person notes with `last_contact: <future-date>`. `last_contact:` must always be ≤ today (last actual bilateral exchange). Future-dated values usually indicate a queued/scheduled outreach was miscoded as completed.
+20. **Title ↔ filename drift** — for every typed note, the filename stem must equal `safe_title(title:)` (see `_schemas/_types.md` → "Filenames and titles"). Flag any note whose on-disk filename disagrees with its `title:`/`name:` field — typically a `title:` containing `/` or `:` the filesystem altered. This is the **upstream cause** of most check-#1 broken wikilinks (links elsewhere point at the title form, not the file). Lean high-severity. Report the filename, the `title:`, and the `safe_title(title:)` it *should* be. Date/id-named notes (journals, briefings, reviews, agent jobs/runs) are exempt.
 
 For each check, gather:
 
@@ -124,7 +125,7 @@ Skip only if the user explicitly said "don't open" or "just write the file." See
 
 ```
 Lint pass complete.
-- 19/19 checks run
+- 20/20 checks run
 - Findings: <N total> (<N-critical, N-high, N-medium, N-low>)
 - Most consequential: <one-line on the highest-severity finding>
 - Report: [[<output file>]]
@@ -153,7 +154,7 @@ If the user wants to bulk-accept the proposed Tasks, that's a follow-on instruct
 ## Related
 
 - `Agents/Prompts/lint.md` — paste-able prompt equivalent.
-- `_workflows/lint.md` — the canonical procedure with the 15 checks.
+- `_workflows/lint.md` — the canonical procedure with the 20 checks.
 - `weekly-review` — its "Auditor findings" section is filled in by this skill when run within the same week.
 - `create-task` — what the user runs to accept proposed lint Tasks.
 - `log-mutation` — the canonical log-append helper.

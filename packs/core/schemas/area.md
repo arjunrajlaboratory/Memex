@@ -2,7 +2,7 @@
 
 An **Area** is an ongoing domain of life or work that does not have a finish line: Research, Personal Operating System, Writing, Health, Family, Finances. Areas contain projects, recurring responsibilities, principles, and dashboards.
 
-File path: `Atlas/Areas/<Display Name>.md`
+File path: `Atlas/Areas/<Display Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = title/name = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

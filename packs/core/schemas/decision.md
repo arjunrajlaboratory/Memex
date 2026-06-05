@@ -2,7 +2,7 @@
 
 A **Decision** is a deliberate choice that you want to be able to defend, revisit, or supersede later. Decisions explain *why* the vault (or a project) is the way it is.
 
-File path: `Atlas/Decisions/<Display Title>.md`
+File path: `Atlas/Decisions/<Display Title>.md` — run the title through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = `title:` = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`. (Distinct from the kebab-case `id: dec-<slug>`.)
 
 ## Frontmatter
 

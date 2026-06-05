@@ -97,6 +97,8 @@ For each canonical letter (one per `(recipient, program, cycle_year)`):
 
 Path: `Atlas/Letters/<Recipient> - <Program> <cycle_year>.md`
 
+Run the assembled title through `safe_title` first (see `CLAUDE.md`/`AGENTS.md` → "A note's title IS its filename"): ` / ` → ` and ` (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse spaces. **Program names are the live hazard here — `MD/PhD` would otherwise split the filename and 404 every `[[...]]` to the letter; write it as `MD-PhD`.** The sanitized title is the filename stem and the target of every wikilink to this Letter — identical.
+
 Slug for `id:` is `<recipient-kebab>-<program-kebab>-<cycle_year>`.
 
 Fill the schema per `_schemas/letter.md`. Body sections start empty except `# Work log`:

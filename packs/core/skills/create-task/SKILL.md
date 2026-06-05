@@ -60,7 +60,7 @@ If `status: scheduled` is right but the user gave a date but not a time, default
 
 ## Step 4 — Write the Task note
 
-Path: `Ops/Tasks/<Subject>.md`. Conform to `_schemas/task.md` exactly. Required body sections per the schema: `# Objective`, `# Context`, `# Inputs`, `# Steps`, `# Acceptance criteria`, `# Risks / constraints`, `# Work log`.
+Path: `Ops/Tasks/<Subject>.md`. **First run `<Subject>` through `safe_title` (see `CLAUDE.md` / `AGENTS.md` → "A note's title IS its filename"): ` / ` → ` and ` (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse/trim spaces.** Use that one sanitized string as the filename stem, as the `title:` value, and as the target of every `[[<Subject>]]` wikilink — they must be identical, or the link 404s in Quartz (a stray `/` is parsed as a path separator). Conform to `_schemas/task.md` exactly. Required body sections per the schema: `# Objective`, `# Context`, `# Inputs`, `# Steps`, `# Acceptance criteria`, `# Risks / constraints`, `# Work log`.
 
 Frontmatter rules worth being precise about:
 

@@ -32,6 +32,23 @@ Every typed note in this vault must declare a `type:` field whose value is one o
 
 Sub-folders inside `Atlas/People/` are allowed: e.g. `Atlas/People/Interactions/`, `Atlas/People/Commitments/`, `Atlas/People/Asks/`. The person profile itself sits at `Atlas/People/<Name>.md`.
 
+## Filenames and titles — `safe_title`
+
+Each schema's `File path:` is derived from the note's title/name (`<Title>`, `<Display Name>`, `<Subject>`). The hard invariant tying them together:
+
+```
+filename stem  ==  title:  ==  every [[wikilink]] target
+```
+
+Because the same string names the file *and* is the wikilink target, a title with a filename-illegal or Quartz-hazardous character drifts: the file saves under a sanitized name while wikilinks keep the raw title and 404. `/` is worst — Quartz parses it as a path separator inside `[[...]]`. So **before** using a title as a filename or wikilink, run `safe_title` and store the result in `title:`:
+
+1. ` / ` (spaced slash) → ` and `; any remaining bare `/` → `-`
+2. `:` → drop (collapse the doubled space)
+3. drop the rest of the hazardous set: `\ * ? " < > | # ^ [ ]`
+4. collapse repeated spaces; trim leading/trailing spaces, dots, and dashes
+
+This is **not** the `id:` slug (a lowercase kebab-case form like `prj-<slug>`) nor the Quartz URL slug (a display transform). It's the one rule every note-creating skill applies so filename, title, and wikilink can never diverge. Full statement + examples live in `CLAUDE.md` / `AGENTS.md` ("A note's title IS its filename"); `_workflows/lint.md` checks #1 and #20 audit for drift.
+
 ## Idea vs Effort vs Project vs Task
 
 These four types form a commitment ladder. The decision tree for "which type should this be?":

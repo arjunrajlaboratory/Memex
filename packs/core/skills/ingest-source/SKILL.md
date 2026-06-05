@@ -49,7 +49,7 @@ If you cannot classify a `Inbox/` file with confidence (it's not obviously a sou
 
 ## Step 2 — Create the Source note
 
-Create `Atlas/Sources/<Title>.md` per `_schemas/source.md`. Fill every frontmatter field you can infer; leave optional fields empty rather than inventing.
+Create `Atlas/Sources/<Title>.md` per `_schemas/source.md`. **First run `<Title>` through `safe_title` (see `CLAUDE.md` / `AGENTS.md` → "A note's title IS its filename"): ` / ` → ` and ` (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse/trim spaces.** That sanitized string is the filename stem, the `title:` value, and the target of every `[[<Title>]]` wikilink you write into downstream pages — identical, or the link 404s in Quartz (article titles routinely carry `:` and `/`, so this is the common case for Sources). Fill every frontmatter field you can infer; leave optional fields empty rather than inventing.
 
 Critical fields:
 
