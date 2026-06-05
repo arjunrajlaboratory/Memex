@@ -32,6 +32,30 @@ Every typed note in this vault must declare a `type:` field whose value is one o
 
 Sub-folders inside `Atlas/People/` are allowed: e.g. `Atlas/People/Interactions/`, `Atlas/People/Commitments/`, `Atlas/People/Asks/`. The person profile itself sits at `Atlas/People/<Name>.md`.
 
+## Filenames and titles — `safe_title`
+
+Each schema's `File path:` is derived from the note's title/name (`<Title>`, `<Display Name>`, `<Subject>`). The hard invariant:
+
+```
+filename stem  ==  every [[wikilink]] target      # always
+filename stem  ==  the title:/name: field          # only when the filename is derived from one
+```
+
+The filename and its wikilinks are the same string, so any filename-illegal or Quartz-hazardous character in the chosen name drifts the file off its links — the file saves under a sanitized name while wikilinks keep the raw form and 404. `/` is worst: Quartz parses it as a path separator inside `[[...]]`. Note that **most types carry no separate title field — the filename *is* the canonical name** (Source, Decision, Project, Concept, Tracker, Effort, Area, Implementation). A few derive the filename from a field: Task/Idea (`title:`), Organization/Person (`name:`) — keep that field equal to the filename.
+
+**Exceptions to the field-equality line** (the `==` to wikilinks always holds):
+- **Grant** — `title:` is the *full proposal title*, deliberately distinct from the short / folder-derived filename. Sanitize and match the **filename**; leave `title:` as the real title.
+- **Composite filenames** — Interaction / Relationship (`<Person> - …`) and Letter (`<Recipient> - <Program> <Year>`) have no single title field; keep each human component `safe_title`-clean and matching the entity it names (Letter's `program:` already uses `MD-PhD`, not `MD/PhD`).
+
+So **before** using any title/name as a filename or wikilink, run `safe_title` on it:
+
+1. ` / ` (spaced slash) → ` and `; any remaining bare `/` → `-`
+2. `:` → drop (collapse the doubled space)
+3. drop the rest of the hazardous set: `\ * ? " < > | # ^ [ ]`
+4. collapse repeated spaces; trim leading/trailing spaces, dots, and dashes
+
+This is **not** the `id:` slug (a lowercase kebab-case form like `prj-<slug>`) nor the Quartz URL slug (a display transform). It's the one rule every note-creating skill applies so filename, title, and wikilink can never diverge. Full statement + examples live in `CLAUDE.md` / `AGENTS.md` ("A note's title IS its filename"); `_workflows/lint.md` checks #1 and #20 audit for drift.
+
 ## Idea vs Effort vs Project vs Task
 
 These four types form a commitment ladder. The decision tree for "which type should this be?":

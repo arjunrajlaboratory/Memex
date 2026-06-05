@@ -2,7 +2,7 @@
 
 A **Concept** is a knowledge page: an idea, technique, technology, or domain. Concepts aggregate the sources, projects, and people that touch them. Use concepts liberally — they are the cross-cutting backbone of the graph. (A Concept is a *subject you understand*; contrast with an Area, which is a *responsibility you maintain*.)
 
-File path: `Atlas/Concepts/<Name>.md`
+File path: `Atlas/Concepts/<Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

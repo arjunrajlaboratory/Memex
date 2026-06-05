@@ -130,7 +130,7 @@ For each tracker with `status: active` and `next_check <= today`:
 
 ### Lint — see [[_workflows/lint]]
 
-Run weekly. Check for: broken wikilinks, stale project pages (no update in N days but `status: active`), tasks with no project and no area, projects with no next action, unprocessed sources older than 7 days, contradictory claims across pages, duplicate entities, overdue waiting-for items, agent jobs stuck in `needs_review`, asks stuck in `draft` >30 days, people whose `next_touch` is past, trackers in `status: broken`, schema enum violations (`status: ingested` on a Source, etc.), required-evidence gaps (Source with empty `raw_path`, accepted Decision with empty `# Evidence`), missing-entity queue gaps (broken wikilinks without a `Followup - Create <Type> - <Name>` tickler), and planned-vs-done blur (Person notes with `last_contact: <future-date>`).
+Run weekly. Check for: broken wikilinks (including `[[X]]` targets containing `/ : # | ^`, which Quartz mis-routes), title↔filename drift (filename stem ≠ `safe_title(title:)` — the upstream cause of broken wikilinks), stale project pages (no update in N days but `status: active`), tasks with no project and no area, projects with no next action, unprocessed sources older than 7 days, contradictory claims across pages, duplicate entities, overdue waiting-for items, agent jobs stuck in `needs_review`, asks stuck in `draft` >30 days, people whose `next_touch` is past, trackers in `status: broken`, schema enum violations (`status: ingested` on a Source, etc.), required-evidence gaps (Source with empty `raw_path`, accepted Decision with empty `# Evidence`), missing-entity queue gaps (broken wikilinks without a `Followup - Create <Type> - <Name>` tickler), and planned-vs-done blur (Person notes with `last_contact: <future-date>`).
 
 ### Missing-entity queue convention
 
@@ -162,6 +162,19 @@ One-shot build (no server): `npm run site:build` — output goes to `quartz/publ
 To change what's published, edit `ignorePatterns` in `quartz/quartz.config.ts`. To add a dashboard, append to `DASHBOARDS` in `quartz/quartz/plugins/emitters/memexDashboards.ts`. The default tab on each dashboard hides closed/archived rows; **All** shows everything. Each dashboard supports live text search across every frontmatter field, multi-select chip filters per facet, sortable columns, click-cell-to-open-note, ⌕ for filter-in-place, ↗ for cross-dashboard nav.
 
 The site is not yet deployed to the public internet. To deploy: set `baseUrl` in `quartz.config.ts` to the target hostname, then follow Quartz's GitHub Pages / Cloudflare Pages docs. **Before publishing publicly, audit `ignorePatterns`** — Person, Interaction, Commitment, Ask notes default to `sensitivity: private` and should not leave the vault without intent (see `_schemas/_privacy.md`).
+
+### A note's title IS its filename — make the title filename-safe first
+
+The invariant: `filename stem == every [[wikilink]] target` always, and `== the note's title:/name: field` when the filename derives from one. Skills derive the filename from a chosen title/name and author wikilinks from the same string, so a character that can't survive a filename makes the file land under a *different* name, and every `[[name]]` link 404s. `/` is the worst: it's a path separator on disk **and** inside `[[...]]` Quartz parses it as a path separator, so `[[A / B]]` resolves to a bogus top-level `/A-/-B`. `:` is illegal on some filesystems. Nothing downstream repairs the drift — one bad name fans broken links into the briefing, interactions, and `log.md`.
+
+So **before** a title becomes a filename or wikilink target, run `safe_title` and store *that* in `title:`:
+
+1. ` / ` (spaced slash) → ` and `; any remaining bare `/` → `-`
+2. `:` → drop (collapse the doubled space it leaves)
+3. drop the rest of the hazardous set: `\ * ? " < > | # ^ [ ]`
+4. collapse repeated spaces; trim leading/trailing spaces, dots, and dashes
+
+`Download early-embryo / iPSC ATAC-seq datasets` → `Download early-embryo and iPSC ATAC-seq datasets`. The result names the file and is the target of every `[[...]]` — identical; for types whose filename derives from a field (Task/Idea `title:`, Organization/Person `name:`) it's that value too. Most types have no title field — the filename *is* the name; **Grant is the exception — its `title:` is the full proposal title, deliberately ≠ its short filename.** Distinct from the `id: <type>-<slug>` field (kebab-case) and the Quartz URL slug (space → `-`, ` - ` → `---`, `+` preserved; `/ : # | ^` never appear in a well-formed slug — if one does, fix the name, not the URL). See `_schemas/_types.md` → "Filenames and titles"; `_workflows/lint.md` checks #1 and #20 catch any drift after the fact.
 
 ## What you may not do
 

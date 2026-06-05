@@ -2,7 +2,7 @@
 
 An **Implementation** is a how-it-works writeup: a runnable spec, a code architecture, a system diagram, or a procedure. It is meant to outlive any single project.
 
-File path: `Atlas/Implementations/<Name>.md`
+File path: `Atlas/Implementations/<Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

@@ -51,7 +51,11 @@ Then ingest the source using the steps below.
   gitignored; the user sweeps it manually.
 
 **Step 2 — Create the source note**
-Create `Atlas/Sources/<Title>.md` following `_schemas/source.md`.
+Create `Atlas/Sources/<Title>.md` following `_schemas/source.md`. First run `<Title>` through
+`safe_title` (see AGENTS.md → "A note's title IS its filename"): ` / ` → ` and ` (bare `/` → `-`),
+drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse spaces — the filename stem and every
+`[[<Title>]]` wikilink must be the one identical sanitized string (article titles carry `:`/`/`
+constantly), or the link 404s in Quartz.
 Fill every frontmatter field you can infer; leave optional fields empty rather
 than inventing metadata. Set `reliability:` thoughtfully: `high` for trusted
 primary sources, `low` for opinion or unverified content, `unknown` when you

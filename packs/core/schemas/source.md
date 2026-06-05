@@ -2,7 +2,7 @@
 
 A **Source** is a processed representation of a raw input (article, paper, transcript, screenshot, dataset). The raw file lives in `Raw/`; the source note in `Atlas/Sources/` summarizes it, extracts claims, and lists which wiki pages were updated as a result.
 
-File path: `Atlas/Sources/<Display Title>.md`
+File path: `Atlas/Sources/<Display Title>.md` — the filename is this note's canonical name (no separate `title:` field). Run it through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"; article titles carry `:`/`/` constantly): filename stem = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

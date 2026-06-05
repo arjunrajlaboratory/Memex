@@ -2,7 +2,7 @@
 
 An **Interaction** is the event-level record of one contact with a person: a call, meeting, coffee, message exchange, email thread. The person profile is the durable summary; interactions are the timeline.
 
-File path: `Atlas/People/Interactions/<Person Name> - YYYY-MM-DD.md`
+File path: `Atlas/People/Interactions/<Person Name> - YYYY-MM-DD.md` — use the Person's `safe_title` name (see `_schemas/_types.md` → "Filenames and titles"): the `<Person Name>` component must match the Person note's filename/`[[wikilink]]` exactly; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

@@ -2,7 +2,7 @@
 
 A **Person** note is a durable, queryable profile of a real human. Treat it as your embedded personal CRM.
 
-File path: `Atlas/People/<Display Name>.md`
+File path: `Atlas/People/<Display Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = `name:` = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

@@ -95,6 +95,10 @@ Flag the other(s) in the report. Don't create parallel Letter notes.
 **Step 4 — Write the Letter notes**
 
 Path: `Atlas/Letters/<Recipient> - <Program> <cycle_year>.md`. Conform to `_schemas/letter.md`.
+Run the assembled title through `safe_title` first (see AGENTS.md → "A note's title IS its
+filename"): ` / ` → ` and `, **bare `/` → `-` (so the `MD/PhD` program → `MD-PhD` — programs are
+the live hazard)**, drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse spaces. The filename
+stem and every `[[...]]` to the letter must be identical.
 Slug for id: `<recipient-kebab>-<program-kebab>-<cycle_year>`.
 
 Body sections start empty except `# Work log`:

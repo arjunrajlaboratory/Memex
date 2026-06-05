@@ -49,6 +49,8 @@ For each item, follow the routing decision tree below. **Do not batch-process** 
 
 ### Decision tree (in order, first-match wins)
 
+**Filename discipline (applies to every write below):** whenever you mint a note filename from a title / name / subject — directly here, or in a delegated skill — run that string through `safe_title` first (see `CLAUDE.md`/`AGENTS.md` → "A note's title IS its filename"): ` / ` → ` and ` (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse spaces. The filename stem, the `title:` value, and every `[[wikilink]]` to the note must be the one identical sanitized string, or the link 404s in Quartz.
+
 1. **Binary file (pdf, docx, png, jpg, mp3, mp4, csv, xlsx, etc.) in `Inbox/`** → COPY into `Raw/<subfolder>/<YYYY-MM-DD>-<slug>.<ext>` (tracked). The subfolder is `sources/` for articles/papers, `screenshots/` for images, `transcripts/` for audio, etc. Then invoke `/ingest-source` to create the typed Source note. After the Source note is in place, MOVE the original from `Inbox/<file>` → `Inbox/_filed/<today>/<file>`.
 
 2. **Markdown / plain-text file in `Inbox/` that's a *raw capture*** (pasted article, transcript chunk, snippet from a chat) → COPY content into `Raw/sources/<YYYY-MM-DD>-<slug>.md` with a header comment recording the original `Inbox/` filename + capture date. Invoke `/ingest-source` on it. MOVE original to `Inbox/_filed/<today>/`.

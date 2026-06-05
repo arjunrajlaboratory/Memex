@@ -2,7 +2,7 @@
 
 A **Project** has a desired outcome and can finish. It is the central unit of work in the vault.
 
-File path: `Atlas/Projects/<Display Name>.md`
+File path: `Atlas/Projects/<Display Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

@@ -15,8 +15,11 @@ Read these files before doing anything else:
 - AGENTS.md
 - _workflows/lint.md
 
-Run all 15 checks defined in _workflows/lint.md in order:
- 1. Broken wikilinks
+Run all checks defined in _workflows/lint.md in order — that file is canonical and
+has grown beyond the summary below (now 20 checks); re-read it and run the full set.
+The high-frequency ones:
+ 1. Broken wikilinks — including any [[X]] whose target contains / : # | ^ (Quartz
+    parses / as a path separator inside [[...]], so [[A / B]] 404s)
  2. Stale active projects
  3. Orphan tasks (no project, no area)
  4. Orphan projects (active, no next actions)
@@ -31,6 +34,13 @@ Run all 15 checks defined in _workflows/lint.md in order:
 13. Quiet trackers (miss_count >= 5)
 14. Sensitivity leaks (Drafts/ or outputs/ files linking sensitive notes)
 15. Schema drift (notes missing required fields per their type: schema)
+16–20. (in _workflows/lint.md) schema enum violations, required-evidence gaps,
+    missing-entity queue gaps, planned-vs-done blur, and — check #20 —
+    **title ↔ filename drift**: (a) flag any filename stem containing / : \ * ? " < > | # ^ [ ]
+    (the upstream cause of most check-#1 broken wikilinks); (b) for notes whose filename
+    derives from a field — Task/Idea (title:), Organization/Person (name:) — also flag when
+    the stem ≠ safe_title(field). Exempt from (b): date/id-named notes, and Grant (its title:
+    is the full proposal title, intentionally ≠ the short filename). Lean high-severity.
 
 Output a structured markdown report. For each check:
 - **Count** of offending notes
