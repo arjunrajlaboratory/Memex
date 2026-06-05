@@ -2,7 +2,7 @@
 
 An **Idea** is a pre-commitment seed: something worth thinking about but not yet a Task (no acceptance criteria) and not yet a Project (no outcome promised). Ideas can stay loose for a long time, get fleshed out by research, then be promoted to a Task / Effort / Project — or dropped.
 
-File path: `Atlas/Ideas/<Display Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = title/name = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
+File path: `Atlas/Ideas/<Display Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = `title:` = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

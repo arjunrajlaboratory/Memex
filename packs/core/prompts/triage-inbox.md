@@ -59,9 +59,9 @@ Then carry out the capture-triage workflow:
    d. Create or update the appropriate typed note, filling in all fields you
       can infer; leave optional fields empty rather than inventing metadata.
       When you mint a filename from a title/subject, run it through `safe_title`
-      first (see AGENTS.md → "A note's title IS its filename"): ` / ` → ` and `,
-      drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse spaces — the
-      filename, `title:`, and every `[[wikilink]]` must be the one identical string.
+      first (see AGENTS.md → "A note's title IS its filename"): ` / ` → ` and `
+      (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse
+      spaces — the filename stem and every `[[wikilink]]` must be the one identical string.
    e. Link the note to related projects, areas, people, and topics.
    f. Move the original capture to
       `Inbox/_filed/YYYY-MM-DD/<original-filename>`.

@@ -75,7 +75,7 @@ Before writing, check:
 
 ## Step 3 — Write the Person note
 
-Path: `Atlas/People/<Display Name>.md` — run `<Display Name>` through `safe_title` first (see `CLAUDE.md`/`AGENTS.md` → "A note's title IS its filename"): drop `/ : \ * ? " < > | # ^ [ ]`, collapse spaces. Names rarely carry these, but a slash in a hyphenated/transliterated name or a trailing `:` would silently break every `[[<Display Name>]]` link. Use the one sanitized string for the filename, `name:`, and every wikilink — identical.
+Path: `Atlas/People/<Display Name>.md` — run `<Display Name>` through `safe_title` first (see `CLAUDE.md`/`AGENTS.md` → "A note's title IS its filename"): ` / ` → ` and ` (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse spaces. Names rarely carry these, but a slash in a hyphenated/transliterated name or a trailing `:` would silently break every `[[<Display Name>]]` link. Use the one sanitized string for the filename, `name:`, and every wikilink — identical.
 
 Use `_schemas/person.md` as the contract. Fill every field you confidently inferred; leave the rest empty (per `AGENTS.md`: "leave optional fields empty rather than inventing metadata").
 

@@ -31,7 +31,7 @@ Ask the user the questions below **one at a time**, but **only the ones they hav
 
 When you ask, present a sensible default in parentheses and let the user accept it with a one-word answer.
 
-1. **Subject** — One short phrase. This becomes `Project - <Subject>.md`. Run it (and every entity name you mint in this run) through `safe_title` first (see `CLAUDE.md`/`AGENTS.md` → "A note's title IS its filename"): ` / ` → ` and `, drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse spaces — so the filename, `title:`, and every `[[wikilink]]` to it stay identical.
+1. **Subject** — One short phrase. This becomes `Project - <Subject>.md`. Run it (and every entity name you mint in this run) through `safe_title` first (see `CLAUDE.md`/`AGENTS.md` → "A note's title IS its filename"): ` / ` → ` and ` (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse spaces — so the filename stem and every `[[wikilink]]` to it stay identical.
 2. **Area** — Which existing Area does this live under? (Show them the current Areas list.) If none fit, propose a new one with a one-line purpose statement.
 3. **Outcome** — What does "done" look like in 1–2 sentences? (If the project is ongoing/maintenance, say `phase: maintaining` and skip a target date.)
 4. **Source material** — Where is it? Options: a `Inbox/` folder, a URL, an external repo path, "I'll paste it", or "no material yet — capture the idea only".

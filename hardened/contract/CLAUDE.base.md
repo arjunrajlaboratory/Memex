@@ -107,13 +107,14 @@ The Quartz emitter is now the only dashboard generator. The older Python script 
 
 ### A note's title IS its filename — make the title filename-safe first
 
-The invariant that keeps wikilinks resolving: for any titled note,
+The invariant that keeps wikilinks resolving:
 
 ```
-filename stem  ==  title:  ==  every [[wikilink]] target
+filename stem  ==  every [[wikilink]] target          # always
+filename stem  ==  the note's title:/name: field       # when the filename derives from one
 ```
 
-Skills derive the filename from the title and author wikilinks from the same string, so if the title contains a character that can't survive a filename, the file lands under a *different* name than the title and every `[[title]]` link 404s. `/` is the worst offender: it's a path separator on disk **and** inside `[[...]]` Quartz parses it as a path separator, so `[[A / B]]` resolves to a bogus top-level `/A-/-B` instead of the note. `:` is illegal on some filesystems and reads as a clause break. Nothing downstream repairs this — a single bad title fans out into broken links in the briefing, interactions, and `log.md`.
+Skills derive the filename from a chosen title/name and author wikilinks from the same string, so if it contains a character that can't survive a filename, the file lands under a *different* name and every `[[name]]` link 404s. `/` is the worst offender: it's a path separator on disk **and** inside `[[...]]` Quartz parses it as a path separator, so `[[A / B]]` resolves to a bogus top-level `/A-/-B` instead of the note. `:` is illegal on some filesystems and reads as a clause break. Nothing downstream repairs this — a single bad title fans out into broken links in the briefing, interactions, and `log.md`.
 
 So **before** a title is used as a filename or a wikilink target, run it through `safe_title` and store *that* string in `title:`:
 
@@ -126,7 +127,7 @@ Examples:
 - `Download early-embryo / iPSC ATAC-seq datasets` → `Download early-embryo and iPSC ATAC-seq datasets`
 - `Follow up with X re: ATAC-seq data collection` → `Follow up with X re ATAC-seq data collection`
 
-The result is what goes in `title:`, what names the file (`<result>.md`), and what every `[[<result>]]` points at — all three identical, nothing left to drift. This is distinct from the `id: <type>-<slug>` field (lowercase kebab-case) and from the URL slug below (a *display* transform applied on top of an already-safe filename).
+The result names the file (`<result>.md`) and is what every `[[<result>]]` points at — identical, nothing left to drift; when the type has a `title:`/`name:` field the filename derives from (Task/Idea `title:`, Organization/Person `name:`), it's that value too. Most types have **no** such field — the filename *is* the canonical name (Source, Decision, Project, Concept, Tracker, Effort, Area, Implementation). **Grant is the exception: its `title:` is the full proposal title, deliberately ≠ its short filename — sanitize the filename, leave `title:` alone.** Distinct from the `id: <type>-<slug>` field (lowercase kebab-case) and the URL slug below (a *display* transform on an already-safe filename). See `_schemas/_types.md` → "Filenames and titles" for the per-type breakdown.
 
 ### URL slugs — don't link the raw filename
 

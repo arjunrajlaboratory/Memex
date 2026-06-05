@@ -36,10 +36,11 @@ The high-frequency ones:
 15. Schema drift (notes missing required fields per their type: schema)
 16–20. (in _workflows/lint.md) schema enum violations, required-evidence gaps,
     missing-entity queue gaps, planned-vs-done blur, and — check #20 —
-    **title ↔ filename drift**: for every typed note the filename stem must equal
-    safe_title(title:); flag any note whose filename and title:/name: disagree
-    (usually a / or : in the title the filesystem altered). This is the upstream
-    cause of most check-#1 broken wikilinks. Lean high-severity.
+    **title ↔ filename drift**: (a) flag any filename stem containing / : \ * ? " < > | # ^ [ ]
+    (the upstream cause of most check-#1 broken wikilinks); (b) for notes whose filename
+    derives from a field — Task/Idea (title:), Organization/Person (name:) — also flag when
+    the stem ≠ safe_title(field). Exempt from (b): date/id-named notes, and Grant (its title:
+    is the full proposal title, intentionally ≠ the short filename). Lean high-severity.
 
 Output a structured markdown report. For each check:
 - **Count** of offending notes

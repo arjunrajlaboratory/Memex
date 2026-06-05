@@ -2,7 +2,7 @@
 
 An **Organization** is a company, lab, school, group, agency, or other named collective.
 
-File path: `Atlas/Organizations/<Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = title/name = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
+File path: `Atlas/Organizations/<Name>.md` — run the name through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = `name:` = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

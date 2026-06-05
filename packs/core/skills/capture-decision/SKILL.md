@@ -48,7 +48,7 @@ If the title is obvious from the decision statement, don't ask separately for a 
 
 ## Step 2 — Write the Decision note
 
-Path: `Atlas/Decisions/<Title>.md`. **First run `<Title>` through `safe_title` (see `CLAUDE.md` / `AGENTS.md` → "A note's title IS its filename"): ` / ` → ` and ` (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse/trim spaces.** That one sanitized string is the filename stem, the `title:` value, and the target of every `[[<Title>]]` wikilink — identical, or the link 404s in Quartz. (The `id: dec-<slug>` below is the separate kebab-case form.) Conform to `_schemas/decision.md` exactly.
+Path: `Atlas/Decisions/<Title>.md`. **First run `<Title>` through `safe_title` (see `CLAUDE.md` / `AGENTS.md` → "A note's title IS its filename"): ` / ` → ` and ` (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse/trim spaces.** That one sanitized string is the filename stem and the target of every `[[<Title>]]` wikilink — identical, or the link 404s in Quartz. (Decision has no `title:` field — the filename is the canonical name; `id: dec-<slug>` below is the separate kebab-case form.) Conform to `_schemas/decision.md` exactly.
 
 Frontmatter rules worth precision:
 

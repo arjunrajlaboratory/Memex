@@ -165,7 +165,7 @@ The site is not yet deployed to the public internet. To deploy: set `baseUrl` in
 
 ### A note's title IS its filename — make the title filename-safe first
 
-For any titled note the invariant is `filename stem == title: == every [[wikilink]] target`. Skills derive the filename from the title and author wikilinks from the same string, so a character that can't survive a filename makes the file land under a *different* name than the title, and every `[[title]]` link 404s. `/` is the worst: it's a path separator on disk **and** inside `[[...]]` Quartz parses it as a path separator, so `[[A / B]]` resolves to a bogus top-level `/A-/-B`. `:` is illegal on some filesystems. Nothing downstream repairs the drift — one bad title fans broken links into the briefing, interactions, and `log.md`.
+The invariant: `filename stem == every [[wikilink]] target` always, and `== the note's title:/name: field` when the filename derives from one. Skills derive the filename from a chosen title/name and author wikilinks from the same string, so a character that can't survive a filename makes the file land under a *different* name, and every `[[name]]` link 404s. `/` is the worst: it's a path separator on disk **and** inside `[[...]]` Quartz parses it as a path separator, so `[[A / B]]` resolves to a bogus top-level `/A-/-B`. `:` is illegal on some filesystems. Nothing downstream repairs the drift — one bad name fans broken links into the briefing, interactions, and `log.md`.
 
 So **before** a title becomes a filename or wikilink target, run `safe_title` and store *that* in `title:`:
 
@@ -174,7 +174,7 @@ So **before** a title becomes a filename or wikilink target, run `safe_title` an
 3. drop the rest of the hazardous set: `\ * ? " < > | # ^ [ ]`
 4. collapse repeated spaces; trim leading/trailing spaces, dots, and dashes
 
-`Download early-embryo / iPSC ATAC-seq datasets` → `Download early-embryo and iPSC ATAC-seq datasets`. The result names the file, fills `title:`, and is the target of every `[[...]]` — all three identical. Distinct from the `id: <type>-<slug>` field (kebab-case) and the Quartz URL slug (space → `-`, ` - ` → `---`, `+` preserved; `/ : # | ^` never appear in a well-formed slug — if one does, fix the title, not the URL). `_workflows/lint.md` checks #1 and #20 catch any drift after the fact.
+`Download early-embryo / iPSC ATAC-seq datasets` → `Download early-embryo and iPSC ATAC-seq datasets`. The result names the file and is the target of every `[[...]]` — identical; for types whose filename derives from a field (Task/Idea `title:`, Organization/Person `name:`) it's that value too. Most types have no title field — the filename *is* the name; **Grant is the exception — its `title:` is the full proposal title, deliberately ≠ its short filename.** Distinct from the `id: <type>-<slug>` field (kebab-case) and the Quartz URL slug (space → `-`, ` - ` → `---`, `+` preserved; `/ : # | ^` never appear in a well-formed slug — if one does, fix the name, not the URL). See `_schemas/_types.md` → "Filenames and titles"; `_workflows/lint.md` checks #1 and #20 catch any drift after the fact.
 
 ## What you may not do
 

@@ -2,7 +2,7 @@
 
 A **Letter** is a deadline-driven written ask on someone's behalf: a letter of recommendation, a cover letter, a nomination blurb, a reference. The actual letter file lives wherever you keep it (typically Google Drive, sometimes local, sometimes both). The Letter note in `Atlas/Letters/` is the **index entry** — it tracks the recipient, the program, the deadline, the submission status, and how to find the file. It does not store the letter body.
 
-File path: `Atlas/Letters/<Recipient> - <Program> <Year>.md` — run the assembled title through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): a `MD/PhD` program becomes `MD-PhD`; filename stem = `title:` = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
+File path: `Atlas/Letters/<Recipient> - <Program> <Year>.md` — a composite name, no single `title:` field. Keep each human component `safe_title`-clean (see `_schemas/_types.md` → "Filenames and titles"): `<Recipient>` matches the Person note's filename, and `<Program>` uses the `MD-PhD` form (never `MD/PhD` — a bare `/` would split the path). The assembled filename stem and every `[[wikilink]]` to the letter must be identical; no `/ : \ * ? " < > | # ^ [ ]`.
 
 Examples:
 - `Atlas/Letters/Jordan Lee - MD 2026.md`

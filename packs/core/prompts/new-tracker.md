@@ -17,8 +17,8 @@ continuing. Do not batch questions. Confirm each answer before moving on.
 1. **Subject** — What one short phrase describes what we're tracking?
    (This becomes the file title: `Tracker - <Subject>.md`.) Run `<Subject>` through
    `safe_title` first (see `CLAUDE.md`/`AGENTS.md` → "A note's title IS its filename"):
-   ` / ` → ` and `, drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse spaces —
-   so the filename, `title:`, and every `[[Tracker - <Subject>]]` wikilink stay identical.
+   ` / ` → ` and ` (bare `/` → `-`), drop `:` and the rest of `\ * ? " < > | # ^ [ ]`, collapse
+   spaces — so the filename stem and every `[[Tracker - <Subject>]]` wikilink stay identical.
 
 2. **Watches** — Which wiki pages does this tracker keep fresh?
    List at least one. Valid types: Concept / Project / Source / Person / Organization.

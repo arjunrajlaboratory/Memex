@@ -2,7 +2,7 @@
 
 A **Tracker** is a standing instruction to keep a wiki page (or set of pages) fresh on a chosen cadence. Trackers are the vault's antidote to stale knowledge.
 
-File path: `Atlas/Trackers/<Subject>.md` — run the subject through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = title/name = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
+File path: `Atlas/Trackers/<Subject>.md` — run the subject through `safe_title` first (see `_schemas/_types.md` → "Filenames and titles"): filename stem = every `[[wikilink]]`; no `/ : \ * ? " < > | # ^ [ ]`.
 
 ## Frontmatter
 

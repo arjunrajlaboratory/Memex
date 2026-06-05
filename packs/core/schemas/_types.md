@@ -34,13 +34,20 @@ Sub-folders inside `Atlas/People/` are allowed: e.g. `Atlas/People/Interactions/
 
 ## Filenames and titles — `safe_title`
 
-Each schema's `File path:` is derived from the note's title/name (`<Title>`, `<Display Name>`, `<Subject>`). The hard invariant tying them together:
+Each schema's `File path:` is derived from the note's title/name (`<Title>`, `<Display Name>`, `<Subject>`). The hard invariant:
 
 ```
-filename stem  ==  title:  ==  every [[wikilink]] target
+filename stem  ==  every [[wikilink]] target      # always
+filename stem  ==  the title:/name: field          # only when the filename is derived from one
 ```
 
-Because the same string names the file *and* is the wikilink target, a title with a filename-illegal or Quartz-hazardous character drifts: the file saves under a sanitized name while wikilinks keep the raw title and 404. `/` is worst — Quartz parses it as a path separator inside `[[...]]`. So **before** using a title as a filename or wikilink, run `safe_title` and store the result in `title:`:
+The filename and its wikilinks are the same string, so any filename-illegal or Quartz-hazardous character in the chosen name drifts the file off its links — the file saves under a sanitized name while wikilinks keep the raw form and 404. `/` is worst: Quartz parses it as a path separator inside `[[...]]`. Note that **most types carry no separate title field — the filename *is* the canonical name** (Source, Decision, Project, Concept, Tracker, Effort, Area, Implementation). A few derive the filename from a field: Task/Idea (`title:`), Organization/Person (`name:`) — keep that field equal to the filename.
+
+**Exceptions to the field-equality line** (the `==` to wikilinks always holds):
+- **Grant** — `title:` is the *full proposal title*, deliberately distinct from the short / folder-derived filename. Sanitize and match the **filename**; leave `title:` as the real title.
+- **Composite filenames** — Interaction / Relationship (`<Person> - …`) and Letter (`<Recipient> - <Program> <Year>`) have no single title field; keep each human component `safe_title`-clean and matching the entity it names (Letter's `program:` already uses `MD-PhD`, not `MD/PhD`).
+
+So **before** using any title/name as a filename or wikilink, run `safe_title` on it:
 
 1. ` / ` (spaced slash) → ` and `; any remaining bare `/` → `-`
 2. `:` → drop (collapse the doubled space)
