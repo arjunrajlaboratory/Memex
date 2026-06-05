@@ -9,6 +9,10 @@ This repository is a personal Memex vault (see [README.md](README.md)). When Cla
 3. If today's briefing exists (`Ops/Briefings/<today>.md`), skim it.
 4. The build plan and "what's done so far" live in `IMPLEMENTATION_PLAN.md` — the Changelog and Resume-here sections are the source of truth for state.
 
+## Framework updates and overrides
+
+Treat `.claude/skills/`, `_schemas/`, `_templates/`, `_workflows/`, `Agents/Prompts/`, `scripts/`, `quartz/`, `AGENTS.md`, and this file as engine-owned framework. Prefer durable local behavior in `_config/overrides.md`; it takes precedence over framework defaults. In-place edits to framework files are allowed, but they are local forks and `/update` will surface them for merge/choice instead of silently overwriting them.
+
 ## Dropping files for ingestion
 
 There is a **drop zone at `Inbox/`** — the folder and its `README.md` are tracked, but everything else dropped into it is gitignored until triage promotes it into the tracked vault. The user drops anything in there — PDFs, screenshots, transcripts, raw markdown, draft synthesis — and the triage workflow reads from it.
@@ -83,6 +87,7 @@ In addition to the paste-able prompts above, the vault ships **Claude Code skill
 | `lint` | "run the lint", "audit the vault", "auditor pass" | Auto-triggering version of `Agents/Prompts/lint.md`. Runs the 15-check auditor pass and writes the report into the open weekly review (or a standalone `Lint - <date>.md`). Flag-only — proposes follow-on tasks but creates none. |
 | `log-mutation` | "log this change", "append a log line for ..." | Tiny helper for the canonical `log.md` append. Invoked by other skills and by the user. The reason every other skill has a "Step N — Log" — keeps the vault audit trail honest. |
 | `weekly-review` | "weekly review", "Friday review", "what happened this week" | Synthesizes 7-day log + briefings + active projects + closed/open tasks + trackers + commitments + asks into `Ops/Reviews/Review - <ISO-week>.md`. Patterns/drift/debt, not a re-summary. Recommendations only — never changes state. |
+| `update` | "update Memex", "pull engine updates", "upgrade this vault" | Runs the engine update prepare step, reviews local framework forks/collisions/renames, carries prose edits onto the new base when safe, asks on conflicts/code/config, and finalizes `.memex/manifest.json` + `.memex/baseline/`. |
 | `email` | "search my email for ...", "what did X say", "find the thread about ...", "did Y reply?", "draft a reply to ..." | General Gmail competence — the reusable home for *how to use email well*: the query cheat-sheet, the search-broadly-first technique (memory `feedback_gmail_search_technique`), reading full threads, and routing substantive email into the vault (→ `ingest-source` / `ingest-person` / `create-task`) or drafting a reply via `create_draft`. **Never sends** — drafts only. |
 
 ## Static site (Quartz)
@@ -161,7 +166,7 @@ You can still set `updated:` explicitly when writing or editing a typed note —
 
 ### Prefer skill invocation over manual mechanics
 
-The vault ships 18 skills at `.claude/skills/` (see table above). For any matching natural-language phrasing — "close this task", "ingest this article", "set up project X", "weekly review", etc. — invoke the skill via the `Skill` tool rather than reproducing its mechanics by hand. The skills enforce the schema rules, the `log.md` append discipline, the parent-page bookkeeping (`# Current next actions`, `# Changelog`, area links), and the cascading state changes (unblocks, surfacing followups) that are easy to forget under fatigue. Manual edits are still fine for one-off adjustments that don't have a skill, but anytime you find yourself opening 3+ files to do "the X workflow", check whether `Skill` already wraps it.
+The vault ships 19 skills at `.claude/skills/` (see table above). For any matching natural-language phrasing — "close this task", "ingest this article", "set up project X", "weekly review", etc. — invoke the skill via the `Skill` tool rather than reproducing its mechanics by hand. The skills enforce the schema rules, the `log.md` append discipline, the parent-page bookkeeping (`# Current next actions`, `# Changelog`, area links), and the cascading state changes (unblocks, surfacing followups) that are easy to forget under fatigue. Manual edits are still fine for one-off adjustments that don't have a skill, but anytime you find yourself opening 3+ files to do "the X workflow", check whether `Skill` already wraps it.
 
 ### In-app TodoWrite is not the vault tracker
 

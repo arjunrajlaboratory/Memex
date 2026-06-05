@@ -36,9 +36,14 @@ PY
 [ -d "$TMP/core/Atlas/Concepts" ] || fail "scaffold dirs missing"
 [ -d "$TMP/core/Drafts" ] || fail "Drafts/ scaffold dir missing"
 [ -f "$TMP/core/Drafts/README.md" ] || fail "Drafts/README.md seed missing"
+[ -f "$TMP/core/_config/overrides.md" ] || fail "_config/overrides.md seed missing"
 [ -f "$TMP/core/.claude/skills/triage-inbox/SKILL.md" ] || fail "core skill missing"
 [ -f "$TMP/core/.claude/settings.json" ] || fail "settings.json (hook wiring) missing"
 [ -f "$TMP/core/.gitignore" ] || fail "vault .gitignore missing"
+[ -f "$TMP/core/.memex/manifest.json" ] || fail ".memex/manifest.json missing"
+[ -f "$TMP/core/.memex/baseline/.claude/skills/triage-inbox/SKILL.md" ] || fail "framework baseline missing"
+grep -q ".memex/baseline/" "$TMP/core/.gitignore" || fail "baseline should be gitignored"
+grep -q ".memex/update-work/" "$TMP/core/.gitignore" || fail "update workdir should be gitignored"
 [ -f "$TMP/core/AGENTS.md" ] || fail "AGENTS.md missing"
 [ -f "$TMP/core/CLAUDE.md" ] || fail "CLAUDE.md missing"
 [ -f "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/"
@@ -58,9 +63,19 @@ grep -qF "forwards into it" "$TMP/core/.claude/skills/email/SKILL.md" && fail "b
 grep -qF "searchable Gmail is **complete**" "$TMP/core/.claude/skills/email/SKILL.md" || fail "blank-forwarding hedge should read 'complete'"
 grep -rq "jane@example.com" "$TMP/core/.claude/skills" || fail "owner email not baked into skills"
 [ ! -e "$TMP/core/.claude/skills/draft-letter" ] || fail "pi skill leaked into core init"
+[ -f "$TMP/core/.claude/skills/update/SKILL.md" ] || fail "update skill missing in core init"
 grep -qi "draft-letter" "$TMP/core/AGENTS.md" && fail "pi content in core contract" || true
 # core contract: marker must be fully resolved (no leftover marker)
 grep -q "PI_CONTRACT_FRAGMENT" "$TMP/core/AGENTS.md" "$TMP/core/CLAUDE.md" && fail "unresolved PI marker" || true
+python3 - "$TMP/core/.memex/manifest.json" <<'PY'
+import json, pathlib, sys
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert manifest["engine_version"]
+assert manifest["answers"]["GIT_MODE"] == "local"
+assert manifest["answers"]["STREAMS"] == ["email", "slack"]
+assert manifest["files"][".claude/skills/update/SKILL.md"]["class"] == "framework"
+assert manifest["files"]["_config/overrides.md"]["class"] == "seed"
+PY
 
 # ---------- core+pi init ----------
 "$ENG/bin/memex-init" --target "$TMP/pi" --packs core,pi --answers "$ENG/tests/fixtures/answers.pi.json" >/dev/null

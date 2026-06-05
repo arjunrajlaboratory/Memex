@@ -1,0 +1,13 @@
+#!/bin/zsh
+# Thin wrapper so users run `memex-update` instead of the python module path.
+ENG="$(cd "$(dirname "$0")/.." && pwd)"
+case "$1" in
+  prepare|finalize|abort)
+    CMD="$1"
+    shift
+    exec python3 "$ENG/tools/memex_update.py" "$CMD" --eng "$ENG" "$@"
+    ;;
+  *)
+    exec python3 "$ENG/tools/memex_update.py" --eng "$ENG" "$@"
+    ;;
+esac

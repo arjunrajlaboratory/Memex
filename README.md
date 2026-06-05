@@ -35,10 +35,29 @@ cd ~/code/my-vault/quartz && npm install && npm run site:serve   # http://localh
 cd ~/code/my-vault && claude
 ```
 
-The interview bakes your answers directly into local, editable skill files — after init the vault is
-yours; edit any skill to suit your flow. Each vault uses a distinct Quartz port so several can run at
-once. To serve durably (auto-start at login, survive sleep), install the LaunchAgent in
+The interview bakes your answers directly into the installed vault and records exactly which engine
+files were installed in `.memex/manifest.json`. Framework files are engine-owned and updatable;
+put durable local preferences in `_config/overrides.md` (or `_config/sources.md` for stream settings).
+If you edit a framework file in place, Memex treats that as a local fork and the update flow will
+surface it for merge/choice instead of silently overwriting it. Each vault uses a distinct Quartz port
+so several can run at once. To serve durably (auto-start at login, survive sleep), install the LaunchAgent in
 `<vault>/scripts/launchd/` (copy the plist to `~/Library/LaunchAgents/` and `launchctl bootstrap`).
+
+## Updating an installed vault
+
+Fresh installs track the engine version, answers, file ownership, and framework baselines under
+`.memex/`. To adopt a newer engine checkout:
+
+```bash
+cd <vault>
+<engine>/bin/memex-update --vault . --non-interactive
+```
+
+With git enabled, the updater refuses a dirty worktree, creates an `engine-update-<version>` branch,
+applies deterministic-safe changes, and writes a plan under `.memex/update-work/` for any local
+framework edits, collisions, config/code choices, or rename candidates. Run `/update` inside the vault
+for the agent-guided merge layer; it resolves the plan and finalizes `.memex/manifest.json` plus the
+baseline. With git mode `none`, review the written plan/report instead of a branch diff.
 
 ## First prompts to try
 
@@ -101,16 +120,20 @@ directly would be clobbered on the next re-derive.
 | File | Role |
 |---|---|
 | `packs.json` | which source files belong to `core` vs `pi` vs `hardened` |
+| `VERSION` | semver label recorded into installed vault manifests |
+| `engine_layout.json` | ownership classes for framework, seed, and data paths |
 | `placeholders.json` | instance facts as `{{TOKENS}}` + the exact source literals they replace |
 | `scrub.json` | derive-time genericization of third-party PII in skill *examples* |
 | `audit_allowlist.json` | detector hits accepted as-is (vendored strings, institution names in examples) |
 | `tools/derive.py` | maintainer: source → template, literals → tokens |
 | `tools/memex_init.py` | user: template → new vault, tokens → your answers |
+| `tools/memex_update.py` | user: newer engine → installed vault, preserving local framework edits |
 | `tools/audit_literals.py` | the completeness gate (no instance fact leaks into the template) |
 | `bin/memex-init` | the user-facing entrypoint |
+| `bin/memex-update` | the user-facing update entrypoint |
 
 **derive** (literals → tokens) and **init** (tokens → answers) are inverses across the same catalog.
 
 ## Not yet done
 
-- **Notion pack** and **upstream-update merge UX**: see the design doc's deferred list.
+- **Notion pack**: see the design docs' deferred lists.
