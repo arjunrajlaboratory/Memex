@@ -29,6 +29,15 @@ If your role is not declared at the start of a session, ask. Do not assume.
 9. **Mark uncertainty.** If confidence is low, set `needs_review: true` and add a `# Reviewer notes` section.
 10. **Respect sensitivity.** Read `_schemas/_privacy.md`. Do not quote `private` notes in external outputs; do not include `sensitive` notes in any agent run log or briefing unless explicitly cited by the user.
 
+## Framework vs. your edits
+
+The vault has two kinds of durable customization:
+
+- **User data and config** live in `Atlas/`, `Ops/`, `Inbox/`, `Drafts/`, `Raw/`, `outputs/`, and `_config/`. The engine update flow never rewrites user data. `_config/overrides.md` and `_config/sources.md` take precedence over framework defaults when a skill or workflow needs local preferences.
+- **Framework files** live in `.claude/skills/`, `_schemas/`, `_templates/`, `_workflows/`, `Agents/Prompts/`, `scripts/`, `quartz/`, `AGENTS.md`, and `CLAUDE.md`. Treat them as engine-owned and read-only by default. If you edit them in place, that is a local fork: the next `/update` will detect it and ask/merge instead of silently overwriting it.
+
+Prefer putting standing local behavior in `_config/overrides.md` over editing framework files.
+
 ## Vault map
 
 | Folder | Who writes here | Notes |
@@ -45,11 +54,11 @@ If your role is not declared at the start of a session, ask. Do not assume.
 | `Agents/` | all agents | jobs, runs, prompts (paste-able), approvals |
 | `Drafts/` | executors, librarian, user | git-tracked staging area for finalize-later text drafts (LLM prose, code, reports). Text is committed; heavy binaries are gitignored. Promote finished drafts into typed `Atlas/` notes, then archive/delete the draft. |
 | `outputs/` | executors | generated **binary** artifacts (report PDFs, letterhead `.docx`, CV PDFs). Folder + `README.md` tracked; contents (`outputs/**`) gitignored — don't commit binaries. |
-| `_config/` | user (curated), setup wizard | instance config the skills read. `_config/sources.md` records which streams (`email`/`slack`/`calendar`) the default daily loop-closing flow checks + the git mode. Tracked, low-sensitivity; edit `enabled:` to turn a stream on/off. |
-| `_schemas/` | user, with agent proposals via PR | edits are governance changes |
-| `_templates/` | user, agents (propose-only) | one per type |
-| `_workflows/` | user, agents (propose-only) | step-by-step workflow prompts |
-| `.claude/skills/` | user (curated) | Claude Code skills auto-triggered by natural-language phrasings — see "Skills" below |
+| `_config/` | user (curated), setup wizard | instance config the skills read. `_config/sources.md` records which streams (`email`/`slack`/`calendar`) the default daily loop-closing flow checks + the git mode. `_config/overrides.md` records local behavior that takes precedence over framework defaults. |
+| `_schemas/` | engine-owned; user forks are surfaced by `/update` | governance rules; prefer local exceptions in `_config/overrides.md` |
+| `_templates/` | engine-owned; user forks are surfaced by `/update` | one per type |
+| `_workflows/` | engine-owned; user forks are surfaced by `/update` | step-by-step workflow prompts |
+| `.claude/skills/` | engine-owned; user forks are surfaced by `/update` | Claude Code skills auto-triggered by natural-language phrasings - see "Skills" below |
 | `scripts/` | (removed 2026-05-18) | Held one-off Python utilities. The single resident, `build_dashboards.py`, was retired once the Quartz emitter (`quartz/quartz/plugins/emitters/memexDashboards.ts`) reached parity. Recreate the folder if a new utility shows up. |
 | `quartz/` | user (config + plugin only); npm (`node_modules/`, `public/`, `.quartz-cache/` gitignored) | Quartz static-site generator that publishes the vault as a browsable site with backlinks, graph, search, and our typed-note dashboards — see "Static site" below |
 
@@ -67,6 +76,7 @@ The vault ships **Claude Code skills** at `.claude/skills/` that the `Skill` too
 | `flesh-out-idea` | "flesh out [[X]]", "research this idea" | Dispatches Sonnet sub-agents (external landscape + vault connections + optional system dive) in parallel; Opus synthesizes 200–400 word `# Research notes` + a concrete `# Proposed first step`. Sets `status: researching`. Refresh mode for ideas last researched >30 days ago preserves an audit trail of how the landscape evolved. **Does NOT auto-promote** — promotion is always a human call. |
 | `promote-idea` | "promote this idea", "turn [[X]] into a project", "let's commit to this" | Walks the Task / Effort / Project choice using the decision tree in `_schemas/_types.md`, writes the spawned note(s) with `related_ideas:` backlinks, sets the Idea to `status: promoted` with a `# Promoted to` section. Never edits the Idea's `# Research notes` after promotion — it becomes a historical record. |
 | `weekly-review` | "weekly review", "Friday review", "what happened this week" | Reads 7 days of log + briefings + active/paused/waiting projects + closed and stale tasks + trackers + commitments + asks. Synthesizes patterns, drift, and debt into `Ops/Reviews/Review - <ISO-week>.md` per `_schemas/review.md`. Auditor findings section runs the lint checklist. **Recommendations only** — never changes Project or Task status. |
+| `update` | "update Memex", "pull engine updates", "upgrade this vault" | Runs the deterministic engine update prepare step, preserves/merges local framework edits with user review, and finalizes `.memex/manifest.json` + `.memex/baseline/` after pending decisions are resolved. |
 
 <!-- PI_CONTRACT_FRAGMENT -->
 

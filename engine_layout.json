@@ -1,0 +1,41 @@
+{
+  "framework": {
+    "prose": [
+      "_schemas/**",
+      "_templates/**",
+      "_workflows/**",
+      "Agents/Prompts/**",
+      ".claude/skills/**",
+      "AGENTS.md",
+      "CLAUDE.md"
+    ],
+    "code": [
+      "quartz/**",
+      ".claude/hooks/**",
+      ".claude/settings.json",
+      "scripts/**",
+      "CV/**",
+      ".gitignore"
+    ]
+  },
+  "seed": [
+    "index.md",
+    "log.md",
+    "_config/sources.md",
+    "_config/overrides.md",
+    "Inbox/README.md",
+    "outputs/README.md",
+    "Drafts/README.md"
+  ],
+  "data": [
+    "Atlas/**",
+    "Ops/**",
+    "Agents/Jobs/**",
+    "Agents/Runs/**",
+    "Agents/Approvals/**",
+    "Inbox/**",
+    "Drafts/**",
+    "outputs/**",
+    "Raw/**"
+  ]
+}

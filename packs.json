@@ -21,6 +21,7 @@
       "shutdown-review",
       "email",
       "revisit-decisions",
+      "update",
       "observe-manual-patterns",
       "observe-skill-corrections",
       "observe-task-actuals"
