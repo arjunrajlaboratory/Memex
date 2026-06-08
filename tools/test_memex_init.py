@@ -1,6 +1,6 @@
 import unittest
 from memex_init import (
-    bake, parse_streams, normalize_git_mode, sources_config_yaml, DEFAULT_STREAMS,
+    bake, parse_account_list, parse_streams, normalize_git_mode, sources_config_yaml, DEFAULT_STREAMS,
 )
 
 class TestBake(unittest.TestCase):
@@ -52,6 +52,14 @@ class TestBakeSections(unittest.TestCase):
         self.assertEqual(bake(tmpl, {"OWNER_FORWARDING_EMAIL": ""}), "**complete**")
         self.assertEqual(bake(tmpl, {"OWNER_FORWARDING_EMAIL": "a@b.edu"}), "**near-complete**")
 
+    def test_sending_accounts_section_drops_when_blank(self):
+        tmpl = "{{?OWNER_SENDING_ACCOUNTS}}Other accounts: `{{OWNER_SENDING_ACCOUNTS}}`.{{/OWNER_SENDING_ACCOUNTS}}"
+        self.assertEqual(bake(tmpl, {"OWNER_SENDING_ACCOUNTS": ""}), "")
+        self.assertEqual(
+            bake(tmpl, {"OWNER_SENDING_ACCOUNTS": "a@b.edu,c@d.org"}),
+            "Other accounts: `a@b.edu,c@d.org`.",
+        )
+
     def test_whitespace_only_answer_counts_as_blank(self):
         self.assertEqual(bake("{{?X}}keep{{/X}}", {"X": "   "}), "")
         self.assertEqual(bake("{{^X}}keep{{/X}}", {"X": "   "}), "keep")
@@ -96,6 +104,14 @@ class TestParseStreams(unittest.TestCase):
         # a provided value is taken literally; unknown names drop to empty
         self.assertEqual(parse_streams("notion,linear"), [])
 
+class TestParseAccountList(unittest.TestCase):
+    def test_comma_string_dedupes(self):
+        self.assertEqual(parse_account_list("a@b.com, c@d.org, a@b.com"), ["a@b.com", "c@d.org"])
+
+    def test_blank_means_empty(self):
+        self.assertEqual(parse_account_list(""), [])
+        self.assertEqual(parse_account_list(None), [])
+
 class TestGitMode(unittest.TestCase):
     def test_defaults_and_valid(self):
         self.assertEqual(normalize_git_mode(None), "local")
@@ -108,12 +124,23 @@ class TestGitMode(unittest.TestCase):
 
 class TestSourcesConfigYaml(unittest.TestCase):
     def test_enabled_flags_reflect_streams(self):
-        out = sources_config_yaml(["email", "slack"], "local", "2026-06-04")
+        out = sources_config_yaml(
+            ["email", "slack"],
+            "local",
+            "2026-06-04",
+            connected_email="jane@example.com",
+            forwarding_email="",
+            other_sending_accounts="jane@lab.example.edu,jane@hospital.example.org",
+        )
         self.assertIn("email: { enabled: true, mcp: claude_ai_Gmail }", out)
         self.assertIn("slack: { enabled: true, mcp: claude_ai_Slack }", out)
         self.assertIn("calendar: { enabled: false,", out)
         self.assertIn("git_mode: local", out)
         self.assertIn("updated: 2026-06-04", out)
+        self.assertIn('gmail_connected: "jane@example.com"', out)
+        self.assertIn('forwarding_in: ""', out)
+        self.assertIn('other_sending_accounts: ["jane@lab.example.edu", "jane@hospital.example.org"]', out)
+        self.assertIn("Treat missing sent-mail evidence for them as inconclusive", out)
 
     def test_calendar_carries_minimal_mode_when_enabled(self):
         out = sources_config_yaml(["calendar"], "remote", "2026-06-04")

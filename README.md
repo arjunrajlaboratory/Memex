@@ -93,15 +93,17 @@ tests/test_init.sh                                        # full init integratio
 
 ### Optional-token prose (conditional sections)
 
-Some tokens are optional — `OWNER_FORWARDING_EMAIL` may be blank. For those, don't just drop the
-token: drop the *prose* around it, or a blank answer bakes broken text (empty `` `` `` pairs, dangling
-clauses). `bake()` understands two Mustache-style sections, resolved before plain token substitution:
+Some tokens are optional — `OWNER_FORWARDING_EMAIL` and `OWNER_SENDING_ACCOUNTS` may be blank.
+For those, don't just drop the token: drop the *prose* around it, or a blank answer bakes broken
+text (empty `` `` `` pairs, dangling clauses). `bake()` understands two Mustache-style sections,
+resolved before plain token substitution:
 
 - `{{?TOKEN}}…{{/TOKEN}}` — keep the span only when `TOKEN` is **non-blank**
 - `{{^TOKEN}}…{{/TOKEN}}` — keep the span only when `TOKEN` is **blank**
 
 ```markdown
 `{{OWNER_PRIMARY_EMAIL}}` is primary{{?OWNER_FORWARDING_EMAIL}}; `{{OWNER_FORWARDING_EMAIL}}` forwards in{{/OWNER_FORWARDING_EMAIL}}.
+{{?OWNER_SENDING_ACCOUNTS}}Other sending accounts: `{{OWNER_SENDING_ACCOUNTS}}`.{{/OWNER_SENDING_ACCOUNTS}}
 ```
 
 Sections whose token is absent from the answers pass through intact (same rule as unknown tokens, so

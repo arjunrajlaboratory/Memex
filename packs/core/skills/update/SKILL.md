@@ -49,11 +49,13 @@ If prepare exits with `error: the newer engine added token(s) with no value: …
 
 ## Step 2 - Resolve pending plan entries
 
-For each entry whose `disposition` is one of `edited`, `removed-upstream-edited`, `rename-candidate`, `rename-collision`, or `collision`, use the artifact paths in the plan:
+For each entry whose `disposition` is one of `edited`, `deleted-local`, `removed-upstream-edited`, `rename-candidate`, `rename-collision`, or `collision`, use the artifact paths in the plan:
 
 - `baseline_path`: the old baked engine ancestor
 - `current_path`: the user's current vault file
 - `staged_path`: the new baked engine file
+
+For `deleted-local`, `current_path` is absent because the user deleted a file the engine still ships. Ask whether to re-add the engine file or keep the deletion as a local divergence.
 
 If git mode is `none`, copy the real current vault file to `<path>.bak` before changing any unresolved edited/collision file. Do not create bulk backups for safe replacements; those are recoverable from `.memex/baseline/`.
 
@@ -89,6 +91,17 @@ Ask whether to:
 
 Never delete an edited file without explicit confirmation.
 
+If the user chooses archive or any other move-aside path, add that path to the plan entry before finalize, e.g. `"extra_paths": ["_archive/<original-path>"]` (or the more specific `"archive_path"` / `"aside_path"` field). Finalize only stages dirty paths named by the plan.
+
+### Deleted locally, still shipped
+
+Ask whether to:
+
+- re-add the new engine version, or
+- keep the deletion as a local divergence.
+
+If the user keeps the deletion, mark the entry resolved and leave the real vault path absent. If they re-add it, copy `staged_path` to the real vault path, then mark resolved.
+
 ### Rename candidates
 
 Ask the user to confirm the rename. If the old file was edited, carry the local edit onto the renamed `staged_path` using the prose/code rules above. When confirmed, create the new path and archive or remove the old path according to the user's choice.
@@ -104,6 +117,8 @@ An engine file now wants a path the user already created. Ask whether to keep th
 ## Step 3 - Finalize
 
 Before finalizing, update the plan JSON so every handled pending entry has `"resolved": true` plus a short `"resolution"` string (`"merged"`, `"kept-local"`, `"took-engine"`, `"archived-old"`, etc.). The deterministic finalizer refuses pending unresolved entries.
+
+If a resolution created or removed any auxiliary path outside `path` / `new_path` (archive files, move-aside files, sidecar backups that should be committed), record it on that entry as `"extra_paths": ["..."]`, `"archive_path": "..."`, or `"aside_path": "..."` before finalizing.
 
 After all pending entries are resolved, run:
 

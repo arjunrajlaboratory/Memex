@@ -44,7 +44,7 @@ If today's briefing already has a `## Shutdown notes` section appended (from `sh
 
 This is the default multi-source pass that keeps vault state from lagging reality. It runs **before** synthesis so §0 and the task list reflect what actually happened off-vault (you answered an email, posted in Slack, a meeting ended).
 
-1. **Read `_config/sources.md`.** Determine which streams are `enabled: true`. If the file is absent (older vault), default to **email + slack enabled, calendar planning-only**. If no streams are enabled, skip to Step 2 — the §0 stale-state queries remain as the fallback safety net.
+1. **Read `_config/sources.md`.** Determine which streams are `enabled: true`. Also read `mailboxes.*` if present: `mailboxes.gmail_connected` is the only mailbox the Gmail MCP searches; `mailboxes.forwarding_in` may cover received mail only; `mailboxes.other_sending_accounts` are outbound identities whose sent mail is invisible unless separately connected. If the file is absent (older vault), default to **email + slack enabled, calendar planning-only**. If no streams are enabled, skip to Step 2 — the §0 stale-state queries remain as the fallback safety net.
 
 2. **Backfill guard.** If `<date>` is more than ~2 days in the past (a backfilled briefing), **skip the comms refresh** — a comms scan only makes sense near today — and note `(comms refresh skipped — backfilled briefing for a past date)` in §0. Generate from vault state alone.
 
@@ -53,6 +53,8 @@ This is the default multi-source pass that keeps vault state from lagging realit
 4. **Run [[reconcile-from-comms]]** for `<date>` in its **briefing sub-mode** (see that skill's "When invoked by daily-briefing"): it auto-applies Tier-A reversible bookkeeping (bump `last_contact`, mark Followups `acted_on`) and **returns the Tier-B proposals** — task closes, Letter→submitted, and (if the `calendar` stream is enabled) passed-event closes — **without prompting**. Hold those proposals for §0 and the batched report-back (Step 6).
 
 Tasks that Tier-A already advanced will read correctly through the rest of the briefing. Tier-B proposals are **not** applied here — the user confirms them in one batch in Step 6, preserving the "agents never self-close" guardrail.
+
+If the contact/send status depends on mail that may have been sent from a non-connected account, the comms pass can only return an **inconclusive** prompt ("couldn't confirm from connected Gmail; did this go from <account>?"). Never convert an empty connected-mailbox `in:sent` result into "not sent" / "awaiting send" when the relevant thread may live in `mailboxes.other_sending_accounts` or the forwarding-in account's own sent folder.
 
 ## Step 2 — Gather inputs (in parallel)
 
@@ -79,6 +81,8 @@ Also pull yesterday's briefing's "## Shutdown notes" section if present — it c
 - **(b) The four vault pre-flight queries below** — the safety net for state changes that *no* comm covered (e.g. a scheduled block that simply passed with no email/Slack about it).
 
 When (a) and (b) point at the same note, keep the reconcile proposal (it carries the signal) and drop the duplicate. If Step 1b was skipped (no streams enabled, or the backfill guard fired), § 0 is just (b).
+
+For outbound-contact tasks (reply/send/email/follow-up tasks), do **not** infer "awaiting send" from stale note state alone when email is enabled. Step 1b's live comms capture (or a same-day `Inbox/comms/<date>/` digest) is the prerequisite. If the connected Gmail search missed the send but the task/person uses a non-connected sending account, render the item as "couldn't confirm from connected Gmail — may have gone from <account>" and ask the user, rather than asserting it remains open.
 
 Four pre-flight queries (run in parallel):
 

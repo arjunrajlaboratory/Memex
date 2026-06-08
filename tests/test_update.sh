@@ -98,13 +98,14 @@ if "$NEXT/bin/memex-update" finalize --vault "$VAULT" --plan "$PLAN" >/dev/null 
   fail "finalize should refuse a pending unresolved plan"
 fi
 
-python3 - "$PLAN" <<'PY'
+python3 - "$PLAN" "$NEXT/tools" <<'PY'
 import json, pathlib, sys
+sys.path.insert(0, sys.argv[2])
+from memex_update import UNRESOLVED_DISPOSITIONS
 path = pathlib.Path(sys.argv[1])
 plan = json.loads(path.read_text())
-pending = {"edited", "removed-upstream-edited", "rename-candidate", "rename-collision", "collision"}
 for entry in plan["entries"]:
-    if entry.get("disposition") in pending:
+    if entry.get("disposition") in UNRESOLVED_DISPOSITIONS:
         entry["resolved"] = True
         entry["resolution"] = "test-resolved"
 path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n")
@@ -151,6 +152,9 @@ PY
 if "$NEXT/bin/memex-update" finalize --vault "$DRYVAULT" --plan "$DRY_PLAN" >/dev/null 2>&1; then
   fail "finalize should refuse a dry-run plan"
 fi
+printf '\ndirty preview marker\n' >> "$DRYVAULT/index.md"
+"$NEXT/bin/memex-update" --vault "$DRYVAULT" --non-interactive --dry-run >/dev/null || fail "dry-run should allow a dirty git worktree"
+[ "$(git -C "$DRYVAULT" branch --show-current)" = "$DRY_BRANCH" ] || fail "dirty dry-run should not switch branches"
 
 # ---------- a new non-port token with no value must refuse before mutating ----------
 FAILVAULT="$TMP/fail-vault"
@@ -165,6 +169,24 @@ fi
 [ -z "$(git -C "$FAILVAULT" branch --list engine-update-0.2.0)" ] || fail "refused update must not create a branch"
 [ -z "$(git -C "$FAILVAULT" status --porcelain)" ] || fail "refused update must not touch the worktree"
 [ ! -e "$FAILVAULT/.claude/skills/update-test-new/SKILL.md" ] || fail "refused update must not add files"
+
+# ---------- stale update branch must not be reused from a different base ----------
+STALEVAULT="$TMP/stale-branch-vault"
+"$ENG/bin/memex-init" --target "$STALEVAULT" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
+git -C "$STALEVAULT" config user.email test@example.com
+git -C "$STALEVAULT" config user.name "Memex Test"
+git -C "$STALEVAULT" add .
+git -C "$STALEVAULT" commit -m "init" >/dev/null
+STALE_BASE="$(git -C "$STALEVAULT" branch --show-current)"
+git -C "$STALEVAULT" switch -c engine-update-0.2.0 >/dev/null
+git -C "$STALEVAULT" switch "$STALE_BASE" >/dev/null
+STALE_OUT="$TMP/stale-branch-update.out"
+if "$NEXT/bin/memex-update" --vault "$STALEVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >"$STALE_OUT" 2>&1; then
+  fail "update should refuse an existing stale update branch"
+fi
+grep -q "already exists" "$STALE_OUT" || fail "stale branch refusal should explain existing update branch"
+[ "$(git -C "$STALEVAULT" branch --show-current)" = "$STALE_BASE" ] || fail "stale branch refusal should not switch branches"
+[ ! -e "$STALEVAULT/.claude/skills/update-test-new/SKILL.md" ] || fail "stale branch refusal must not apply update files"
 
 # ---------- no-conflict update auto-commits (prepare commit path; covers C1) ----------
 CLEANVAULT="$TMP/clean-vault"
@@ -207,6 +229,8 @@ git -C "$RENAMEVAULT" config user.email test@example.com
 git -C "$RENAMEVAULT" config user.name "Memex Test"
 git -C "$RENAMEVAULT" add .
 git -C "$RENAMEVAULT" commit -m "init" >/dev/null
+mkdir -p "$RENAMEVAULT/_archive/.claude/skills/email"
+cp "$RENAMEVAULT/.claude/skills/email/SKILL.md" "$RENAMEVAULT/_archive/.claude/skills/email/SKILL.md"
 cat > "$TMP/rejected-rename-plan.json" <<EOF
 {
   "answers": {
@@ -214,6 +238,7 @@ cat > "$TMP/rejected-rename-plan.json" <<EOF
     "OWNER_NAME": "Jane Roe",
     "OWNER_PRIMARY_EMAIL": "jane@example.com",
     "OWNER_FORWARDING_EMAIL": "",
+    "OWNER_SENDING_ACCOUNTS": "",
     "FRAMING": "Example framing",
     "VAULT_PATH": "$RENAMEVAULT",
     "USER_HOME": "$TMP",
@@ -230,7 +255,8 @@ cat > "$TMP/rejected-rename-plan.json" <<EOF
       "path": ".claude/skills/email/SKILL.md",
       "new_path": ".claude/skills/rejected-rename/SKILL.md",
       "resolved": true,
-      "resolution": "kept-old-path"
+      "resolution": "kept-old-path",
+      "extra_paths": ["_archive/.claude/skills/email/SKILL.md"]
     }
   ],
   "packs": ["core"],
@@ -239,6 +265,7 @@ cat > "$TMP/rejected-rename-plan.json" <<EOF
 EOF
 "$NEXT/bin/memex-update" finalize --vault "$RENAMEVAULT" --plan "$TMP/rejected-rename-plan.json" >/dev/null 2>&1 || fail "finalize should tolerate absent rejected-rename destination"
 [ ! -e "$RENAMEVAULT/.claude/skills/rejected-rename/SKILL.md" ] || fail "finalize should not create rejected rename destination"
+[ -e "$RENAMEVAULT/_archive/.claude/skills/email/SKILL.md" ] || fail "finalize should preserve declared archive path"
 
 # ---------- abort returns to the pre-update branch ----------
 ABORTVAULT="$TMP/abort-vault"
@@ -261,5 +288,14 @@ ABORT_PLAN="$(ls "$ABORTVAULT"/.memex/update-work/0.2.0-*/plan.json)"
 [ ! -e "$ABORTVAULT/.claude/skills/update-test-new/SKILL.md" ] || fail "abort did not remove an added file"
 [ -e "$ABORTVAULT/.claude/skills/observe-task-actuals/SKILL.md" ] || fail "abort did not restore a pruned file"
 [ -z "$(git -C "$ABORTVAULT" status --porcelain)" ] || fail "abort left the worktree dirty"
+
+# ---------- git-off pending update blocks a second prepare ----------
+PENDINGVAULT="$TMP/pending-nogit-vault"
+"$ENG/bin/memex-init" --target "$PENDINGVAULT" --packs core --answers "$ENG/tests/fixtures/answers.nogit.json" >/dev/null
+printf '\nlocal edit to force a pending plan\n' >> "$PENDINGVAULT/.claude/skills/email/SKILL.md"
+"$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null
+if "$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null 2>&1; then
+  fail "second prepare should refuse while a git-off update is pending"
+fi
 
 echo "PASS: memex-update safe ops + pending plan + finalize + refuse + no-conflict + abort"

@@ -190,18 +190,58 @@ def normalize_git_mode(raw: Any) -> str:
     return m if m in VALID_GIT_MODES else "local"
 
 
-def sources_config_yaml(streams: list[str], git_mode: str, today: str) -> str:
+def parse_account_list(raw: Any) -> list[str]:
+    """Normalize a comma/list answer into ordered, de-duplicated account strings."""
+    if raw is None:
+        return []
+    items = raw.split(",") if isinstance(raw, str) else list(raw)
+    seen, out = set(), []
+    for item in (str(x).strip() for x in items):
+        if item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _inline_or_none(value: str) -> str:
+    return f"`{value}`" if value else "none listed"
+
+
+def _yaml_string(value: str) -> str:
+    return json.dumps(value)
+
+
+def _yaml_list(values: list[str]) -> str:
+    return "[" + ", ".join(json.dumps(v) for v in values) + "]"
+
+
+def sources_config_yaml(
+    streams: list[str],
+    git_mode: str,
+    today: str,
+    *,
+    connected_email: str = "",
+    forwarding_email: str = "",
+    other_sending_accounts: Any = None,
+) -> str:
     def line(name: str) -> str:
         en = "true" if name in streams else "false"
         extra = ", mode: minimal" if name == "calendar" else ""
         return f"  {name}: {{ enabled: {en}, mcp: {STREAM_MCP[name]}{extra} }}"
 
+    connected = str(connected_email or "").strip()
+    forwarding = str(forwarding_email or "").strip()
+    other_senders = parse_account_list(other_sending_accounts)
     rows = "\n".join(line(s) for s in VALID_STREAMS)
     return f"""---
 type: config
 scope: sources
 git_mode: {git_mode}
 updated: {today}
+mailboxes:
+  gmail_connected: {_yaml_string(connected)}
+  forwarding_in: {_yaml_string(forwarding)}
+  other_sending_accounts: {_yaml_list(other_senders)}
 streams:
 {rows}
 ---
@@ -216,6 +256,17 @@ Which streams the daily loop-closing flow checks. `capture-comms` +
   messages are the strongest loop-*closing* signals.
 - **calendar** (`mode: minimal`) - a Task linked to a calendar event whose end-time
   has passed becomes a "confirm close?" item; no attendee / `last_contact` bumping.
+
+## Email visibility
+
+- **Connected Gmail mailbox:** {_inline_or_none(connected)} - this is the only mailbox
+  the Gmail MCP searches.
+- **Forwarding-in address:** {_inline_or_none(forwarding)} - received mail may arrive
+  in the connected mailbox, but sent mail from this address is invisible unless it was
+  also sent through the connected mailbox.
+- **Other sending accounts:** {_inline_or_none(", ".join(other_senders))} - sent mail
+  from these accounts is invisible to `in:sent` unless those mailboxes are separately
+  connected. Treat missing sent-mail evidence for them as inconclusive, not "not sent."
 
 If this file is absent, skills fall back to: email + slack enabled, calendar
 planning-only.
@@ -273,6 +324,9 @@ def classify_path(path: str, layout: dict[str, Any]) -> tuple[str | None, str | 
     for pattern in layout.get("seed", []):
         if _matches(path, pattern):
             return "seed", "prose" if pathlib.PurePosixPath(path).suffix == ".md" else "code"
+    for pattern in layout.get("hybrid", []):
+        if _matches(path, pattern):
+            return "hybrid", "code"
     for kind, patterns in layout.get("framework", {}).items():
         for pattern in patterns:
             if _matches(path, pattern):
@@ -322,7 +376,14 @@ def _write_seed_files(target: pathlib.Path, answers: dict[str, Any], streams: li
         "Home page for this vault. Browse the typed-note dashboards at "
         "`/dashboards/`, or read `AGENTS.md` for how agents operate here.\n"
     )
-    seeds["_config/sources.md"] = sources_config_yaml(streams, git_mode, today)
+    seeds["_config/sources.md"] = sources_config_yaml(
+        streams,
+        git_mode,
+        today,
+        connected_email=answers.get("OWNER_PRIMARY_EMAIL", ""),
+        forwarding_email=answers.get("OWNER_FORWARDING_EMAIL", ""),
+        other_sending_accounts=answers.get("OWNER_SENDING_ACCOUNTS", ""),
+    )
     seeds["_config/overrides.md"] = (
         "---\n"
         "type: config\n"
@@ -478,7 +539,7 @@ def write_manifest_and_baseline(
         shutil.rmtree(baseline)
     baseline.mkdir(parents=True, exist_ok=True)
     for rel, meta in files.items():
-        if meta["class"] != "framework":
+        if meta["class"] not in {"framework", "hybrid"}:
             continue
         src = staged_dir / rel
         if src.exists():

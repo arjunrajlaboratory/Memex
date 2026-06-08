@@ -2,6 +2,7 @@
   "OWNER_NAME": "Jane Roe",
   "OWNER_PRIMARY_EMAIL": "jane@example.com",
   "OWNER_FORWARDING_EMAIL": "",
+  "OWNER_SENDING_ACCOUNTS": "jane@clinic.example.org",
   "FRAMING": "CSO at Example Bio",
   "VAULT_PATH": "/tmp/example-vault",
   "USER_HOME": "/Users/jane",

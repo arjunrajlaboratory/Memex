@@ -32,6 +32,11 @@ pre-flight — it relied on the user remembering; this reads the captured signal
   bookkeeping) — do not hand-edit `status: done`.
 - **Read-only on comms.** Never send / draft / react-to / schedule email or Slack. You may re-read
   a thread (via the phase-1-loaded MCP tools) to confirm a match, but you never write to Gmail/Slack.
+- **Mailbox access gaps are not negative evidence.** The Gmail MCP searches only the connected
+  mailbox recorded in `_config/sources.md` (`mailboxes.gmail_connected`). Sent mail from
+  `mailboxes.forwarding_in` or `mailboxes.other_sending_accounts` is invisible unless those
+  mailboxes are separately connected. If a proposal depends on "no sent email found" for one of
+  those accounts, mark it inconclusive and ask the user; never assert "not sent" / "awaiting send."
 - **Honor sensitivity.** Anything the phase-1 file flagged `[sensitive — summarized]` (e.g. a career
   decision) is **always** propose-only and never auto-applied; do not expand the summary or quote it.
   Never lower a note's sensitivity.
@@ -90,7 +95,10 @@ job, and the mark is the idempotency key. For each reconciled item:
    (`ls Atlas/... Ops/Tasks/...` or grep). If it says `(no obvious target)`, this is a *create*
    proposal (Tier B), not an update. If the link is wrong, search by person-name + subject keyword
    (the way `observe-task-actuals` triangulates) before giving up. Re-read the comm thread via the
-   MCP tools only if you need to confirm the action truly happened.
+   MCP tools only if you need to confirm the action truly happened. When re-reading email, first
+   check `_config/sources.md` for mailbox visibility. A miss in connected Gmail is only a query miss
+   for threads expected there; for non-connected sending accounts it is an access gap and should
+   become a Tier-B "couldn't confirm; did this go from <account>?" question.
 
 4. **Classify into Tier A or Tier B** per the table. Demote on low confidence / sensitivity / no match.
 

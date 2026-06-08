@@ -27,6 +27,7 @@ from memex_bake import (
     bake,
     bake_engine,
     normalize_git_mode,
+    parse_account_list,
     parse_streams,
     read_json,
     sources_config_yaml,
@@ -38,6 +39,7 @@ from memex_bake import (
 __all__ = [
     "bake",
     "strip_sections",
+    "parse_account_list",
     "parse_streams",
     "normalize_git_mode",
     "sources_config_yaml",
