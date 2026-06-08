@@ -265,9 +265,11 @@ def ensure_update_branch(vault_dir: pathlib.Path, version: str) -> str:
         return branch
     exists = run_git(vault_dir, ["rev-parse", "--verify", branch], check=False)
     if exists.returncode == 0:
-        run_git(vault_dir, ["switch", branch])
-    else:
-        run_git(vault_dir, ["switch", "-c", branch])
+        raise RuntimeError(
+            f"update branch {branch} already exists; switch to it to continue that update "
+            "or delete it before preparing from this branch"
+        )
+    run_git(vault_dir, ["switch", "-c", branch])
     return branch
 
 
@@ -366,7 +368,7 @@ def fill_new_answers(
                 updated[token] = value
             elif token in PORT_TOKENS:
                 updated[token] = default
-            elif allow_blank_tokens:
+            elif placeholder_allows_blank(placeholder) or allow_blank_tokens:
                 updated[token] = ""
             else:
                 raise RuntimeError(
@@ -376,6 +378,22 @@ def fill_new_answers(
         else:
             updated[token] = placeholder.get("example", "") if token in PORT_TOKENS else ""
     return answers_with_defaults(placeholder_manifest, updated), added
+
+
+def placeholder_allows_blank(placeholder: dict[str, Any]) -> bool:
+    if placeholder.get("optional") is True or placeholder.get("allow_blank") is True:
+        return True
+    prompt = str(placeholder.get("prompt", "")).lower()
+    return "or blank" in prompt
+
+
+def missing_required_tokens(placeholder_manifest: dict[str, Any], added_tokens: list[str]) -> list[str]:
+    placeholders = {placeholder["token"]: placeholder for placeholder in placeholder_manifest["placeholders"]}
+    return [
+        token
+        for token in added_tokens
+        if token not in PORT_TOKENS and not placeholder_allows_blank(placeholders.get(token, {}))
+    ]
 
 
 def detect_renames(
@@ -728,7 +746,7 @@ def prepare_update(args: argparse.Namespace) -> int:
         # blank into framework files. Refuse fast (before mutating anything) so the
         # caller can re-run with --set TOKEN=VALUE. Ports carry a safe example
         # default; --dry-run still previews; --allow-blank-tokens opts into blanks.
-        missing_tokens = [t for t in added_tokens if t not in PORT_TOKENS]
+        missing_tokens = missing_required_tokens(placeholder_manifest, added_tokens)
         if missing_tokens and args.non_interactive and not args.allow_blank_tokens and not args.dry_run:
             print(
                 "error: the newer engine added token(s) with no value: "

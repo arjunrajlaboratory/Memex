@@ -4,7 +4,14 @@ import unittest
 from unittest import mock
 
 from memex_bake import BakeResult, sha256_file
-from memex_update import Disposition, classify_update, fill_new_answers, plan_update_paths, unresolved_plan_entries
+from memex_update import (
+    Disposition,
+    classify_update,
+    fill_new_answers,
+    missing_required_tokens,
+    plan_update_paths,
+    unresolved_plan_entries,
+)
 
 
 LAYOUT = {
@@ -216,7 +223,18 @@ class TestNewTokenDetection(unittest.TestCase):
         self.assertEqual(answers["QUARTZ_PORT"], "8181")
         self.assertEqual(answers["NEW_OPTIONAL"], "")
 
-    def test_interactive_blank_new_non_port_token_refuses(self):
+    def test_interactive_blank_new_optional_token_is_allowed(self):
+        placeholders = {
+            "placeholders": [
+                {"token": "OWNER_SENDING_ACCOUNTS", "prompt": "Other sending accounts (or blank)", "example": "a@b.com"},
+            ]
+        }
+        with mock.patch("builtins.input", return_value=""):
+            answers, added = fill_new_answers(placeholders, {}, interactive=True)
+        self.assertEqual(added, ["OWNER_SENDING_ACCOUNTS"])
+        self.assertEqual(answers["OWNER_SENDING_ACCOUNTS"], "")
+
+    def test_interactive_blank_new_required_non_port_token_refuses(self):
         placeholders = {
             "placeholders": [
                 {"token": "NEW_REQUIRED", "prompt": "Required", "example": "example"},
@@ -225,6 +243,19 @@ class TestNewTokenDetection(unittest.TestCase):
         with mock.patch("builtins.input", return_value=""):
             with self.assertRaisesRegex(RuntimeError, "NEW_REQUIRED"):
                 fill_new_answers(placeholders, {}, interactive=True)
+
+    def test_missing_required_tokens_skips_optional_blanks(self):
+        placeholders = {
+            "placeholders": [
+                {"token": "OWNER_SENDING_ACCOUNTS", "prompt": "Other sending accounts (or blank)", "example": "a@b.com"},
+                {"token": "NEW_REQUIRED", "prompt": "Required", "example": "example"},
+                {"token": "QUARTZ_PORT", "prompt": "Port", "example": "8181"},
+            ]
+        }
+        self.assertEqual(
+            missing_required_tokens(placeholders, ["OWNER_SENDING_ACCOUNTS", "NEW_REQUIRED", "QUARTZ_PORT"]),
+            ["NEW_REQUIRED"],
+        )
 
 
 class TestPlanResolution(unittest.TestCase):

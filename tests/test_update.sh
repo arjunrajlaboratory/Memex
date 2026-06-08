@@ -170,6 +170,24 @@ fi
 [ -z "$(git -C "$FAILVAULT" status --porcelain)" ] || fail "refused update must not touch the worktree"
 [ ! -e "$FAILVAULT/.claude/skills/update-test-new/SKILL.md" ] || fail "refused update must not add files"
 
+# ---------- stale update branch must not be reused from a different base ----------
+STALEVAULT="$TMP/stale-branch-vault"
+"$ENG/bin/memex-init" --target "$STALEVAULT" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
+git -C "$STALEVAULT" config user.email test@example.com
+git -C "$STALEVAULT" config user.name "Memex Test"
+git -C "$STALEVAULT" add .
+git -C "$STALEVAULT" commit -m "init" >/dev/null
+STALE_BASE="$(git -C "$STALEVAULT" branch --show-current)"
+git -C "$STALEVAULT" switch -c engine-update-0.2.0 >/dev/null
+git -C "$STALEVAULT" switch "$STALE_BASE" >/dev/null
+STALE_OUT="$TMP/stale-branch-update.out"
+if "$NEXT/bin/memex-update" --vault "$STALEVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >"$STALE_OUT" 2>&1; then
+  fail "update should refuse an existing stale update branch"
+fi
+grep -q "already exists" "$STALE_OUT" || fail "stale branch refusal should explain existing update branch"
+[ "$(git -C "$STALEVAULT" branch --show-current)" = "$STALE_BASE" ] || fail "stale branch refusal should not switch branches"
+[ ! -e "$STALEVAULT/.claude/skills/update-test-new/SKILL.md" ] || fail "stale branch refusal must not apply update files"
+
 # ---------- no-conflict update auto-commits (prepare commit path; covers C1) ----------
 CLEANVAULT="$TMP/clean-vault"
 "$ENG/bin/memex-init" --target "$CLEANVAULT" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
