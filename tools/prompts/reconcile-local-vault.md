@@ -26,7 +26,7 @@ Procedure:
 1. Create a temporary baked engine tree:
 
    ```bash
-   python3 <ENGINE_DIR>/tools/memex_init.py --eng <ENGINE_DIR> --target /tmp/memex-reconcile-baked --packs <PACKS> --answers <ANSWERS_JSON>
+   python3 <ENGINE_DIR>/tools/memex_init.py --eng <ENGINE_DIR> --target /tmp/memex-reconcile-baked --packs <PACKS> --answers <ANSWERS_JSON> --force
    ```
 
    This produces literal-for-literal framework files using the maintainer's real answers.
@@ -41,10 +41,10 @@ Procedure:
 3. After reconciliation, stamp the local vault as a first-class installed vault:
 
    ```bash
-   python3 <ENGINE_DIR>/tools/memex_update.py finalize --eng <ENGINE_DIR> --vault <VAULT_DIR> --plan <PLAN_JSON>
+   python3 <ENGINE_DIR>/tools/memex_update.py finalize --eng <ENGINE_DIR> --vault <VAULT_DIR> --plan <PLAN_JSON> --no-git-commit
    ```
 
-   If no normal update plan exists yet, create a minimal temporary plan JSON containing:
+   Use `--no-git-commit` because step 2 may have intentionally adopted framework changes before the vault has an update plan; the single reconciliation commit happens in step 4. If no normal update plan exists yet, create a minimal temporary plan JSON containing:
 
    ```json
    {

@@ -133,8 +133,15 @@ received. Received comms more often *open* loops (someone asks you for something
    - **Sent: `in:sent newer_than:<window>`** — the loop-closing gold. What did *I* send today?
    - For any thread that looks loop-relevant, `get_thread` with `messageFormat: FULL_CONTENT` to
      read the actual chain before classifying (snippets hide the substance).
-   - Mailbox note: `{{OWNER_PRIMARY_EMAIL}}` is primary{{?OWNER_FORWARDING_EMAIL}}; `{{OWNER_FORWARDING_EMAIL}}` forwards in{{/OWNER_FORWARDING_EMAIL}}.
-     A miss is usually a query miss, not an access gap (memory `feedback_gmail_search_technique`).
+   - Mailbox visibility: the Gmail MCP searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}.
+     `{{OWNER_FORWARDING_EMAIL}}` forwards received mail into it, but sent mail from that address
+     is invisible unless it was also sent through the connected mailbox{{/OWNER_FORWARDING_EMAIL}}{{?OWNER_SENDING_ACCOUNTS}}.
+     Other sending accounts the user may use: `{{OWNER_SENDING_ACCOUNTS}}`; `in:sent` cannot see
+     mail sent from those accounts unless their mailboxes are separately connected{{/OWNER_SENDING_ACCOUNTS}}.
+     For threads expected in the connected mailbox, a miss is usually a query miss (memory
+     `feedback_gmail_search_technique`). For sends from non-connected accounts, an empty `in:sent`
+     result is an access gap and must be labeled **couldn't confirm**, not "not sent" or
+     "awaiting send."
 
 4. **Scan Slack — both directions, including what I sent** (only if `slack` is enabled per Step 0).
    - Resolve the user's own Slack identity first (`slack_read_user_profile` /

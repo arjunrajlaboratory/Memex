@@ -14,10 +14,12 @@
       ".claude/hooks/**",
       ".claude/settings.json",
       "scripts/**",
-      "CV/**",
-      ".gitignore"
+      "CV/**"
     ]
   },
+  "hybrid": [
+    ".gitignore"
+  ],
   "seed": [
     "index.md",
     "log.md",

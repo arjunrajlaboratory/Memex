@@ -40,12 +40,45 @@ from memex_bake import (
 
 
 RENAME_SIMILARITY_THRESHOLD = 0.82
+ENGINE_FILE_CLASSES = {"framework", "hybrid"}
+
+
+class Disposition:
+    UNCHANGED = "unchanged"
+    REPLACE_UNTOUCHED = "replace-untouched"
+    EDITED = "edited"
+    DELETED_LOCAL = "deleted-local"
+    NEW = "new"
+    COLLISION = "collision"
+    REMOVED_UPSTREAM = "removed-upstream"
+    REMOVED_UPSTREAM_EDITED = "removed-upstream-edited"
+    RENAME_CANDIDATE = "rename-candidate"
+    RENAME_COLLISION = "rename-collision"
+    SEED_IF_ABSENT = "seed-if-absent"
+    SEED_PRESENT = "seed-present"
+
+
 UNRESOLVED_DISPOSITIONS = {
-    "edited",
-    "removed-upstream-edited",
-    "rename-candidate",
-    "rename-collision",
-    "collision",
+    Disposition.EDITED,
+    Disposition.DELETED_LOCAL,
+    Disposition.REMOVED_UPSTREAM_EDITED,
+    Disposition.RENAME_CANDIDATE,
+    Disposition.RENAME_COLLISION,
+    Disposition.COLLISION,
+}
+SAFE_PATH_DISPOSITIONS = {
+    Disposition.REMOVED_UPSTREAM,
+    Disposition.SEED_IF_ABSENT,
+    Disposition.REPLACE_UNTOUCHED,
+    Disposition.NEW,
+}
+AUTO_APPLIED_DISPOSITIONS = {
+    Disposition.UNCHANGED,
+    Disposition.SEED_PRESENT,
+}
+ABORT_UNTRACKED_DISPOSITIONS = {
+    Disposition.NEW,
+    Disposition.SEED_IF_ABSENT,
 }
 
 
@@ -80,9 +113,10 @@ def parse_set_values(items: list[str] | None) -> dict[str, str]:
 
 
 def prune_finished_work_dirs(vault_dir: pathlib.Path) -> None:
-    """Remove past .memex/update-work/* runs that are complete (or have no plan),
+    """Remove past .memex/update-work/* runs that are complete or dry-run previews,
     so staging trees don't accumulate. Pending runs are kept (a merge may be in
-    flight); `abort` removes those explicitly."""
+    flight); `abort` removes those explicitly. Work dirs with no inline plan are
+    kept because a custom --plan may still point at their staged/version files."""
     base = vault_dir / ".memex/update-work"
     if not base.exists():
         return
@@ -96,8 +130,23 @@ def prune_finished_work_dirs(vault_dir: pathlib.Path) -> None:
                 status = read_json(plan).get("status")
             except (ValueError, OSError):
                 status = None
-        if status == "complete" or not plan.exists():
+        if status in {"complete", "dry-run"}:
             shutil.rmtree(d, ignore_errors=True)
+
+
+def pending_update_plans(vault_dir: pathlib.Path) -> list[pathlib.Path]:
+    base = vault_dir / ".memex/update-work"
+    if not base.exists():
+        return []
+    pending: list[pathlib.Path] = []
+    for plan in sorted(base.glob("*/plan.json")):
+        try:
+            status = read_json(plan).get("status")
+        except (ValueError, OSError):
+            continue
+        if status in {"pending", "commit-failed"}:
+            pending.append(plan)
+    return pending
 
 
 def strip_work_heavy(work_dir: pathlib.Path) -> None:
@@ -159,6 +208,20 @@ def run_git(vault_dir: pathlib.Path, args: list[str], *, check: bool = True) -> 
         capture_output=True,
         check=check,
     )
+
+
+def prompt_input(prompt: str) -> str:
+    try:
+        return input(prompt)
+    except EOFError as exc:
+        raise RuntimeError(
+            "interactive input is unavailable; rerun with --non-interactive, "
+            "--set TOKEN=VALUE, or --allow-blank-tokens as appropriate"
+        ) from exc
+
+
+def subprocess_error(exc: subprocess.CalledProcessError) -> str:
+    return (exc.stderr or exc.stdout or str(exc)).strip()
 
 
 def is_git_repo(vault_dir: pathlib.Path) -> bool:
@@ -287,6 +350,7 @@ def fill_new_answers(
     answers: dict[str, Any],
     *,
     interactive: bool,
+    allow_blank_tokens: bool = False,
 ) -> tuple[dict[str, Any], list[str]]:
     updated = dict(answers)
     added: list[str] = []
@@ -297,8 +361,18 @@ def fill_new_answers(
         added.append(token)
         if interactive:
             default = placeholder.get("example", "")
-            value = input(f"{placeholder['prompt']} [{default}]: ").strip()
-            updated[token] = value or (default if token in PORT_TOKENS else value)
+            value = prompt_input(f"{placeholder['prompt']} [{default}]: ").strip()
+            if value:
+                updated[token] = value
+            elif token in PORT_TOKENS:
+                updated[token] = default
+            elif allow_blank_tokens:
+                updated[token] = ""
+            else:
+                raise RuntimeError(
+                    f"new token {token} needs a value. Re-run with --set {token}=VALUE "
+                    "or --allow-blank-tokens to accept a blank."
+                )
         else:
             updated[token] = placeholder.get("example", "") if token in PORT_TOKENS else ""
     return answers_with_defaults(placeholder_manifest, updated), added
@@ -348,12 +422,12 @@ def classify_update(
     old_fw = {
         rel: meta
         for rel, meta in manifest.get("files", {}).items()
-        if meta.get("class") == "framework"
+        if meta.get("class") in ENGINE_FILE_CLASSES
     }
     new_fw = {
         rel: meta
         for rel, meta in staged_meta.items()
-        if meta.get("class") == "framework"
+        if meta.get("class") in ENGINE_FILE_CLASSES
     }
     old_paths = set(old_fw)
     new_paths = set(new_fw)
@@ -377,25 +451,25 @@ def classify_update(
     for item in rename_candidates:
         old_path, new_path = item["old_path"], item["new_path"]
         current_path = vault_dir / old_path
-        baseline_path = baseline_dir / old_path
         new_current_path = vault_dir / new_path
-        edited = current_path.exists() and baseline_path.exists() and sha256_file(current_path) != sha256_file(baseline_path)
-        disposition = "rename-collision" if new_current_path.exists() else "rename-candidate"
+        old_hash = old_fw[old_path].get("sha256")
+        edited = bool(current_path.exists() and old_hash and sha256_file(current_path) != old_hash)
+        disposition = Disposition.RENAME_COLLISION if new_current_path.exists() else Disposition.RENAME_CANDIDATE
         entry = {
             "disposition": disposition,
             "path": old_path,
             "new_path": new_path,
-            "class": "framework",
+            "class": new_fw[new_path].get("class", old_fw[old_path].get("class")),
             "kind": old_fw[old_path].get("kind"),
             "pack": old_fw[old_path].get("pack"),
             "similarity": item["similarity"],
             "edited": edited,
             "applied": False,
         }
-        entry["baseline_path"] = staged_version_path(work_dir, "baseline", old_path, baseline_path)
+        entry["baseline_path"] = staged_version_path(work_dir, "baseline", old_path, baseline_dir / old_path)
         entry["current_path"] = staged_version_path(work_dir, "current", old_path, current_path)
         entry["staged_path"] = staged_version_path(work_dir, "staged", new_path, staged_dir / new_path)
-        if disposition == "rename-collision":
+        if disposition == Disposition.RENAME_COLLISION:
             entry["collision_path"] = staged_version_path(work_dir, "collision", new_path, new_current_path)
         entries.append(entry)
         unresolved.append(entry)
@@ -405,22 +479,28 @@ def classify_update(
         baseline = baseline_dir / rel
         staged = staged_dir / rel
         meta = old_fw[rel]
-        if not current.exists() or not baseline.exists():
-            disposition = "edited"
-        elif sha256_file(current) == sha256_file(baseline):
-            disposition = "unchanged" if sha256_file(current) == sha256_file(staged) else "replace-untouched"
+        if not baseline.exists():
+            disposition = Disposition.EDITED
+        elif not current.exists():
+            disposition = Disposition.DELETED_LOCAL
         else:
-            disposition = "edited"
+            current_hash = sha256_file(current)
+            baseline_hash = meta.get("sha256") or sha256_file(baseline)
+            staged_hash = new_fw[rel].get("sha256") or sha256_file(staged)
+            if current_hash == baseline_hash:
+                disposition = Disposition.UNCHANGED if current_hash == staged_hash else Disposition.REPLACE_UNTOUCHED
+            else:
+                disposition = Disposition.EDITED
 
         entry = {
             "disposition": disposition,
             "path": rel,
-            "class": "framework",
+            "class": new_fw[rel].get("class", meta.get("class")),
             "kind": meta.get("kind"),
             "pack": meta.get("pack"),
             "applied": False,
         }
-        if disposition == "edited":
+        if disposition in {Disposition.EDITED, Disposition.DELETED_LOCAL}:
             add_version_paths(
                 entry,
                 work_dir=work_dir,
@@ -434,16 +514,16 @@ def classify_update(
 
     for rel in sorted(brand_new_paths - renamed_new):
         meta = new_fw[rel]
-        disposition = "collision" if (vault_dir / rel).exists() else "new"
+        disposition = Disposition.COLLISION if (vault_dir / rel).exists() else Disposition.NEW
         entry = {
             "disposition": disposition,
             "path": rel,
-            "class": "framework",
+            "class": meta.get("class"),
             "kind": meta.get("kind"),
             "pack": meta.get("pack"),
             "applied": False,
         }
-        if disposition == "collision":
+        if disposition == Disposition.COLLISION:
             add_version_paths(
                 entry,
                 work_dir=work_dir,
@@ -457,20 +537,20 @@ def classify_update(
 
     for rel in sorted(removed_paths - renamed_old):
         current = vault_dir / rel
-        baseline = baseline_dir / rel
         meta = old_fw[rel]
-        edited = current.exists() and baseline.exists() and sha256_file(current) != sha256_file(baseline)
-        disposition = "removed-upstream-edited" if edited else "removed-upstream"
+        old_hash = meta.get("sha256")
+        edited = bool(current.exists() and old_hash and sha256_file(current) != old_hash)
+        disposition = Disposition.REMOVED_UPSTREAM_EDITED if edited else Disposition.REMOVED_UPSTREAM
         entry = {
             "disposition": disposition,
             "path": rel,
-            "class": "framework",
+            "class": meta.get("class"),
             "kind": meta.get("kind"),
             "pack": meta.get("pack"),
             "applied": False,
         }
-        if disposition == "removed-upstream-edited":
-            entry["baseline_path"] = staged_version_path(work_dir, "baseline", rel, baseline)
+        if disposition == Disposition.REMOVED_UPSTREAM_EDITED:
+            entry["baseline_path"] = staged_version_path(work_dir, "baseline", rel, baseline_dir / rel)
             entry["current_path"] = staged_version_path(work_dir, "current", rel, current)
             entry["staged_path"] = None
             unresolved.append(entry)
@@ -479,7 +559,7 @@ def classify_update(
     for rel, meta in sorted(staged_meta.items()):
         if meta.get("class") != "seed":
             continue
-        disposition = "seed-present" if (vault_dir / rel).exists() else "seed-if-absent"
+        disposition = Disposition.SEED_PRESENT if (vault_dir / rel).exists() else Disposition.SEED_IF_ABSENT
         entries.append(
             {
                 "disposition": disposition,
@@ -511,11 +591,21 @@ def plan_update_paths(plan: dict[str, Any]) -> set[str]:
         if path and (
             entry.get("applied")
             or entry.get("resolved")
-            or disposition in {"removed-upstream", "seed-if-absent", "replace-untouched", "new"}
+            or disposition in SAFE_PATH_DISPOSITIONS
         ):
             paths.add(path)
-        if new_path and (entry.get("resolved") or disposition in {"rename-candidate", "rename-collision"}):
+        if new_path and (entry.get("resolved") or disposition in {Disposition.RENAME_CANDIDATE, Disposition.RENAME_COLLISION}):
             paths.add(new_path)
+        for key in ("archive_path", "aside_path"):
+            extra = entry.get(key)
+            if isinstance(extra, str) and extra:
+                paths.add(extra)
+        raw_extra = entry.get("extra_paths", [])
+        if isinstance(raw_extra, str):
+            raw_extra = [raw_extra]
+        for extra in raw_extra:
+            if isinstance(extra, str) and extra:
+                paths.add(extra)
     return paths
 
 
@@ -542,20 +632,20 @@ def apply_safe_operations(
     for entry in entries:
         rel = entry["path"]
         disposition = entry["disposition"]
-        if disposition == "replace-untouched":
+        if disposition == Disposition.REPLACE_UNTOUCHED:
             copy_file(staged_dir / rel, vault_dir / rel)
             entry["applied"] = True
-        elif disposition == "new":
+        elif disposition == Disposition.NEW:
             copy_file(staged_dir / rel, vault_dir / rel)
             entry["applied"] = True
-        elif disposition == "seed-if-absent":
+        elif disposition == Disposition.SEED_IF_ABSENT:
             if not (vault_dir / rel).exists():
                 copy_file(staged_dir / rel, vault_dir / rel)
                 entry["applied"] = True
-        elif disposition == "removed-upstream" and prune_removed:
+        elif disposition == Disposition.REMOVED_UPSTREAM and prune_removed:
             remove_file(vault_dir / rel)
             entry["applied"] = True
-        elif disposition in {"unchanged", "seed-present"}:
+        elif disposition in AUTO_APPLIED_DISPOSITIONS:
             entry["applied"] = True
     ensure_gitignore_entries(vault_dir)
 
@@ -625,39 +715,49 @@ def prepare_update(args: argparse.Namespace) -> int:
     placeholder_manifest = read_json(engine_dir / "placeholders.json")
     base_answers = dict(manifest.get("answers", {}))
     base_answers.update(parse_set_values(getattr(args, "set_values", [])))
-    answers, added_tokens = fill_new_answers(
-        placeholder_manifest,
-        base_answers,
-        interactive=not args.non_interactive,
-    )
-    answers["GIT_MODE"] = normalize_git_mode(answers.get("GIT_MODE"))
-
-    # New non-port tokens the engine added but we have no value for would bake
-    # blank into framework files. Refuse fast (before mutating anything) so the
-    # caller can re-run with --set TOKEN=VALUE. Ports carry a safe example
-    # default; --dry-run still previews; --allow-blank-tokens opts into blanks.
-    missing_tokens = [t for t in added_tokens if t not in PORT_TOKENS]
-    if missing_tokens and args.non_interactive and not args.allow_blank_tokens and not args.dry_run:
-        print(
-            "error: the newer engine added token(s) with no value: "
-            + ", ".join(missing_tokens)
-            + ". Re-run with --set TOKEN=VALUE for each (or --allow-blank-tokens "
-            "to accept blanks). Nothing was changed."
-        )
-        return 2
-    if added_tokens and args.non_interactive:
-        print("note: new engine token(s) seen: " + ", ".join(added_tokens))
-
-    prune_finished_work_dirs(vault_dir)
-
-    version = engine_version(engine_dir)
-    git_branch: str | None = None
-    previous_branch: str | None = None
-    git_on = answers["GIT_MODE"] != "none" and is_git_repo(vault_dir)
     try:
+        answers, added_tokens = fill_new_answers(
+            placeholder_manifest,
+            base_answers,
+            interactive=not args.non_interactive,
+            allow_blank_tokens=args.allow_blank_tokens,
+        )
+        answers["GIT_MODE"] = normalize_git_mode(answers.get("GIT_MODE"))
+
+        # New non-port tokens the engine added but we have no value for would bake
+        # blank into framework files. Refuse fast (before mutating anything) so the
+        # caller can re-run with --set TOKEN=VALUE. Ports carry a safe example
+        # default; --dry-run still previews; --allow-blank-tokens opts into blanks.
+        missing_tokens = [t for t in added_tokens if t not in PORT_TOKENS]
+        if missing_tokens and args.non_interactive and not args.allow_blank_tokens and not args.dry_run:
+            print(
+                "error: the newer engine added token(s) with no value: "
+                + ", ".join(missing_tokens)
+                + ". Re-run with --set TOKEN=VALUE for each (or --allow-blank-tokens "
+                "to accept blanks). Nothing was changed."
+            )
+            return 2
+        if added_tokens and args.non_interactive:
+            print("note: new engine token(s) seen: " + ", ".join(added_tokens))
+
+        prune_finished_work_dirs(vault_dir)
+        pending = pending_update_plans(vault_dir)
+        if pending:
+            raise RuntimeError(
+                "an update is already in progress; finalize or abort "
+                f"{pending[0]} before preparing another update"
+            )
+
+        version = engine_version(engine_dir)
+        git_branch: str | None = None
+        previous_branch: str | None = None
+        git_on = answers["GIT_MODE"] != "none" and is_git_repo(vault_dir)
         if git_on and not args.no_git_branch:
-            assert_clean_git(vault_dir)
-            previous_branch = run_git(vault_dir, ["branch", "--show-current"], check=False).stdout.strip() or None
+            current_branch = run_git(vault_dir, ["branch", "--show-current"], check=False).stdout.strip() or None
+            if not args.dry_run:
+                assert_clean_git(vault_dir)
+            update_branch = f"engine-update-{version}"
+            previous_branch = None if current_branch == update_branch else current_branch
         if git_on and not args.no_git_branch and not args.dry_run:
             git_branch = ensure_update_branch(vault_dir, version)
 
@@ -692,7 +792,7 @@ def prepare_update(args: argparse.Namespace) -> int:
 
         prune_removed = args.non_interactive or args.yes_prune
         if not prune_removed:
-            removed_count = sum(1 for entry in entries if entry["disposition"] == "removed-upstream")
+            removed_count = sum(1 for entry in entries if entry["disposition"] == Disposition.REMOVED_UPSTREAM)
             if removed_count:
                 value = input(f"Prune {removed_count} untouched files removed upstream? [y/N]: ").strip().lower()
                 prune_removed = value in {"y", "yes"}
@@ -756,6 +856,9 @@ def prepare_update(args: argparse.Namespace) -> int:
         return 0
     except RuntimeError as exc:
         print(f"error: {exc}")
+        return 1
+    except subprocess.CalledProcessError as exc:
+        print(f"error: {subprocess_error(exc)}")
         return 1
 
 
@@ -842,7 +945,7 @@ def abort_update(args: argparse.Namespace) -> int:
         return 1
     paths = plan_update_paths(plan)
     branch = plan.get("branch")
-    previous = plan.get("previous_branch") or "main"
+    previous = plan.get("previous_branch")
 
     # Revert tracked files the update modified/deleted back to their committed state.
     tracked = [
@@ -855,7 +958,7 @@ def abort_update(args: argparse.Namespace) -> int:
 
     # Remove untracked files the update added (new framework files, freshly seeded files).
     for entry in plan.get("entries", []):
-        if entry.get("applied") and entry.get("disposition") in {"new", "seed-if-absent"}:
+        if entry.get("applied") and entry.get("disposition") in ABORT_UNTRACKED_DISPOSITIONS:
             rel = entry.get("path")
             if not rel:
                 continue
@@ -865,16 +968,26 @@ def abort_update(args: argparse.Namespace) -> int:
                 target.unlink()
 
     current = run_git(vault_dir, ["branch", "--show-current"], check=False).stdout.strip()
+    returned_to = current or previous or "<unknown>"
     if branch and current == branch:
-        run_git(vault_dir, ["switch", previous], check=False)
-        unique = run_git(vault_dir, ["rev-list", f"{previous}..{branch}"], check=False).stdout.strip()
-        if not unique:
-            run_git(vault_dir, ["branch", "-D", branch], check=False)
+        if previous and previous != branch:
+            switched = run_git(vault_dir, ["switch", previous], check=False)
+            if switched.returncode == 0:
+                unique = run_git(vault_dir, ["rev-list", f"{previous}..{branch}"], check=False).stdout.strip()
+                if not unique:
+                    run_git(vault_dir, ["branch", "-D", branch], check=False)
+            else:
+                returned_to = current
+        else:
+            returned_to = current
 
     work_dir = plan.get("work_dir")
     if work_dir:
         shutil.rmtree(pathlib.Path(work_dir), ignore_errors=True)
-    print(f"abort: reverted update changes; returned to {previous}")
+    if branch and returned_to == branch:
+        print(f"abort: reverted update changes; stayed on {branch} (no previous branch recorded)")
+    else:
+        print(f"abort: reverted update changes; returned to {returned_to}")
     return 0
 
 

@@ -35,6 +35,11 @@ git mode.
 4. **Extensibility: three + config list + documented path.** Implement
    email/Slack/calendar now; store enabled streams as an editable config note, not
    hard-coded; document how to add a fourth source.
+5. **Mailbox truth model: connected mailbox plus sending accounts.** Gmail `in:sent`
+   is authoritative only for the mailbox the MCP is authenticated to. Forwarding can
+   make received mail visible, but it does not make sent mail from that forwarding
+   account visible. Non-connected sending accounts must be modeled explicitly and a
+   sent-mail miss for them is inconclusive, not evidence of "not sent."
 
 ## Architecture
 
@@ -69,6 +74,10 @@ type: config
 scope: sources
 git_mode: local            # local | none | remote (recorded for reference)
 updated: <YYYY-MM-DD>
+mailboxes:
+  gmail_connected: "{{OWNER_PRIMARY_EMAIL}}"
+  forwarding_in: "{{OWNER_FORWARDING_EMAIL}}"
+  other_sending_accounts: []       # normalized from OWNER_SENDING_ACCOUNTS comma-list
 streams:
   email:    { enabled: true,  mcp: claude_ai_Gmail }
   slack:    { enabled: true,  mcp: claude_ai_Slack }
@@ -79,6 +88,13 @@ streams:
 Body documents the "add a new source" extension path (config entry + a
 `capture-comms` scan block; reconcile needs no change since it reads the same
 `## Action items` API).
+
+The `mailboxes` block documents visibility, not authorization. `gmail_connected`
+is the only mailbox `capture-comms` can search via Gmail. `forwarding_in` can make
+received messages appear in that mailbox, but its own sent folder remains outside
+scope. `other_sending_accounts` are outbound identities the user may use; if a
+loop-closing reply might have gone from one of them, empty connected-Gmail search
+results must be reported as "couldn't confirm" rather than "awaiting send."
 
 **Backward compatibility:** if the file is absent (older vaults), skills assume
 `email + slack enabled, calendar planning-only` — nothing breaks.
@@ -94,6 +110,10 @@ Insert between the existence check (Step 1) and gather (Step 2):
 - Run `reconcile-from-comms` for `<date>` in **briefing sub-mode**: apply Tier-A
   automatically; **do not prompt mid-briefing** for Tier-B — hand the proposals up.
 - §0 becomes **reconcile Tier-B ∪ the 4 stale-state queries** (deduped).
+- For outbound-contact tasks, run the live comms pass before reporting status. Do
+  not infer "not sent" from a work-log or stale task status when email is enabled;
+  if the connected mailbox cannot see the relevant sending account, ask the user to
+  confirm instead.
 - Report-back presents §0 as the single batched confirm; confirmed closes route
   through `close-task`, then update reconcile's ledger/checkboxes.
 - **Backfill for a far-past `<date>`:** skip the comms refresh (a comms scan only

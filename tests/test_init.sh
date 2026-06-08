@@ -54,13 +54,16 @@ grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email s
 grep -q "slack: { enabled: true" "$TMP/core/_config/sources.md" || fail "slack stream not enabled by default"
 grep -q "calendar: { enabled: false" "$TMP/core/_config/sources.md" || fail "calendar should default off"
 grep -q "git_mode: local" "$TMP/core/_config/sources.md" || fail "default git_mode should be local"
+grep -q 'gmail_connected: "jane@example.com"' "$TMP/core/_config/sources.md" || fail "connected mailbox not recorded"
+grep -q 'other_sending_accounts: \[\]' "$TMP/core/_config/sources.md" || fail "blank sending accounts should bake empty list"
 [ -d "$TMP/core/.git" ] || fail "local git mode should init a repo"
 grep -q "memex-quartz" "$TMP/core/.claude/settings.json" 2>/dev/null && fail "settings.json should reference hooks not launchd" || true
 no_unbaked "$TMP/core"
 # blank OWNER_FORWARDING_EMAIL: optional-token prose must DROP, not bake empties
 no_empty_inline_code "$TMP/core/.claude/skills" || fail "empty inline-code (optional token baked blank) in core skills"
 grep -qF "forwards into it" "$TMP/core/.claude/skills/email/SKILL.md" && fail "blank-forwarding clause not dropped from email skill" || true
-grep -qF "searchable Gmail is **complete**" "$TMP/core/.claude/skills/email/SKILL.md" || fail "blank-forwarding hedge should read 'complete'"
+grep -qF "Gmail MCP searches only the connected mailbox" "$TMP/core/.claude/skills/email/SKILL.md" || fail "email skill should state connected mailbox boundary"
+grep -qF "inconclusive access-gap evidence" "$TMP/core/.claude/skills/email/SKILL.md" || fail "email skill should treat non-connected sends as inconclusive"
 grep -rq "jane@example.com" "$TMP/core/.claude/skills" || fail "owner email not baked into skills"
 [ ! -e "$TMP/core/.claude/skills/draft-letter" ] || fail "pi skill leaked into core init"
 [ -f "$TMP/core/.claude/skills/update/SKILL.md" ] || fail "update skill missing in core init"
@@ -83,8 +86,9 @@ PY
 grep -qi "draft-letter\|letter" "$TMP/pi/CLAUDE.md" || fail "pi fragment not merged into contract"
 no_unbaked "$TMP/pi"
 # set OWNER_FORWARDING_EMAIL: the optional clause + hedge bake in (the kept branch)
-grep -qF '`jane@example.edu` **forwards into it**' "$TMP/pi/.claude/skills/email/SKILL.md" || fail "forwarding clause not baked when set"
-grep -qF "searchable Gmail is **near-complete**" "$TMP/pi/.claude/skills/email/SKILL.md" || fail "set-forwarding hedge should read 'near-complete'"
+grep -qF '`jane@example.edu` forwards received mail into it' "$TMP/pi/.claude/skills/email/SKILL.md" || fail "forwarding visibility clause not baked when set"
+grep -qF 'Other sending accounts the user may use: `jane@lab.example.edu,jane@hospital.example.org`' "$TMP/pi/.claude/skills/email/SKILL.md" || fail "sending accounts clause not baked when set"
+grep -qF 'other_sending_accounts: ["jane@lab.example.edu", "jane@hospital.example.org"]' "$TMP/pi/_config/sources.md" || fail "sending accounts not normalized into sources config"
 # pi port baked distinctly
 grep -q "8182" "$TMP/pi/quartz/package.json" || fail "pi QUARTZ_PORT not baked"
 
@@ -93,6 +97,7 @@ grep -q "8182" "$TMP/pi/quartz/package.json" || fail "pi QUARTZ_PORT not baked"
 [ -f "$TMP/nogit/_config/sources.md" ] || fail "_config/sources.md missing (nogit)"
 grep -q "calendar: { enabled: true" "$TMP/nogit/_config/sources.md" || fail "calendar stream not enabled when requested"
 grep -q "git_mode: none" "$TMP/nogit/_config/sources.md" || fail "git_mode none not recorded"
+grep -q 'other_sending_accounts: \["jane@clinic.example.org"\]' "$TMP/nogit/_config/sources.md" || fail "nogit sending account not recorded"
 [ ! -d "$TMP/nogit/.git" ] || fail "git mode none should NOT init a repo"
 
 # ---------- guards ----------

@@ -9,7 +9,7 @@ You are running as **`agent:executor`** for this skill (or `agent:capture` when 
 
 ## Why this skill exists
 
-Gmail is already wired into this vault (the Gmail MCP powers `ingest-person` backfill, `draft-letter` seeding, and `daily-briefing` calendar/inbox pulls). But "how to use email" lived only *inside* those skills. The recurring failure mode was concluding "this isn't in Gmail" after a too-narrow query — a **technique** gap, not a capability gap. See memory `feedback_gmail_search_technique`. This skill is the general, reusable place for email competence so any session can search/read/capture/draft well without reinventing it.
+Gmail is already wired into this vault (the Gmail MCP powers `ingest-person` backfill, `draft-letter` seeding, and `daily-briefing` calendar/inbox pulls). But "how to use email" lived only *inside* those skills. The recurring failure modes were (a) concluding "this isn't in Gmail" after a too-narrow query — a **technique** gap, not a capability gap — and (b) treating a miss in the connected mailbox as proof when the user may have sent from another account the Gmail MCP cannot read. See memories `feedback_gmail_search_technique` and `feedback_gmail_penn_mailbox_blind_spot`. This skill is the general, reusable place for email competence so any session can search/read/capture/draft well without reinventing it.
 
 ## Hard rules (non-negotiable)
 
@@ -34,7 +34,7 @@ Order of operations:
 1. **Broad, both directions:** `(from:<name-or-addr> OR to:<name-or-addr>)` with `in:anywhere`, no date filter (or a generous one). Names work as well as address fragments.
 2. **Content keywords:** search a distinctive phrase from what you're looking for (`"universal data extraction"`, `"patient navigation"`) — catches threads where the person is only cc'd or the subject is unrelated.
 3. **Only then narrow** by date / sender / `is:unread` / `label:` once you've located the thread family.
-4. **Only conclude "not in Gmail"** after a content-keyword search across `in:anywhere` comes up empty. If it's genuinely absent, say so and ask the user to forward/paste it — don't fabricate.
+4. **Only conclude "not in the connected Gmail mailbox"** after a content-keyword search across `in:anywhere` comes up empty. If the thread could live in a non-connected sending account, call that an access gap instead of absence; ask the user to forward/paste it or confirm which account they used.
 
 ### Gmail query cheat-sheet (pass as the `query` arg; natural language must be pre-translated)
 
@@ -51,7 +51,7 @@ Order of operations:
 | Restrict to inbox | `in:inbox` |
 | Group / OR | `{from:amy from:david}` or `from:amy OR from:david` |
 
-Notes: `search_threads` returns snippets + headers only — **not full bodies**. **Mailbox completeness:** `{{OWNER_PRIMARY_EMAIL}}` is the user's primary mailbox and is what the MCP searches{{?OWNER_FORWARDING_EMAIL}}; `{{OWNER_FORWARDING_EMAIL}}` **forwards into it**{{/OWNER_FORWARDING_EMAIL}}. So the searchable Gmail is **{{?OWNER_FORWARDING_EMAIL}}near-complete{{/OWNER_FORWARDING_EMAIL}}{{^OWNER_FORWARDING_EMAIL}}complete{{/OWNER_FORWARDING_EMAIL}}** for real correspondence — if a thread isn't found, assume a **query miss, not an access gap** (search harder; don't tell the user it's "not in Gmail" until a content-keyword `in:anywhere` search is empty). See memory `feedback_gmail_search_technique`.
+Notes: `search_threads` returns snippets + headers only — **not full bodies**. **Mailbox visibility:** the Gmail MCP searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}. `{{OWNER_FORWARDING_EMAIL}}` forwards received mail into it, but sent mail from that address is invisible unless it was also sent through the connected mailbox{{/OWNER_FORWARDING_EMAIL}}{{?OWNER_SENDING_ACCOUNTS}}. Other sending accounts the user may use: `{{OWNER_SENDING_ACCOUNTS}}`; mail sent from those accounts is invisible to this Gmail MCP unless those mailboxes are separately connected{{/OWNER_SENDING_ACCOUNTS}}. For threads expected to be in the connected mailbox, assume a **query miss, not an access gap** until broad content-keyword search fails (memory `feedback_gmail_search_technique`). For mail sent from or housed in a non-connected account, an empty search is **inconclusive access-gap evidence**, not proof that the user did not send it.
 
 ## Step 2 — Read the actual thread
 

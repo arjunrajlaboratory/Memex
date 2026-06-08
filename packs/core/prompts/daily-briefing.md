@@ -31,6 +31,17 @@ copy its content.
 immediately and tell the user. Do not overwrite it unless the user explicitly
 confirms regeneration.
 
+**Default loop-closing pass:** before gathering the inputs below, read `_config/sources.md`
+for enabled streams and `mailboxes.*`. Run `capture-comms` for {{date}}, then
+`reconcile-from-comms` in daily-briefing sub-mode, unless {{date}} is more than ~2 days
+old. Tier-A reversible bookkeeping auto-applies; Tier-B proposals become `## 0. State
+confirmation needed` and are confirmed in one batch after the briefing. The Gmail MCP
+searches only `mailboxes.gmail_connected`: sent mail from `mailboxes.forwarding_in` or
+`mailboxes.other_sending_accounts` is invisible unless separately connected. For
+outbound-contact tasks, an empty connected-mailbox `in:sent` result is inconclusive,
+not proof of "not sent"; phrase those items as "couldn't confirm from connected Gmail"
+and ask the user.
+
 Gather the following inputs (read only what exists; skip gracefully if absent):
 1. Active projects — `Atlas/Projects/*.md` where `status: active`
 2. Open tasks — `Ops/Tasks/*.md` where `status` not in [done, canceled]
@@ -56,6 +67,7 @@ period_start: {{date}}
 period_end: {{date}}
 includes_calendar: true
 includes_agent_queue: true
+includes_comms: <true if the default loop-closing pass ran; false if skipped>
 open_tasks_count: <count>
 projects_reviewed: <count>
 sensitivity: private
