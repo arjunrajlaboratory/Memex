@@ -34,6 +34,7 @@ def copy_file(src, dst, pairs):
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.suffix in TEXT_EXTS:
         dst.write_text(bake_out(src.read_text(errors="ignore"), pairs))
+        shutil.copymode(src, dst)
     else:
         shutil.copy2(src, dst)  # binaries copied as-is
 
