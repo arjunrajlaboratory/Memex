@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-context.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-context.sh\""
           }
         ]
       }
@@ -17,11 +17,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/bump-updated.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/bump-updated.sh\""
           },
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/log-mutation.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/log-mutation.sh\""
           }
         ]
       }

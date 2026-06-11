@@ -39,6 +39,25 @@ PY
 [ -f "$TMP/core/_config/overrides.md" ] || fail "_config/overrides.md seed missing"
 [ -f "$TMP/core/.claude/skills/triage-inbox/SKILL.md" ] || fail "core skill missing"
 [ -f "$TMP/core/.claude/settings.json" ] || fail "settings.json (hook wiring) missing"
+[ -x "$TMP/core/.claude/hooks/bump-updated.sh" ] || fail "bump-updated hook not executable"
+[ -x "$TMP/core/.claude/hooks/log-mutation.sh" ] || fail "log-mutation hook not executable"
+[ -x "$TMP/core/.claude/hooks/session-start-context.sh" ] || fail "session-start hook not executable"
+python3 - "$TMP/core/.claude/settings.json" <<'PY' || fail "hook settings should be bash-wrapped"
+import json, pathlib, sys
+settings = json.loads(pathlib.Path(sys.argv[1]).read_text())
+commands = {
+    hook["command"]
+    for group in settings["hooks"].values()
+    for entry in group
+    for hook in entry["hooks"]
+}
+expected = {
+    'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/bump-updated.sh"',
+    'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/log-mutation.sh"',
+    'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-context.sh"',
+}
+assert expected <= commands, sorted(commands)
+PY
 [ -f "$TMP/core/.gitignore" ] || fail "vault .gitignore missing"
 [ -f "$TMP/core/.memex/manifest.json" ] || fail ".memex/manifest.json missing"
 [ -f "$TMP/core/.memex/baseline/.claude/skills/triage-inbox/SKILL.md" ] || fail "framework baseline missing"

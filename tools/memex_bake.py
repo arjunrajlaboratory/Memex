@@ -159,6 +159,7 @@ def bake_file(src: pathlib.Path, dst: pathlib.Path, answers: dict[str, Any]) -> 
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.suffix in TEXT_EXTS:
         dst.write_text(bake(src.read_text(errors="ignore"), answers))
+        shutil.copymode(src, dst)
     else:
         shutil.copy2(src, dst)
 

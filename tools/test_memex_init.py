@@ -1,4 +1,9 @@
+import os
+import pathlib
+import stat
+import tempfile
 import unittest
+from memex_bake import bake_file
 from memex_init import (
     bake, parse_account_list, parse_streams, normalize_git_mode, sources_config_yaml, DEFAULT_STREAMS,
 )
@@ -19,6 +24,21 @@ class TestBake(unittest.TestCase):
     def test_value_with_braces_not_re_expanded(self):
         # an answer value containing a token is NOT re-processed (single pass)
         self.assertEqual(bake("{{A}}", {"A": "{{B}}", "B": "z"}), "{{B}}")
+
+
+class TestBakeFile(unittest.TestCase):
+    def test_text_file_preserves_source_mode(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            src = root / "hook.sh"
+            dst = root / "out" / "hook.sh"
+            src.write_text("#!/usr/bin/env bash\necho {{TOKEN}}\n")
+            os.chmod(src, 0o755)
+
+            bake_file(src, dst, {"TOKEN": "ok"})
+
+            self.assertEqual(dst.read_text(), "#!/usr/bin/env bash\necho ok\n")
+            self.assertEqual(stat.S_IMODE(dst.stat().st_mode), 0o755)
 
 
 class TestBakeSections(unittest.TestCase):
