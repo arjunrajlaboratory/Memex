@@ -43,7 +43,6 @@ Prefer putting standing local behavior in `_config/overrides.md` over editing fr
 | Folder | Who writes here | Notes |
 | --- | --- | --- |
 | `Inbox/` | user (drop only), capture agent (read + move into `_filed/`) | drop zone; folder and `README.md` are tracked, all other contents are gitignored; after triage, processed originals are moved to `Inbox/_filed/<YYYY-MM-DD>/`. Empty top level (minus README) = "all dropped files filed." |
-| `Inbox/` | capture agent, user | unprocessed captures (tracked) |
 | `Raw/` | capture agent (add only), user | immutable evidence |
 | `Atlas/` | librarian, executors (per job), tracker | synthesis layer. Subfolders: Areas, Projects, People (+ Interactions, Commitments, Asks), Organizations, Sources, Concepts, Decisions, Implementations, Trackers (+ Digests), Efforts, Ideas, Relationships |
 | `Ops/Tasks/` | planner, capture, user, executors (status updates) | commitments |
@@ -59,7 +58,7 @@ Prefer putting standing local behavior in `_config/overrides.md` over editing fr
 | `_templates/` | engine-owned; user forks are surfaced by `/update` | one per type |
 | `_workflows/` | engine-owned; user forks are surfaced by `/update` | step-by-step workflow prompts |
 | `.claude/skills/` | engine-owned; user forks are surfaced by `/update` | Claude Code skills auto-triggered by natural-language phrasings - see "Skills" below |
-| `scripts/` | (removed 2026-05-18) | Held one-off Python utilities. The single resident, `build_dashboards.py`, was retired once the Quartz emitter (`quartz/quartz/plugins/emitters/memexDashboards.ts`) reached parity. Recreate the folder if a new utility shows up. |
+| `scripts/` | engine-owned; user forks are surfaced by `/update` | framework utilities installed by the engine: `serve_quartz.sh` (Quartz dev server), `launchd/` (the launch-agent plist), `memex-doctor.sh` (health check). The pi pack adds `merge_letterhead.py` and `build_cv.sh`. |
 | `quartz/` | user (config + plugin only); npm (`node_modules/`, `public/`, `.quartz-cache/` gitignored) | Quartz static-site generator that publishes the vault as a browsable site with backlinks, graph, search, and our typed-note dashboards — see "Static site" below |
 
 ## Skills
@@ -69,7 +68,7 @@ The vault ships **Claude Code skills** at `.claude/skills/` that the `Skill` too
 | Skill | What triggers it | What it does |
 | --- | --- | --- |
 | `session-start` | "where did we leave off", "what's on my plate", session opening | 5-second pre-flight: log tail + needs_review + `Inbox/` + today's briefing + recommended next action. Doesn't auto-act. |
-| `triage-inbox` | "triage the inbox", "process the dropbox", "clear Inbox/" | Walks every unfiled item in `Inbox/` + `Inbox/`, classifies it (source / task / interaction / commitment / ask / followup / journal / draft-wiki), routes to the right typed note via the appropriate child skill, archives the original. The signal of completion is an empty top-level `Inbox/`. |
+| `triage-inbox` | "triage the inbox", "process the dropbox", "clear Inbox/" | Walks every unfiled item in `Inbox/`, classifies it (source / task / interaction / commitment / ask / followup / journal / draft-wiki), routes to the right typed note via the appropriate child skill, archives the original. The signal of completion is an empty top-level `Inbox/`. |
 | `ingest-source` | "ingest this article", "process this PDF", "add this URL" | Single-source ingest: fetch or copy the raw file to `Raw/` (immutable), create `Atlas/Sources/<Title>.md` per `_schemas/source.md`, propagate downstream wiki edits (or propose them as needs_review Tasks). |
 | `ingest-project` | "ingest this project", "set up X project", any multi-entity ingest (>3 typed notes) | Wizard walking the topological order Area → Orgs → People → Sources → Concepts → Project → Sub-projects → Implementations → Trackers → Tasks → Followups. Dispatches Sonnet/Haiku sub-agents for parallel batch writes; restates the plan + an estimated cost line before dispatching. |
 | `ingest-person` | "add a Person for X", or implicitly when another skill identifies a new Person | One Person note with Gmail backfill (recent threads, email/role/org from signatures, seeded `# Conversation history`). Honors the standing preference that Person notes never ship as Gmail-less stubs. |
@@ -88,7 +87,7 @@ For each workflow below, the detailed prompt lives in `_workflows/`. This sectio
 
 ### The `Inbox/` drop zone
 
-There is a **staging folder at `Inbox/`** — the folder and its `README.md` are tracked, but everything else dropped into it is gitignored until triage promotes it into the tracked vault. The user drops any file there — PDFs, screenshots, transcripts, raw markdown, draft synthesis — and capture triage / source ingest reads from it in addition to `Inbox/`.
+There is a **staging folder at `Inbox/`** — the folder and its `README.md` are tracked, but everything else dropped into it is gitignored until triage promotes it into the tracked vault. The user drops any file there — PDFs, screenshots, transcripts, raw markdown, draft synthesis — and capture triage / source ingest reads from it.
 
 Routing (always: create the tracked output first, then move the original):
 - **Binaries** (pdf, docx, png, jpg, mp3, mp4, csv, xlsx, …) → COPY into `Raw/<subfolder>/YYYY-MM-DD-<slug>.<ext>` (tracked), then create the typed note (e.g. `Source - <Title>.md`).
@@ -157,14 +156,14 @@ This convention exists because an early auditor pass identified the recurring "m
 
 ## Static site (Quartz)
 
-The vault publishes as a **static site** via [Quartz](https://quartz.jzhao.xyz) installed at `quartz/`. Quartz reads the vault root (with `ignorePatterns` excluding `Inbox/`, `Raw/`, `_archive/`, `Agents/Jobs|Runs|Approvals/`, etc.), renders every typed `.md` as an HTML page with `[[wikilinks]]` resolved, and emits backlinks, a graph view, full-text search, and mobile-friendly layout. A custom **MemexDashboards** emitter plugin (`quartz/quartz/plugins/emitters/memexDashboards.ts` + `quartz/quartz/components/MemexDashboard.tsx`) generates 12 filterable dashboards (Tasks, Projects, People, Sources, Trackers, Followups, Concepts, Organizations, Decisions, Areas, Implementations, Ideas) at `/dashboards/*`, sharing the same chrome as the note pages.
+The vault publishes as a **static site** via [Quartz](https://quartz.jzhao.xyz) installed at `quartz/`. Quartz reads the vault root (with `ignorePatterns` excluding `Inbox/`, `Raw/`, `_archive/`, `Agents/Jobs|Runs|Approvals/`, etc.), renders every typed `.md` as an HTML page with `[[wikilinks]]` resolved, and emits backlinks, a graph view, full-text search, and mobile-friendly layout. A custom **MemexDashboards** emitter plugin (`quartz/quartz/plugins/emitters/memexDashboards.ts` + `quartz/quartz/components/MemexDashboard.tsx`) generates 14 filterable dashboards (Tasks, Projects, People, Sources, Trackers, Followups, Concepts, Organizations, Decisions, Areas, Ideas, Implementations, a cross-type "Needs attention" board at `/dashboards/stale`, and — with the pi pack — Letters) at `/dashboards/*`, sharing the same chrome as the note pages.
 
 Run locally:
 
 ```
 cd quartz
 npm install        # first time only
-npm run site:serve # watches the vault, live-reloads at http://localhost:8181
+npm run site:serve # watches the vault, live-reloads at http://localhost:{{QUARTZ_PORT}}
 ```
 
 One-shot build (no server): `npm run site:build` — output goes to `quartz/public/` (gitignored).
@@ -197,4 +196,4 @@ So **before** a title becomes a filename or wikilink target, run `safe_title` an
 
 ## When confused, ask
 
-Append a one-line question to `## Open Questions` in `IMPLEMENTATION_PLAN.md` (during bootstrap) or to the relevant task note's `# Reviewer notes` (in steady-state). Never guess at structural decisions.
+Append a one-line question to the relevant task note's `# Reviewer notes` section (create the section if it's absent). Never guess at structural decisions.

@@ -8,7 +8,7 @@ demand. Ships as **packs** you opt into, derived from a real vault but carrying 
   workflows + prompts.
 - **`pi` pack** (optional): the academic-PI example — letters / CV / grants (`draft-letter`,
   `ingest-letters`, `cv-scan`, `cv-build` + the Letter/Grant schemas + CV LaTeX).
-- **hardened core** (always): the two discipline hooks + their `settings.json` wiring, the Quartz
+- **hardened core** (always): the three discipline hooks + their `settings.json` wiring, the Quartz
   static-site + dashboards emitter, the contract template, the vault `.gitignore`, the launchd
   durable-serve setup.
 

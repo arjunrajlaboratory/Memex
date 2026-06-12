@@ -15,8 +15,8 @@ Every typed note in this vault must declare a `type:` field whose value is one o
 | `decision` | `Atlas/Decisions/` | [[_schemas/decision]] | A decision of record |
 | `implementation` | `Atlas/Implementations/` | [[_schemas/implementation]] | A how-it-works writeup |
 | `source` | `Atlas/Sources/` | [[_schemas/source]] | A processed external input |
-| `letter` | `Atlas/Letters/` | [[_schemas/letter]] | A deadline-driven written ask (rec / cover / nomination); index over the letter file in Drive |
-| `grant` | `Atlas/Grants/` | [[_schemas/grant]] | A funding proposal / fellowship / award; index over the proposal folder in Drive |
+| `letter` | `Atlas/Letters/` | [[_schemas/letter]] | A deadline-driven written ask (rec / cover / nomination); index over the letter file in Drive *(pi pack — core-only vaults omit this type)* |
+| `grant` | `Atlas/Grants/` | [[_schemas/grant]] | A funding proposal / fellowship / award; index over the proposal folder in Drive *(pi pack — core-only vaults omit this type)* |
 | `tracker` | `Atlas/Trackers/` | [[_schemas/tracker]] | A living-topic watcher; re-runs on a cadence and files digests |
 | `tracker_digest` | `Atlas/Trackers/Digests/` | [[_schemas/tracker_digest]] | A single tracker run output |
 | `task` | `Ops/Tasks/` | [[_schemas/task]] | A discrete commitment |

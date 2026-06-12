@@ -126,8 +126,9 @@
       "log-mutation.sh"
     ],
     "contract": [
-      "AGENTS.md",
-      "CLAUDE.md"
+      "AGENTS.base.md",
+      "CLAUDE.base.md",
+      "pi-fragment.md"
     ],
     "quartz": true,
     "launchd": [
