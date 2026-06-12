@@ -5,7 +5,7 @@
   <!-- Per-vault Label: launchd keys agents by Label, so a fixed name would
        make a second vault's agent collide with the first. -->
   <key>Label</key>
-  <string>com.memex.quartz.{{VAULT_NAME}}</string>
+  <string>com.memex.quartz.{{MEMEX_LAUNCHD_ID}}</string>
 
   <key>ProgramArguments</key>
   <array>

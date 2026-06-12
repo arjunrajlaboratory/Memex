@@ -16,7 +16,7 @@ hand-curated and survive re-derives; nothing to do for those.)
 | `hardened/hooks/bump-updated.sh` | `.claude/hooks/bump-updated.sh` | Full rewrite: drop `set -euo pipefail` (jq-less fallback killed the hook), `$REPO_ROOT`-anchored scoping (no longer bumps other repos), `cat`-over instead of `mv` (preserves inode/mode). |
 | `hardened/hooks/session-start-context.sh` | `.claude/hooks/session-start-context.sh` | "Memex" branding (was "LifeOS"), single awk pass for task counts + needs_review (was 6 greps), quartz log to `outputs/quartz-serve.log` (was world-writable `/tmp`). |
 | `hardened/settings.json` | `.claude/settings.json` | `permissions.deny` block (`.env*`, `secrets/**`, force-push) + anchored PostToolUse matcher `^(Edit\|Write)$`. |
-| `hardened/launchd/com.you.memex-quartz.plist` | `scripts/launchd/…` | Label `com.memex.quartz.{{VAULT_NAME}}` (source vault: its real vault name), `ThrottleInterval 10`, logs to `{{VAULT_PATH}}/outputs/quartz-serve.log`. |
+| `hardened/launchd/com.you.memex-quartz.plist` | `scripts/launchd/…` | Label `com.memex.quartz.{{MEMEX_LAUNCHD_ID}}` — a bake-time identity computed from the path-derived CC_PROJECT_SLUG (NOT the shareable vault name; two vaults from one answers file must not collide), `ThrottleInterval 10`, logs to `{{VAULT_PATH}}/outputs/quartz-serve.log`. In the source vault the Label literal is its own slug, which derive tokenizes. |
 | `hardened/launchd/serve_quartz.sh` | `scripts/serve_quartz.sh` | Mode 755 (exec bit only; content unchanged). Note: mode-only changes do NOT propagate to already-installed vaults (the updater compares content) — `chmod +x` installed copies manually if you run the script directly; the launchd path is unaffected (plist invokes via `/bin/zsh`). |
 | `hardened/quartz/quartz/cli/handlers.js` | `quartz/quartz/cli/handlers.js` | `server.listen(argv.port, "127.0.0.1")` + `WebSocketServer({ host: "127.0.0.1", … })` — serve mode includes private notes; must not bind the LAN. |
 | `hardened/quartz/quartz.config.ts` | `quartz/quartz.config.ts` | `ignorePatterns` += `.memex`, `_config`, `_config/**`; `baseUrl: "localhost:<your port>"` (derive tokenizes the port literal). |
@@ -34,7 +34,7 @@ hand-curated and survive re-derives; nothing to do for those.)
   `memex-update prepare` runs `git rm -r --cached .memex` and the removal rides
   the update commit. The old manifest content remains in git *history*; if the
   vault pushed to a remote and that matters, rewrite history manually.
-- **The launchd plist is renamed** to `com.memex.quartz.<vault-name>.plist`
+- **The launchd plist is renamed** to `com.memex.quartz.<path-derived-id>.plist`
   with a matching Label. Because the plist *content* also changed in this
   release (Label, log paths, ThrottleInterval), the updater classifies the old
   file as `removed-upstream` and the new one as `new` — NOT as a rename. The

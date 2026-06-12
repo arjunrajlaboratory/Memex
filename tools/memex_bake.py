@@ -472,6 +472,16 @@ def bake_engine(
     streams = parse_streams(answers.get("STREAMS")) if streams is None else streams
     git_mode = normalize_git_mode(answers.get("GIT_MODE")) if git_mode is None else git_mode
     normalized = normalize_answers(answers)
+    # launchd identity: must be unique PER VAULT PATH, not per display name —
+    # two vaults initialized from one answers file share VAULT_NAME, and a
+    # shared launchd Label/filename means the second LaunchAgent clobbers the
+    # first. CC_PROJECT_SLUG is always path-derived at init; VAULT_NAME is the
+    # fallback only for legacy manifests that predate slug derivation.
+    launchd_id = (
+        str(answers.get("CC_PROJECT_SLUG", "")).strip().lstrip("-")
+        or str(answers.get("VAULT_NAME", "")).strip()
+    )
+    normalized["MEMEX_LAUNCHD_ID"] = launchd_id  # computed, never interviewed
 
     if include_scaffold:
         for d in SCAFFOLD_DIRS:
@@ -524,10 +534,10 @@ def bake_engine(
         for fp in launchd.iterdir():
             if fp.is_file():
                 if fp.suffix == ".plist":
-                    # Carry the vault name in the plist filename so multiple
-                    # vaults' launchd agents do not collide on one machine.
-                    vault_name = str(answers.get("VAULT_NAME", "")).strip()
-                    plist_name = f"com.memex.quartz.{vault_name}.plist" if vault_name else "com.memex.quartz.plist"
+                    # Carry the path-derived vault identity in the plist
+                    # filename so multiple vaults' launchd agents (incl. the
+                    # baked Label) never collide on one machine.
+                    plist_name = f"com.memex.quartz.{launchd_id}.plist" if launchd_id else "com.memex.quartz.plist"
                     dst = target / "scripts/launchd" / plist_name
                 else:
                     dst = target / "scripts" / fp.name

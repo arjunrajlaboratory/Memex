@@ -79,9 +79,14 @@ grep -q "^\.memex/$" "$TMP/core/.gitignore" || fail ".memex/ (manifest answers +
 [ -x "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/ or not executable"
 [ -x "$TMP/core/scripts/memex-doctor.sh" ] || fail "memex-doctor.sh not installed/executable"
 (cd "$TMP/core" && ./scripts/memex-doctor.sh >/dev/null) || fail "doctor reports FAIL on a fresh vault"
-[ -f "$TMP/core/scripts/launchd/com.memex.quartz.example-vault.plist" ] || fail "launchd plist missing/misnamed (should carry vault name)"
+# launchd identity is PATH-derived (CC_PROJECT_SLUG minus leading '-'), never
+# the shareable VAULT_NAME — two vaults from one answers file must not collide.
+CORE_LAUNCHD_ID="$(python3 -c "import re; print(re.sub(r'[^A-Za-z0-9]', '-', '$TMP/core').lstrip('-'))")"
+CORE_PLIST="$TMP/core/scripts/launchd/com.memex.quartz.${CORE_LAUNCHD_ID}.plist"
+[ -f "$CORE_PLIST" ] || fail "launchd plist missing/misnamed (should carry path-derived id)"
+grep -q "com.memex.quartz.${CORE_LAUNCHD_ID}" "$CORE_PLIST" || fail "plist Label should carry path-derived id"
 # VAULT_PATH is derived from --target (fixture says /tmp/example-vault; init overrides)
-grep -q "$TMP/core/scripts/serve_quartz.sh" "$TMP/core/scripts/launchd/com.memex.quartz.example-vault.plist" \
+grep -q "$TMP/core/scripts/serve_quartz.sh" "$CORE_PLIST" \
   || fail "plist VAULT_PATH not derived from --target"
 # sources config seed: present, default streams (email+slack on, calendar off), local git
 [ -f "$TMP/core/_config/sources.md" ] || fail "_config/sources.md seed missing"

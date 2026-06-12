@@ -51,8 +51,8 @@ fi
 
 # 4. launchd durable-serve (macOS only, optional)
 if [ "$(uname)" = "Darwin" ] && command -v launchctl >/dev/null 2>&1; then
-  if launchctl list 2>/dev/null | grep -q "com.memex.quartz.{{VAULT_NAME}}"; then
-    pass "launchd agent loaded: com.memex.quartz.{{VAULT_NAME}}"
+  if launchctl list 2>/dev/null | grep -q "com.memex.quartz.{{MEMEX_LAUNCHD_ID}}"; then
+    pass "launchd agent loaded: com.memex.quartz.{{MEMEX_LAUNCHD_ID}}"
   else
     warn "launchd agent not loaded (optional; see scripts/launchd/ to install)"
   fi

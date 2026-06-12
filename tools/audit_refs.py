@@ -21,8 +21,10 @@ TEXT_NAMES = {"gitignore", ".gitignore"}
 SKIP_DIRS = {".git", "node_modules", "public", ".quartz-cache", "__pycache__", ".venv"}
 TOKEN_RE = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
 SECTION_RE = re.compile(r"\{\{([?^/])([A-Z0-9_]+)\}\}")
-# Note-creation placeholders resolved at vault runtime, not at init.
-RUNTIME_TOKENS = {"YYYYMMDD"}
+# Note-creation placeholders resolved at vault runtime, not at init —
+# plus MEMEX_LAUNCHD_ID, which bake_engine computes from CC_PROJECT_SLUG /
+# VAULT_NAME at bake time (never interviewed, so not in placeholders.json).
+RUNTIME_TOKENS = {"YYYYMMDD", "MEMEX_LAUNCHD_ID"}
 # packs.json sections that are name lists of .md files under packs/<pack>/<section>/.
 MD_SECTIONS = ("schemas", "templates", "workflows", "prompts")
 QUARTZ = "hardened/quartz"
