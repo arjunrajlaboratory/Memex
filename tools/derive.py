@@ -5,7 +5,7 @@ Usage: derive.py --src ~/code/your-source-vault [--eng .]
 Rebuilds packs/ and hardened/ from packs.json, swapping literals->{{TOKENS}}.
 Never writes to --src.
 """
-import argparse, json, pathlib, shutil, sys
+import argparse, json, os, pathlib, shutil, sys
 
 def load(p):
     with open(p) as fh:
@@ -30,17 +30,37 @@ def bake_out(text, pairs):
 # Task-5 template audit is the backstop that would catch such a leak.
 TEXT_EXTS = {".md", ".ts", ".tsx", ".sh", ".json", ".plist", ".scss", ".py", ".tex", ".sty", ".yaml", ".yml"}
 
+# One source-resolver per packs.json section. derive and memex_bake's
+# LOCATION_MAP must stay in lockstep: every key here is installed by init via
+# LOCATION_MAP, and an unknown packs.json key is a hard error (a silently
+# skipped section is how pi/scripts got wiped by the rmtree below).
+SECTION_SOURCES = {
+    "skills":    ("tree", lambda SRC, n: SRC / ".claude/skills" / n),
+    "schemas":   ("file", lambda SRC, n: SRC / "_schemas" / f"{n}.md"),
+    "templates": ("file", lambda SRC, n: SRC / "_templates" / f"{n}.md"),
+    "workflows": ("file", lambda SRC, n: SRC / "_workflows" / f"{n}.md"),
+    "prompts":   ("file", lambda SRC, n: SRC / "Agents/Prompts" / f"{n}.md"),
+    "scripts":   ("file", lambda SRC, n: SRC / "scripts" / n),
+}
+PRUNE_DIRS = {"__pycache__", ".git", "node_modules", "public", ".quartz-cache"}
+
 def copy_file(src, dst, pairs):
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.suffix in TEXT_EXTS:
-        dst.write_text(bake_out(src.read_text(errors="ignore"), pairs))
+        try:
+            text = src.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            sys.exit(f"derive: {src} is not valid UTF-8; fix the source file or add its extension to binary handling")
+        dst.write_text(bake_out(text, pairs))
         shutil.copymode(src, dst)
     else:
         shutil.copy2(src, dst)  # binaries copied as-is
 
 def copy_tree(src, dst, pairs):
-    for fp in src.rglob("*"):
-        if fp.is_file() and "__pycache__" not in fp.parts and ".git" not in fp.parts:
+    for dirpath, dirnames, filenames in os.walk(src):
+        dirnames[:] = [d for d in dirnames if d not in PRUNE_DIRS]
+        for name in filenames:
+            fp = pathlib.Path(dirpath) / name
             copy_file(fp, dst / fp.relative_to(src), pairs)
 
 def planned_sources(packs, SRC):
@@ -50,12 +70,17 @@ def planned_sources(packs, SRC):
     out = []
     for pack in [k for k in packs if k != "hardened"]:
         cfg = packs[pack]
-        for s in cfg.get("skills", []):    out.append((f"{pack}.skill:{s}", SRC/".claude/skills"/s))
-        for s in cfg.get("schemas", []):   out.append((f"{pack}.schema:{s}", SRC/"_schemas"/f"{s}.md"))
-        for t in cfg.get("templates", []): out.append((f"{pack}.template:{t}", SRC/"_templates"/f"{t}.md"))
-        for w in cfg.get("workflows", []): out.append((f"{pack}.workflow:{w}", SRC/"_workflows"/f"{w}.md"))
-        for pr in cfg.get("prompts", []):  out.append((f"{pack}.prompt:{pr}", SRC/"Agents/Prompts"/f"{pr}.md"))
-        if cfg.get("cv"):                  out.append((f"{pack}.cv", SRC/"CV"))
+        for section, value in cfg.items():
+            if section == "cv":
+                if value:
+                    out.append((f"{pack}.cv", SRC / "CV"))
+                continue
+            if section not in SECTION_SOURCES:
+                sys.exit(f"derive: packs.json section {pack}.{section} is not implemented "
+                         f"(known: {', '.join(sorted(SECTION_SOURCES))}, cv); nothing was changed")
+            _, resolve = SECTION_SOURCES[section]
+            for name in value:
+                out.append((f"{pack}.{section}:{name}", resolve(SRC, name)))
     H = packs["hardened"]
     for hook in H.get("hooks", []):        out.append((f"hardened.hook:{hook}", SRC/".claude/hooks"/hook))
     for lf in H.get("launchd", []):
@@ -103,18 +128,17 @@ def main():
 
     for pack in [k for k in packs if k != "hardened"]:
         cfg = packs[pack]
-        for s in cfg.get("skills", []):
-            copy_tree(SRC/".claude/skills"/s, ENG/f"packs/{pack}/skills"/s, pairs)
-        for s in cfg.get("schemas", []):
-            copy_file(SRC/"_schemas"/f"{s}.md", ENG/f"packs/{pack}/schemas"/f"{s}.md", pairs)
-        for t in cfg.get("templates", []):
-            copy_file(SRC/"_templates"/f"{t}.md", ENG/f"packs/{pack}/templates"/f"{t}.md", pairs)
-        for w in cfg.get("workflows", []):
-            copy_file(SRC/"_workflows"/f"{w}.md", ENG/f"packs/{pack}/workflows"/f"{w}.md", pairs)
-        for pr in cfg.get("prompts", []):
-            copy_file(SRC/"Agents/Prompts"/f"{pr}.md", ENG/f"packs/{pack}/prompts"/f"{pr}.md", pairs)
-        if cfg.get("cv"):
-            copy_tree(SRC/"CV", ENG/f"packs/{pack}/cv", pairs)
+        for section, value in cfg.items():
+            if section == "cv":
+                if value:
+                    copy_tree(SRC / "CV", ENG / f"packs/{pack}/cv", pairs)
+                continue
+            # planned_sources() already rejected unknown sections pre-wipe.
+            kind, resolve = SECTION_SOURCES[section]
+            for name in value:
+                src = resolve(SRC, name)
+                dst = ENG / f"packs/{pack}/{section}" / (name if kind == "tree" else src.name)
+                (copy_tree if kind == "tree" else copy_file)(src, dst, pairs)
 
     H = packs["hardened"]
     # NOTE: hardened/contract/ is intentionally NOT derived or wiped here. All
@@ -129,10 +153,8 @@ def main():
         src = SRC/"scripts/launchd"/lf if lf.endswith(".plist") else SRC/"scripts"/lf
         copy_file(src, ENG/"hardened/launchd"/lf, pairs)
     if H.get("quartz"):
-        # copy quartz source but NOT node_modules/public/cache (huge, regenerated)
-        for fp in (SRC/"quartz").rglob("*"):
-            if fp.is_file() and not any(p in fp.parts for p in ("node_modules","public",".quartz-cache",".git")):
-                copy_file(fp, ENG/"hardened/quartz"/fp.relative_to(SRC/"quartz"), pairs)
+        # copy quartz source; copy_tree prunes node_modules/public/cache (huge, regenerated)
+        copy_tree(SRC/"quartz", ENG/"hardened/quartz", pairs)
     # Vault-level files that wire hooks + git-ignore. Stored WITHOUT a leading dot
     # (gitignore, not .gitignore) so they don't act on the engine repo itself;
     # memex_init places them at <vault>/.claude/settings.json and <vault>/.gitignore.
