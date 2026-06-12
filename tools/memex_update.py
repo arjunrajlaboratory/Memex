@@ -215,15 +215,22 @@ def content_similarity(left: pathlib.Path, right: pathlib.Path) -> float:
 def three_way_merge(current: pathlib.Path, baseline: pathlib.Path, staged: pathlib.Path) -> str | None:
     """Clean 3-way merge text, or None on conflict / unavailable git."""
     try:
+        # bytes mode: text=True would decode with errors='strict' under the
+        # locale codec and crash (or mangle) on non-UTF-8 input.
         proc = subprocess.run(
             ["git", "merge-file", "--stdout", str(current), str(baseline), str(staged)],
-            capture_output=True, text=True, check=False,
+            capture_output=True, check=False,
         )
     except FileNotFoundError:
         return None
     if proc.returncode != 0:  # >0: conflicts; <0: error
         return None
-    return proc.stdout
+    try:
+        return proc.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        # Undecodable bytes: decline the auto-merge and fall back to manual
+        # resolution rather than risk corrupting content.
+        return None
 
 
 def staged_version_path(work_dir: pathlib.Path, bucket: str, rel: str, src: pathlib.Path | None) -> str | None:
@@ -505,7 +512,15 @@ def detect_renames(
             continue
         used_old.add(old_path)
         used_new.add(new_path)
-        candidates.append({"old_path": old_path, "new_path": new_path, "similarity": round(score, 4)})
+        candidates.append({
+            "old_path": old_path,
+            "new_path": new_path,
+            "similarity": round(score, 4),
+            # Internal, unrounded score for threshold gates (rounding 0.99949
+            # up to 0.9995 must not flip an auto-rename decision). Never copied
+            # into persisted plan entries.
+            "similarity_raw": score,
+        })
     return candidates
 
 
@@ -572,9 +587,22 @@ def classify_update(
         entry["staged_path"] = staged_version_path(work_dir, "staged", new_path, staged_dir / new_path)
         if disposition == Disposition.RENAME_COLLISION:
             entry["collision_path"] = staged_version_path(work_dir, "collision", new_path, new_current_path)
-        if disposition == Disposition.RENAME_CANDIDATE and not edited and item["similarity"] >= 0.9995:
+            if (
+                not edited
+                and new_current_path.is_file()
+                and sha256_file(new_current_path) == sha256_file(staged_dir / new_path)
+            ):
+                # The destination already holds exactly the staged bytes (e.g.
+                # a non-git abort left an applied auto-rename's copy behind):
+                # nothing to reconcile at new_path; only the stale old path
+                # remains, which apply_safe_operations removes (with undo).
+                entry.update({"resolved": True, "resolution": "identical-content"})
+                entries.append(entry)
+                continue
+        if disposition == Disposition.RENAME_CANDIDATE and not edited and item["similarity_raw"] >= 0.9995:
             # Near-identical content, no local edit, free destination: the move
-            # is mechanical, no judgement needed.
+            # is mechanical, no judgement needed. Gate on the raw score so a
+            # display-rounded 0.9995 (e.g. true 0.99949) cannot sneak through.
             entry.update({"resolved": True, "resolution": "auto-rename"})
             entries.append(entry)
             continue
@@ -633,7 +661,10 @@ def classify_update(
             if merged is not None:
                 merged_path = work_dir / "merged" / rel
                 merged_path.parent.mkdir(parents=True, exist_ok=True)
-                merged_path.write_text(merged)
+                # Encode + write_bytes: byte-exact UTF-8 output with no
+                # platform newline translation (write_text would default to
+                # locale encoding and universal-newline mapping).
+                merged_path.write_bytes(merged.encode("utf-8"))
                 entry.update(
                     {
                         "resolved": True,
@@ -658,8 +689,10 @@ def classify_update(
         }
         if disposition == Disposition.COLLISION:
             # Byte-identical vault content (e.g. the user pre-copied the file
-            # from a newer engine): nothing to reconcile.
-            if sha256_file(vault_dir / rel) == (meta.get("sha256") or sha256_file(staged_dir / rel)):
+            # from a newer engine): nothing to reconcile. is_file() guards a
+            # directory collision, which must stay an unresolved COLLISION
+            # (staged_version_path already handles directories gracefully).
+            if (vault_dir / rel).is_file() and sha256_file(vault_dir / rel) == (meta.get("sha256") or sha256_file(staged_dir / rel)):
                 entry.update({"resolved": True, "resolution": "identical-content", "applied": True})
                 entries.append(entry)
                 continue
@@ -797,6 +830,13 @@ def apply_safe_operations(
             entry["applied"] = True
         elif disposition == Disposition.RENAME_CANDIDATE and entry.get("resolution") == "auto-rename":
             copy_file(staged_dir / entry["new_path"], vault_dir / entry["new_path"])
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
+            remove_file(vault_dir / rel)
+            entry["applied"] = True
+        elif disposition == Disposition.RENAME_COLLISION and entry.get("resolution") == "identical-content":
+            # Destination already holds the staged bytes (classify verified);
+            # mirror auto-rename minus the copy: archive + remove the old path.
             if (vault_dir / rel).exists():
                 copy_file(vault_dir / rel, work_dir / "undo" / rel)
             remove_file(vault_dir / rel)
@@ -1231,12 +1271,22 @@ def abort_update(args: argparse.Namespace) -> int:
     for entry in plan.get("entries", []):
         if entry.get("disposition") in ABORT_UNTRACKED_DISPOSITIONS:
             rel = entry.get("path")
-            if not rel:
-                continue
-            in_index = run_git(vault_dir, ["ls-files", "--error-unmatch", "--", rel], check=False)
-            target = vault_dir / rel
-            if in_index.returncode != 0 and target.is_file():
-                target.unlink()
+        elif entry.get("disposition") == Disposition.RENAME_CANDIDATE:
+            # An auto-rename copied staged content to new_path, which was free
+            # before the update (RENAME_CANDIDATE means no pre-existing
+            # destination), so removing it cannot lose user content. Not gated
+            # on applied/resolution for the same crash-mid-apply reason above.
+            # RENAME_COLLISION is deliberately excluded: its new_path
+            # pre-existed and may be user content.
+            rel = entry.get("new_path")
+        else:
+            continue
+        if not rel:
+            continue
+        in_index = run_git(vault_dir, ["ls-files", "--error-unmatch", "--", rel], check=False)
+        target = vault_dir / rel
+        if in_index.returncode != 0 and target.is_file():
+            target.unlink()
 
     current = run_git(vault_dir, ["branch", "--show-current"], check=False).stdout.strip()
     returned_to = current or previous or "<unknown>"

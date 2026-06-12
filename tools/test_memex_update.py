@@ -265,6 +265,18 @@ class TestThreeWayMerge(unittest.TestCase):
             (d / "staged2").write_text("a\nb ENGINE\nc\n")
             self.assertIsNone(three_way_merge(d / "current", d / "base", d / "staged2"))
 
+    def test_declines_undecodable_bytes(self):
+        # A clean merge whose result contains invalid UTF-8 must decline
+        # (return None) rather than crash or corrupt content on decode.
+        import tempfile, pathlib
+        from memex_update import three_way_merge
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            (d / "base").write_bytes(b"a\nb\nc\n")
+            (d / "current").write_bytes(b"a\nb\nc\n")
+            (d / "staged").write_bytes(b"a\nb\nc\n\xff\xfe latin-1 garbage\n")
+            self.assertIsNone(three_way_merge(d / "current", d / "base", d / "staged"))
+
 
 class TestNewTokenDetection(unittest.TestCase):
     def test_noninteractive_new_tokens_use_existing_defaults(self):

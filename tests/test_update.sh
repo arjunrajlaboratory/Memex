@@ -348,4 +348,40 @@ PENDING_WORK="$(dirname "$PENDING_PLAN")"
 "$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null \
   || fail "third prepare after non-git abort should succeed"
 
-echo "PASS: memex-update safe ops + pending plan + finalize + refuse + no-conflict + abort + non-git abort"
+# ---------- abort removes an applied auto-rename's new path ----------
+NEXT2="$TMP/engine-next-rename"
+mkdir -p "$NEXT2"
+( cd "$NEXT" && tar -cf - . ) | ( cd "$NEXT2" && tar -xf - )
+# identical content at a new path -> similarity 1.0 -> auto-rename
+mv "$NEXT2/packs/core/skills/observe-manual-patterns" "$NEXT2/packs/core/skills/observe-manual-patterns-v2"
+RENAMEABORTVAULT="$TMP/rename-abort-vault"
+"$ENG/bin/memex-init" --target "$RENAMEABORTVAULT" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
+git -C "$RENAMEABORTVAULT" config user.email test@example.com
+git -C "$RENAMEABORTVAULT" config user.name "Memex Test"
+git -C "$RENAMEABORTVAULT" add .
+git -C "$RENAMEABORTVAULT" commit -m "init" >/dev/null
+RENAME_ABORT_BRANCH="$(git -C "$RENAMEABORTVAULT" branch --show-current)"
+# conflicting edit (NEXT2 inherits NEXT's triage-inbox marker) keeps the plan pending
+printf '\nCONFLICTING LOCAL LINE at the same spot\n' >> "$RENAMEABORTVAULT/.claude/skills/triage-inbox/SKILL.md"
+git -C "$RENAMEABORTVAULT" add .
+git -C "$RENAMEABORTVAULT" commit -m "local edit" >/dev/null
+"$NEXT2/bin/memex-update" --vault "$RENAMEABORTVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null
+[ -e "$RENAMEABORTVAULT/.claude/skills/observe-manual-patterns-v2/SKILL.md" ] || fail "auto-rename did not create the new path"
+[ ! -e "$RENAMEABORTVAULT/.claude/skills/observe-manual-patterns/SKILL.md" ] || fail "auto-rename did not remove the old path"
+RENAME_ABORT_PLAN="$(ls "$RENAMEABORTVAULT"/.memex/update-work/0.2.0-*/plan.json)"
+python3 - "$RENAME_ABORT_PLAN" <<'PY'
+import json, pathlib, sys
+plan = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert plan["status"] == "pending", plan["status"]
+auto = [e for e in plan["entries"] if e.get("resolution") == "auto-rename"]
+assert auto, "expected an auto-rename entry"
+assert all(e["applied"] for e in auto), auto
+assert all("similarity_raw" not in e for e in plan["entries"]), "similarity_raw must not be persisted"
+PY
+"$NEXT2/bin/memex-update" abort --vault "$RENAMEABORTVAULT" --plan "$RENAME_ABORT_PLAN" >/dev/null
+[ -e "$RENAMEABORTVAULT/.claude/skills/observe-manual-patterns/SKILL.md" ] || fail "abort did not restore the auto-renamed old path"
+[ ! -e "$RENAMEABORTVAULT/.claude/skills/observe-manual-patterns-v2/SKILL.md" ] || fail "abort did not remove the auto-renamed new path"
+[ "$(git -C "$RENAMEABORTVAULT" branch --show-current)" = "$RENAME_ABORT_BRANCH" ] || fail "rename abort did not return to the original branch"
+[ -z "$(git -C "$RENAMEABORTVAULT" status --porcelain)" ] || fail "rename abort left the worktree dirty"
+
+echo "PASS: memex-update safe ops + pending plan + finalize + refuse + no-conflict + abort + non-git abort + rename abort"
