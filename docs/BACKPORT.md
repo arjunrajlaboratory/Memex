@@ -24,6 +24,7 @@ hand-curated and survive re-derives; nothing to do for those.)
 | `hardened/gitignore` | `.gitignore` | += `.claude/settings.local.json` and `.memex/` (manifest embeds the interview answers). |
 | `packs/core/schemas/_types.md` | `_schemas/_types.md` | `letter`/`grant` rows annotated "*(pi pack — core-only vaults omit this type)*". |
 | `packs/pi/scripts/build_cv.sh` | `scripts/build_cv.sh` | **NEW file** — `/cv-build` always referenced it but the engine never shipped it. `derive.py` now handles `scripts` sections, and its pre-flight will FAIL if the source vault lacks this file. |
+| 11 skills (`lint`, `weekly-review`, `ingest-source`, `daily-briefing`, `ingest-person`, `flesh-out-idea`, `shutdown-review`, `capture-decision`, `ingest-project`; pi: `ingest-letters`, `draft-letter`) | `.claude/skills/<name>/SKILL.md` | The quartz-server start command they embed now logs to `<vault>/outputs/quartz-serve.log` instead of world-writable `/tmp/quartz-serve.log` (in the source vault the literal is the real vault path that derive tokenizes to `{{VAULT_PATH}}`). |
 
 ## Behavior notes for existing installed vaults (release notes)
 
