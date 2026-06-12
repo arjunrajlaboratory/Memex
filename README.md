@@ -4,7 +4,7 @@ The distributable engine behind a [Memex vault](https://github.com/exampleorg/va
 discipline for an LLM-maintained knowledge base plus a librarian agent that grows structure on
 demand. Ships as **packs** you opt into, derived from a real vault but carrying none of its data.
 
-- **`core` pack** (always): the ~23 job-agnostic skills + the core typed-note schemas + templates +
+- **`core` pack** (always): the 24 job-agnostic skills + the core typed-note schemas + templates +
   workflows + prompts.
 - **`pi` pack** (optional): the academic-PI example — letters / CV / grants (`draft-letter`,
   `ingest-letters`, `cv-scan`, `cv-build` + the Letter/Grant schemas + CV LaTeX).
