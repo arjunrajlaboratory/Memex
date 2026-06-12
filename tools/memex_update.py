@@ -186,7 +186,7 @@ def pending_update_plans(vault_dir: pathlib.Path) -> list[pathlib.Path]:
 def strip_work_heavy(work_dir: pathlib.Path) -> None:
     """Drop the bulky staged tree + per-file version copies once they are no
     longer needed, keeping the small plan.json for review."""
-    for sub in ("staged", "versions"):
+    for sub in ("staged", "versions", "merged"):
         shutil.rmtree(work_dir / sub, ignore_errors=True)
 
 
@@ -210,6 +210,20 @@ def content_similarity(left: pathlib.Path, right: pathlib.Path) -> float:
             return 1.0
         return 0.0
     return difflib.SequenceMatcher(None, left_text, right_text).ratio()
+
+
+def three_way_merge(current: pathlib.Path, baseline: pathlib.Path, staged: pathlib.Path) -> str | None:
+    """Clean 3-way merge text, or None on conflict / unavailable git."""
+    try:
+        proc = subprocess.run(
+            ["git", "merge-file", "--stdout", str(current), str(baseline), str(staged)],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if proc.returncode != 0:  # >0: conflicts; <0: error
+        return None
+    return proc.stdout
 
 
 def staged_version_path(work_dir: pathlib.Path, bucket: str, rel: str, src: pathlib.Path | None) -> str | None:
@@ -558,6 +572,12 @@ def classify_update(
         entry["staged_path"] = staged_version_path(work_dir, "staged", new_path, staged_dir / new_path)
         if disposition == Disposition.RENAME_COLLISION:
             entry["collision_path"] = staged_version_path(work_dir, "collision", new_path, new_current_path)
+        if disposition == Disposition.RENAME_CANDIDATE and not edited and item["similarity"] >= 0.9995:
+            # Near-identical content, no local edit, free destination: the move
+            # is mechanical, no judgement needed.
+            entry.update({"resolved": True, "resolution": "auto-rename"})
+            entries.append(entry)
+            continue
         entries.append(entry)
         unresolved.append(entry)
 
@@ -598,7 +618,31 @@ def classify_update(
                 staged_dir=staged_dir,
                 rel=rel,
             )
-            unresolved.append(entry)
+            merged: str | None = None
+            if (
+                disposition == Disposition.EDITED
+                and meta.get("kind") == "prose"
+                and baseline.exists()
+                and current.exists()
+                and staged.exists()
+            ):
+                # Local edit + engine change that don't overlap merge cleanly;
+                # a no-op engine change (staged == baseline) merges trivially
+                # and auto-keeps the local edit.
+                merged = three_way_merge(current, baseline, staged)
+            if merged is not None:
+                merged_path = work_dir / "merged" / rel
+                merged_path.parent.mkdir(parents=True, exist_ok=True)
+                merged_path.write_text(merged)
+                entry.update(
+                    {
+                        "resolved": True,
+                        "resolution": "auto-merged",
+                        "merged_path": merged_path.as_posix(),
+                    }
+                )
+            else:
+                unresolved.append(entry)
         entries.append(entry)
 
     for rel in sorted(brand_new_paths - renamed_new):
@@ -613,6 +657,12 @@ def classify_update(
             "applied": False,
         }
         if disposition == Disposition.COLLISION:
+            # Byte-identical vault content (e.g. the user pre-copied the file
+            # from a newer engine): nothing to reconcile.
+            if sha256_file(vault_dir / rel) == (meta.get("sha256") or sha256_file(staged_dir / rel)):
+                entry.update({"resolved": True, "resolution": "identical-content", "applied": True})
+                entries.append(entry)
+                continue
             add_version_paths(
                 entry,
                 work_dir=work_dir,
@@ -739,6 +789,18 @@ def apply_safe_operations(
             if not (vault_dir / rel).exists():
                 copy_file(staged_dir / rel, vault_dir / rel)
                 entry["applied"] = True
+        elif disposition == Disposition.EDITED and entry.get("resolution") == "auto-merged" and entry.get("merged_path"):
+            # Archive the original first: non-git vaults have no other recovery.
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
+            copy_file(pathlib.Path(entry["merged_path"]), vault_dir / rel)
+            entry["applied"] = True
+        elif disposition == Disposition.RENAME_CANDIDATE and entry.get("resolution") == "auto-rename":
+            copy_file(staged_dir / entry["new_path"], vault_dir / entry["new_path"])
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
+            remove_file(vault_dir / rel)
+            entry["applied"] = True
         elif disposition == Disposition.REMOVED_UPSTREAM and prune_removed:
             # Archive the original first: non-git vaults have no other recovery.
             if (vault_dir / rel).exists():

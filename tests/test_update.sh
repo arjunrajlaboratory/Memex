@@ -98,6 +98,18 @@ assert counts.get("removed-upstream", 0) >= 1, counts
 assert counts.get("replace-untouched", 0) >= 1, counts
 PY
 
+# the engine did not change the email skill, so the local edit 3-way-merges
+# cleanly and is auto-applied; the collision fixture keeps the plan pending
+python3 - "$PLAN" <<'PY'
+import json, pathlib, sys
+plan = json.loads(pathlib.Path(sys.argv[1]).read_text())
+auto = [e for e in plan["entries"] if e.get("resolution") == "auto-merged"]
+assert auto, "expected at least one auto-merged entry (email skill local edit)"
+assert all(e["applied"] for e in auto), auto
+ident = [e for e in plan["entries"] if e.get("resolution") == "identical-content"]
+PY
+grep -q "Local email skill edit that must survive" "$VAULT/.claude/skills/email/SKILL.md" || fail "auto-merge lost the local edit"
+
 if "$NEXT/bin/memex-update" finalize --vault "$VAULT" --plan "$PLAN" >/dev/null 2>&1; then
   fail "finalize should refuse a pending unresolved plan"
 fi
@@ -300,8 +312,9 @@ git -C "$ABORTVAULT" config user.name "Memex Test"
 git -C "$ABORTVAULT" add .
 git -C "$ABORTVAULT" commit -m "init" >/dev/null
 ABORT_BRANCH="$(git -C "$ABORTVAULT" branch --show-current)"
-mkdir -p "$ABORTVAULT/.claude/skills/email"
-printf '\nlocal edit to force a pending plan\n' >> "$ABORTVAULT/.claude/skills/email/SKILL.md"
+# Both sides append at EOF of the same file (engine adds the timezone marker),
+# so the 3-way merge conflicts and the plan stays pending.
+printf '\nCONFLICTING LOCAL LINE at the same spot\n' >> "$ABORTVAULT/.claude/skills/triage-inbox/SKILL.md"
 git -C "$ABORTVAULT" add .
 git -C "$ABORTVAULT" commit -m "local edit" >/dev/null
 "$NEXT/bin/memex-update" --vault "$ABORTVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null
@@ -317,7 +330,8 @@ ABORT_PLAN="$(ls "$ABORTVAULT"/.memex/update-work/0.2.0-*/plan.json)"
 # ---------- git-off pending update blocks a second prepare ----------
 PENDINGVAULT="$TMP/pending-nogit-vault"
 "$ENG/bin/memex-init" --target "$PENDINGVAULT" --packs core --answers "$ENG/tests/fixtures/answers.nogit.json" >/dev/null
-printf '\nlocal edit to force a pending plan\n' >> "$PENDINGVAULT/.claude/skills/email/SKILL.md"
+# conflicting edit (engine appends its marker to the same file) keeps the plan pending
+printf '\nCONFLICTING LOCAL LINE at the same spot\n' >> "$PENDINGVAULT/.claude/skills/triage-inbox/SKILL.md"
 "$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null
 if "$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null 2>&1; then
   fail "second prepare should refuse while a git-off update is pending"

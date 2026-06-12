@@ -119,7 +119,16 @@ class TestUpdateClassification(unittest.TestCase):
             self.assertEqual(by_path[".gitignore"]["class"], "hybrid")
             self.assertEqual(by_path[".gitignore"]["disposition"], Disposition.UNCHANGED)
             self.assertEqual(by_path["_config/overrides.md"]["disposition"], Disposition.SEED_IF_ABSENT)
-            self.assertEqual(len(unresolved), 3)
+            # The identical-content rename (similarity 1.0, no local edit) is
+            # auto-resolved; edited + collision remain unresolved.
+            rename = next(e for e in entries if e["disposition"] == Disposition.RENAME_CANDIDATE)
+            self.assertTrue(rename["resolved"])
+            self.assertEqual(rename["resolution"], "auto-rename")
+            self.assertEqual(len(unresolved), 2)
+            self.assertEqual(
+                {e["disposition"] for e in unresolved},
+                {Disposition.EDITED, Disposition.COLLISION},
+            )
 
     def test_rename_candidate_with_existing_destination_is_collision(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -239,6 +248,22 @@ class TestDetectRenames(unittest.TestCase):
             self.assertGreater(scores["b.md"], scores["a.md"])
             # Best pair is emitted first (score-sorted).
             self.assertEqual(candidates[0]["old_path"], "b.md")
+
+
+class TestThreeWayMerge(unittest.TestCase):
+    def test_clean_and_conflicting(self):
+        import tempfile, pathlib
+        from memex_update import three_way_merge
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            (d / "base").write_text("a\nb\nc\n")
+            (d / "current").write_text("a\nb LOCAL\nc\n")
+            (d / "staged").write_text("a\nb\nc\nENGINE\n")
+            merged = three_way_merge(d / "current", d / "base", d / "staged")
+            self.assertIn("b LOCAL", merged)
+            self.assertIn("ENGINE", merged)
+            (d / "staged2").write_text("a\nb ENGINE\nc\n")
+            self.assertIsNone(three_way_merge(d / "current", d / "base", d / "staged2"))
 
 
 class TestNewTokenDetection(unittest.TestCase):
