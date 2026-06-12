@@ -267,6 +267,15 @@ class TestSafeRelPath(unittest.TestCase):
         assert_safe_rel_path("Atlas/People/X.md", "test")  # no raise
 
 
+class TestValidatePlanPaths(unittest.TestCase):
+    def test_non_dict_entries_raise(self):
+        from memex_update import validate_plan_paths
+        for bad in (["not-a-dict"], [None], [["path"]], [{"path": "ok.md"}, 7]):
+            with self.assertRaises(RuntimeError):
+                validate_plan_paths({"entries": bad})
+        validate_plan_paths({"entries": [{"path": "Atlas/X.md"}]})  # no raise
+
+
 class TestParseSetValues(unittest.TestCase):
     def test_malformed_item_raises(self):
         from memex_update import parse_set_values

@@ -58,6 +58,8 @@ def assert_safe_rel_path(rel: str, origin: str) -> None:
 
 def validate_plan_paths(plan: dict[str, Any]) -> None:
     for entry in plan.get("entries", []):
+        if not isinstance(entry, dict):
+            raise RuntimeError("malformed plan: entries must be objects")
         for key in ("path", "new_path", "archive_path", "aside_path"):
             value = entry.get(key)
             if isinstance(value, str) and value:
@@ -144,7 +146,8 @@ def prune_finished_work_dirs(vault_dir: pathlib.Path) -> None:
     """Remove past .memex/update-work/* runs that are complete or dry-run previews,
     so staging trees don't accumulate. Pending runs are kept (a merge may be in
     flight); `abort` removes those explicitly. Work dirs with no inline plan are
-    kept because a custom --plan may still point at their staged/version files."""
+    kept out of conservatism: dirs written by older tool versions may lack a
+    readable plan.json, and deleting blind could discard an undo archive."""
     base = vault_dir / ".memex/update-work"
     if not base.exists():
         return
@@ -264,8 +267,11 @@ def is_git_repo(vault_dir: pathlib.Path) -> bool:
 
 
 def assert_clean_git(vault_dir: pathlib.Path) -> None:
-    out = run_git(vault_dir, ["status", "--porcelain", "--untracked-files=all"])
-    if out.stdout.strip():
+    # .memex/ is engine state and always update-owned; an abandoned update can
+    # leave a staged .memex/manifest.json deletion (untrack_memex_state) that
+    # the user cannot meaningfully "commit or stash". Only refuse on real dirt.
+    dirty = {path for path in dirty_paths(vault_dir) if not path.startswith(".memex/")}
+    if dirty:
         raise RuntimeError(
             "refusing: git working tree is dirty. Commit or stash local changes before running update."
         )
@@ -822,6 +828,10 @@ def prepare_update(args: argparse.Namespace) -> int:
             )
 
         version = engine_version(engine_dir)
+        now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        work_dir = vault_dir / ".memex/update-work" / f"{version}-{now}"
+        plan_path = work_dir / "plan.json"
+
         git_branch: str | None = None
         previous_branch: str | None = None
         git_on = answers["GIT_MODE"] != "none" and is_git_repo(vault_dir)
@@ -835,8 +845,28 @@ def prepare_update(args: argparse.Namespace) -> int:
             git_branch = ensure_update_branch(vault_dir, version)
             untrack_memex_state(vault_dir)
 
-        now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        work_dir = vault_dir / ".memex/update-work" / f"{version}-{now}"
+        if not args.dry_run:
+            # Arm the pending-update guard the moment the vault is mutated
+            # (branch created, .memex state untracked): a crash before the full
+            # provisional plan below (e.g. Ctrl-C at the prune prompt) must
+            # still leave a plan on disk that abort can act on.
+            write_plan(
+                plan_path=plan_path,
+                manifest=manifest,
+                answers=answers,
+                packs=packs,
+                engine_dir=engine_dir,
+                vault_dir=vault_dir,
+                work_dir=work_dir,
+                entries=[],
+                unresolved=[],
+                added_tokens=added_tokens,
+                branch=git_branch,
+                previous_branch=previous_branch,
+                dry_run=False,
+                status_override="applying",
+            )
+
         staged_dir = work_dir / "staged"
         source_map = bake_engine(
             engine_dir,
@@ -871,7 +901,6 @@ def prepare_update(args: argparse.Namespace) -> int:
                 value = prompt_input(f"Prune {removed_count} untouched files removed upstream? [y/N]: ").strip().lower()
                 prune_removed = value in {"y", "yes"}
 
-        plan_path = work_dir / "plan.json"
         if not args.dry_run:
             # Write a provisional plan before touching the vault: a crash
             # mid-apply must leave a plan on disk (it carries the undo/work
@@ -900,6 +929,11 @@ def prepare_update(args: argparse.Namespace) -> int:
                 prune_removed=prune_removed,
             )
 
+        # In the no-unresolved path, hold "applying" until the manifest write
+        # and commit below succeed: marking "complete" early would disarm the
+        # pending guard and let prune_finished_work_dirs reap the undo archive
+        # after a crash between here and the commit.
+        hold_applying = bool(not unresolved and not args.dry_run)
         plan = write_plan(
             plan_path=plan_path,
             manifest=manifest,
@@ -914,6 +948,7 @@ def prepare_update(args: argparse.Namespace) -> int:
             branch=git_branch,
             previous_branch=previous_branch,
             dry_run=args.dry_run,
+            status_override="applying" if hold_applying else None,
         )
 
         if not unresolved and not args.dry_run:
@@ -972,6 +1007,12 @@ def finalize_update(args: argparse.Namespace) -> int:
         return 1
     if plan.get("dry_run") or plan.get("status") == "dry-run":
         print("error: cannot finalize a dry-run plan; rerun prepare without --dry-run")
+        return 1
+    if plan.get("status") == "applying":
+        print(
+            "error: plan is mid-apply (prepare did not finish); "
+            f"run abort --plan {plan_path} and re-run prepare"
+        )
         return 1
     # The plan's entries were reviewed against a specific engine tree; a moved
     # or since-pulled engine checkout would rewrite manifest/baseline for
@@ -1074,6 +1115,10 @@ def abort_update(args: argparse.Namespace) -> int:
     ]
     if tracked:
         run_git(vault_dir, ["restore", "--source=HEAD", "--staged", "--worktree", "--", *tracked], check=False)
+    # untrack_memex_state stages a .memex deletion; ls-files above no longer
+    # sees those paths, so re-stage them from HEAD explicitly. On vaults that
+    # never tracked .memex this is a no-op (next prepare untracks again).
+    run_git(vault_dir, ["restore", "--staged", "--", ".memex"], check=False)
 
     # Remove untracked files the update added (new framework files, freshly
     # seeded files). Not gated on applied=True: a crash mid-apply leaves the
@@ -1095,6 +1140,7 @@ def abort_update(args: argparse.Namespace) -> int:
         if previous and previous != branch:
             switched = run_git(vault_dir, ["switch", previous], check=False)
             if switched.returncode == 0:
+                returned_to = previous
                 unique = run_git(vault_dir, ["rev-list", f"{previous}..{branch}"], check=False).stdout.strip()
                 if not unique:
                     run_git(vault_dir, ["branch", "-D", branch], check=False)

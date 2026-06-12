@@ -102,6 +102,27 @@ if "$NEXT/bin/memex-update" finalize --vault "$VAULT" --plan "$PLAN" >/dev/null 
   fail "finalize should refuse a pending unresolved plan"
 fi
 
+# finalize must refuse a mid-apply plan (crash during prepare's safe ops)
+python3 - "$PLAN" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+plan = json.loads(path.read_text())
+plan["status"] = "applying"
+path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n")
+PY
+APPLYING_OUT="$TMP/applying-finalize.out"
+if "$NEXT/bin/memex-update" finalize --vault "$VAULT" --plan "$PLAN" >"$APPLYING_OUT" 2>&1; then
+  fail "finalize should refuse a mid-apply (applying) plan"
+fi
+grep -q "mid-apply" "$APPLYING_OUT" || fail "applying refusal should mention mid-apply"
+python3 - "$PLAN" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+plan = json.loads(path.read_text())
+plan["status"] = "pending"
+path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n")
+PY
+
 python3 - "$PLAN" "$NEXT/tools" <<'PY'
 import json, pathlib, sys
 sys.path.insert(0, sys.argv[2])
