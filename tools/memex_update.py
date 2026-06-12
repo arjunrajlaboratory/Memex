@@ -13,6 +13,7 @@ import datetime
 import difflib
 import io
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,31 @@ from memex_bake import (
 
 RENAME_SIMILARITY_THRESHOLD = 0.82
 ENGINE_FILE_CLASSES = {"framework", "hybrid"}
+DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def assert_safe_rel_path(rel: str, origin: str) -> None:
+    """Manifest/plan paths are consumed by copy/delete operations against the
+    vault. In an LLM-maintained vault those files are agent-writable, so a
+    poisoned entry must never escape the vault root."""
+    raw = str(rel).replace("\\", "/")
+    p = pathlib.PurePosixPath(raw)
+    if p.is_absolute() or raw.startswith("~") or DRIVE_RE.match(raw) or ".." in p.parts or not raw.strip():
+        raise RuntimeError(f"unsafe path {rel!r} in {origin}; refusing")
+
+
+def validate_plan_paths(plan: dict[str, Any]) -> None:
+    for entry in plan.get("entries", []):
+        for key in ("path", "new_path", "archive_path", "aside_path"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                assert_safe_rel_path(value, f"plan entry {key}")
+        raw_extra = entry.get("extra_paths", [])
+        if isinstance(raw_extra, str):
+            raw_extra = [raw_extra]
+        for extra in raw_extra:
+            if isinstance(extra, str) and extra:
+                assert_safe_rel_path(extra, "plan entry extra_paths")
 
 
 class Disposition:
@@ -107,9 +133,10 @@ def parse_set_values(items: list[str] | None) -> dict[str, str]:
     """Parse repeated --set TOKEN=VALUE pairs into a dict."""
     out: dict[str, str] = {}
     for item in items or []:
-        if "=" in item:
-            key, value = item.split("=", 1)
-            out[key.strip()] = value
+        if "=" not in item:
+            raise RuntimeError(f"--set expects TOKEN=VALUE, got {item!r}")
+        key, value = item.split("=", 1)
+        out[key.strip()] = value
     return out
 
 
@@ -145,7 +172,7 @@ def pending_update_plans(vault_dir: pathlib.Path) -> list[pathlib.Path]:
             status = read_json(plan).get("status")
         except (ValueError, OSError):
             continue
-        if status in {"pending", "commit-failed"}:
+        if status in {"pending", "commit-failed", "applying"}:
             pending.append(plan)
     return pending
 
@@ -203,7 +230,8 @@ def add_version_paths(
 
 def run_git(vault_dir: pathlib.Path, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args],
+        # quotepath off so non-ASCII paths come back verbatim, not octal-escaped
+        ["git", "-c", "core.quotepath=off", *args],
         cwd=str(vault_dir),
         text=True,
         capture_output=True,
@@ -264,7 +292,7 @@ def ensure_update_branch(vault_dir: pathlib.Path, version: str) -> str:
     current = run_git(vault_dir, ["branch", "--show-current"], check=False).stdout.strip()
     if current == branch:
         return branch
-    exists = run_git(vault_dir, ["rev-parse", "--verify", branch], check=False)
+    exists = run_git(vault_dir, ["rev-parse", "--verify", f"refs/heads/{branch}"], check=False)
     if exists.returncode == 0:
         raise RuntimeError(
             f"update branch {branch} already exists; switch to it to continue that update "
@@ -272,6 +300,17 @@ def ensure_update_branch(vault_dir: pathlib.Path, version: str) -> str:
         )
     run_git(vault_dir, ["switch", "-c", branch])
     return branch
+
+
+def untrack_memex_state(vault_dir: pathlib.Path) -> None:
+    """.memex/ is gitignored as of engine 0.x, but vaults installed by older
+    engines committed .memex/manifest.json (which embeds the user's answers).
+    gitignore does not untrack already-tracked files, so the next update would
+    leave a permanently dirty worktree. Untrack once; the removal rides the
+    update commit."""
+    tracked = run_git(vault_dir, ["ls-files", "--", ".memex"], check=False).stdout.strip()
+    if tracked:
+        run_git(vault_dir, ["rm", "-r", "--cached", "-q", "--", ".memex"], check=False)
 
 
 def filter_unignored(vault_dir: pathlib.Path, paths: set[str] | list[str]) -> list[str]:
@@ -315,7 +354,10 @@ def extract_engine_commit(engine_dir: pathlib.Path, commit: str, dest: pathlib.P
         raise RuntimeError(f"cannot reconstruct baseline from engine commit {commit}: {stderr}")
     dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as tar:
-        tar.extractall(dest)
+        try:
+            tar.extractall(dest, filter="data")
+        except TypeError:  # Python < 3.12 has no filter= parameter
+            tar.extractall(dest)
     return dest
 
 
@@ -491,10 +533,12 @@ def classify_update(
         baseline = baseline_dir / rel
         staged = staged_dir / rel
         meta = old_fw[rel]
-        if not baseline.exists():
-            disposition = Disposition.EDITED
-        elif not current.exists():
+        # Order matters: a locally-deleted file with a missing baseline is still
+        # DELETED_LOCAL, not EDITED (there is no current content to have edited).
+        if not current.exists():
             disposition = Disposition.DELETED_LOCAL
+        elif not baseline.exists():
+            disposition = Disposition.EDITED
         else:
             current_hash = sha256_file(current)
             baseline_hash = meta.get("sha256") or sha256_file(baseline)
@@ -624,7 +668,11 @@ def plan_update_paths(plan: dict[str, Any]) -> set[str]:
 def assert_only_plan_paths_dirty(vault_dir: pathlib.Path, plan: dict[str, Any]) -> None:
     allowed = plan_update_paths(plan)
     dirty = dirty_paths(vault_dir)
-    unexpected = sorted(path for path in dirty if path not in allowed)
+    # .memex/ is engine state and always update-owned; older vaults may have
+    # tracked files there whose staged removal (untrack_memex_state) shows dirty.
+    unexpected = sorted(
+        path for path in dirty if path not in allowed and not path.startswith(".memex/")
+    )
     if unexpected:
         preview = ", ".join(unexpected[:5])
         suffix = "" if len(unexpected) <= 5 else f", ... and {len(unexpected) - 5} more"
@@ -639,12 +687,16 @@ def apply_safe_operations(
     *,
     vault_dir: pathlib.Path,
     staged_dir: pathlib.Path,
+    work_dir: pathlib.Path,
     prune_removed: bool,
 ) -> None:
     for entry in entries:
         rel = entry["path"]
         disposition = entry["disposition"]
         if disposition == Disposition.REPLACE_UNTOUCHED:
+            # Archive the original first: non-git vaults have no other recovery.
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
             copy_file(staged_dir / rel, vault_dir / rel)
             entry["applied"] = True
         elif disposition == Disposition.NEW:
@@ -655,6 +707,9 @@ def apply_safe_operations(
                 copy_file(staged_dir / rel, vault_dir / rel)
                 entry["applied"] = True
         elif disposition == Disposition.REMOVED_UPSTREAM and prune_removed:
+            # Archive the original first: non-git vaults have no other recovery.
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
             remove_file(vault_dir / rel)
             entry["applied"] = True
         elif disposition in AUTO_APPLIED_DISPOSITIONS:
@@ -679,6 +734,7 @@ def write_plan(
     answers: dict[str, Any],
     packs: list[str],
     engine_dir: pathlib.Path,
+    vault_dir: pathlib.Path,
     work_dir: pathlib.Path,
     entries: list[dict[str, Any]],
     unresolved: list[dict[str, Any]],
@@ -686,8 +742,9 @@ def write_plan(
     branch: str | None,
     previous_branch: str | None = None,
     dry_run: bool = False,
+    status_override: str | None = None,
 ) -> dict[str, Any]:
-    status = "dry-run" if dry_run else ("pending" if unresolved else "complete")
+    status = status_override or ("dry-run" if dry_run else ("pending" if unresolved else "complete"))
     payload = {
         "status": status,
         "dry_run": dry_run,
@@ -705,10 +762,12 @@ def write_plan(
         "answers": answers,
         "added_tokens": added_tokens,
         "branch": branch,
-        "work_dir": work_dir.as_posix(),
+        # Stored vault-relative so the plan survives a vault move (work_dir is
+        # always under the vault).
+        "work_dir": work_dir.relative_to(vault_dir).as_posix(),
         "entries": entries,
         "summary": summarize(entries, unresolved),
-        "finalize_command": f"python3 {pathlib.Path(__file__).as_posix()} finalize --eng {engine_dir.as_posix()} --vault <vault> --plan {plan_path.as_posix()}",
+        "finalize_command": f"python3 {pathlib.Path(__file__).resolve().as_posix()} finalize --eng {engine_dir.as_posix()} --vault <vault> --plan {plan_path.as_posix()}",
     }
     write_json(plan_path, payload)
     return payload
@@ -723,11 +782,13 @@ def prepare_update(args: argparse.Namespace) -> int:
         return 1
 
     manifest = read_json(manifest_path)
-    packs = manifest.get("packs", ["core"])
-    placeholder_manifest = read_json(engine_dir / "placeholders.json")
-    base_answers = dict(manifest.get("answers", {}))
-    base_answers.update(parse_set_values(getattr(args, "set_values", [])))
     try:
+        for rel in manifest.get("files", {}):
+            assert_safe_rel_path(rel, ".memex/manifest.json files")
+        packs = manifest.get("packs", ["core"])
+        placeholder_manifest = read_json(engine_dir / "placeholders.json")
+        base_answers = dict(manifest.get("answers", {}))
+        base_answers.update(parse_set_values(getattr(args, "set_values", [])))
         answers, added_tokens = fill_new_answers(
             placeholder_manifest,
             base_answers,
@@ -772,6 +833,7 @@ def prepare_update(args: argparse.Namespace) -> int:
             previous_branch = None if current_branch == update_branch else current_branch
         if git_on and not args.no_git_branch and not args.dry_run:
             git_branch = ensure_update_branch(vault_dir, version)
+            untrack_memex_state(vault_dir)
 
         now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         work_dir = vault_dir / ".memex/update-work" / f"{version}-{now}"
@@ -806,24 +868,45 @@ def prepare_update(args: argparse.Namespace) -> int:
         if not prune_removed:
             removed_count = sum(1 for entry in entries if entry["disposition"] == Disposition.REMOVED_UPSTREAM)
             if removed_count:
-                value = input(f"Prune {removed_count} untouched files removed upstream? [y/N]: ").strip().lower()
+                value = prompt_input(f"Prune {removed_count} untouched files removed upstream? [y/N]: ").strip().lower()
                 prune_removed = value in {"y", "yes"}
 
+        plan_path = work_dir / "plan.json"
         if not args.dry_run:
+            # Write a provisional plan before touching the vault: a crash
+            # mid-apply must leave a plan on disk (it carries the undo/work
+            # paths and keeps the pending-update guard armed).
+            write_plan(
+                plan_path=plan_path,
+                manifest=manifest,
+                answers=answers,
+                packs=packs,
+                engine_dir=engine_dir,
+                vault_dir=vault_dir,
+                work_dir=work_dir,
+                entries=entries,
+                unresolved=unresolved,
+                added_tokens=added_tokens,
+                branch=git_branch,
+                previous_branch=previous_branch,
+                dry_run=False,
+                status_override="applying",
+            )
             apply_safe_operations(
                 entries,
                 vault_dir=vault_dir,
                 staged_dir=staged_dir,
+                work_dir=work_dir,
                 prune_removed=prune_removed,
             )
 
-        plan_path = pathlib.Path(args.plan) if args.plan else work_dir / "plan.json"
         plan = write_plan(
             plan_path=plan_path,
             manifest=manifest,
             answers=answers,
             packs=packs,
             engine_dir=engine_dir,
+            vault_dir=vault_dir,
             work_dir=work_dir,
             entries=entries,
             unresolved=unresolved,
@@ -882,8 +965,22 @@ def finalize_update(args: argparse.Namespace) -> int:
         print(f"error: plan not found: {plan_path}")
         return 1
     plan = read_json(plan_path)
+    try:
+        validate_plan_paths(plan)
+    except RuntimeError as exc:
+        print(f"error: {exc}")
+        return 1
     if plan.get("dry_run") or plan.get("status") == "dry-run":
         print("error: cannot finalize a dry-run plan; rerun prepare without --dry-run")
+        return 1
+    # The plan's entries were reviewed against a specific engine tree; a moved
+    # or since-pulled engine checkout would rewrite manifest/baseline for
+    # content the user never saw.
+    plan_to = plan.get("engine_to") or {}
+    current_commit = engine_commit(engine_dir)
+    if plan_to.get("commit") and current_commit and plan_to["commit"] != current_commit:
+        print(f"error: engine checkout {current_commit} does not match the plan's engine_to "
+              f"{plan_to['commit']}; check out that commit (or re-run prepare)")
         return 1
     answers = plan.get("answers", {})
     packs = plan.get("packs", ["core"])
@@ -937,7 +1034,12 @@ def finalize_update(args: argparse.Namespace) -> int:
     write_json(plan_path, plan)
     work_dir = plan.get("work_dir")
     if work_dir:
-        strip_work_heavy(pathlib.Path(work_dir))
+        wd = pathlib.Path(work_dir)
+        wd = vault_dir / wd if not wd.is_absolute() else wd  # old plans stored absolute
+        # work_dir lives under the vault by construction; never clean elsewhere
+        # (the plan file is agent-writable).
+        if wd.resolve().is_relative_to(vault_dir):
+            strip_work_heavy(wd)
     print(f"finalize: manifest and baseline refreshed for engine {version}")
     return 0
 
@@ -952,6 +1054,11 @@ def abort_update(args: argparse.Namespace) -> int:
         print(f"error: plan not found: {plan_path}")
         return 1
     plan = read_json(plan_path)
+    try:
+        validate_plan_paths(plan)
+    except RuntimeError as exc:
+        print(f"error: {exc}")
+        return 1
     if not is_git_repo(vault_dir):
         print("abort: not a git repo; remove update changes manually if needed.")
         return 1
@@ -968,9 +1075,12 @@ def abort_update(args: argparse.Namespace) -> int:
     if tracked:
         run_git(vault_dir, ["restore", "--source=HEAD", "--staged", "--worktree", "--", *tracked], check=False)
 
-    # Remove untracked files the update added (new framework files, freshly seeded files).
+    # Remove untracked files the update added (new framework files, freshly
+    # seeded files). Not gated on applied=True: a crash mid-apply leaves the
+    # provisional plan with applied=False; the ls-files + is_file checks below
+    # keep this safe for files the update never actually created.
     for entry in plan.get("entries", []):
-        if entry.get("applied") and entry.get("disposition") in ABORT_UNTRACKED_DISPOSITIONS:
+        if entry.get("disposition") in ABORT_UNTRACKED_DISPOSITIONS:
             rel = entry.get("path")
             if not rel:
                 continue
@@ -995,7 +1105,12 @@ def abort_update(args: argparse.Namespace) -> int:
 
     work_dir = plan.get("work_dir")
     if work_dir:
-        shutil.rmtree(pathlib.Path(work_dir), ignore_errors=True)
+        wd = pathlib.Path(work_dir)
+        wd = vault_dir / wd if not wd.is_absolute() else wd  # old plans stored absolute
+        # work_dir lives under the vault by construction; never delete elsewhere
+        # (the plan file is agent-writable).
+        if wd.resolve().is_relative_to(vault_dir):
+            shutil.rmtree(wd, ignore_errors=True)
     if branch and returned_to == branch:
         print(f"abort: reverted update changes; stayed on {branch} (no previous branch recorded)")
     else:
@@ -1010,7 +1125,6 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--eng", required=True)
     prepare.add_argument("--vault", default=".")
-    prepare.add_argument("--plan")
     prepare.add_argument("--non-interactive", action="store_true")
     prepare.add_argument("--yes-prune", action="store_true")
     prepare.add_argument("--dry-run", action="store_true")

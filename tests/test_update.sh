@@ -50,7 +50,11 @@ PY
 git -C "$VAULT" config user.email test@example.com
 git -C "$VAULT" config user.name "Memex Test"
 git -C "$VAULT" add .
+# Simulate a vault installed by an older engine that committed .memex state
+# (now gitignored, hence -f); the update must untrack it once.
+git -C "$VAULT" add -f .memex/manifest.json
 git -C "$VAULT" commit -m "init" >/dev/null
+[ -n "$(git -C "$VAULT" ls-files .memex/)" ] || fail "migration setup: .memex/manifest.json should start tracked"
 
 cat >> "$VAULT/.claude/skills/email/SKILL.md" <<'EOF'
 
@@ -122,6 +126,7 @@ assert m["answers"].get("OWNER_TIMEZONE") == "America/New_York", m["answers"].ge
 PY
 grep -q "Update test marker:" "$VAULT/.memex/baseline/.claude/skills/triage-inbox/SKILL.md" || fail "baseline not refreshed to new engine"
 [ -z "$(git -C "$VAULT" status --porcelain)" ] || fail "worktree should be clean after finalize"
+[ -z "$(git -C "$VAULT" ls-files .memex/)" ] || fail "tracked .memex state was not untracked by the update"
 
 cat > "$VAULT/Atlas/Projects/Unrelated.md" <<'EOF'
 # Unrelated

@@ -258,6 +258,23 @@ class TestNewTokenDetection(unittest.TestCase):
         )
 
 
+class TestSafeRelPath(unittest.TestCase):
+    def test_rejects_absolute_and_parent_and_drive(self):
+        from memex_update import assert_safe_rel_path
+        for bad in ("/etc/passwd", "../escape.md", "a/../../b", "~root/x", "C:/x"):
+            with self.assertRaises(RuntimeError):
+                assert_safe_rel_path(bad, "test")
+        assert_safe_rel_path("Atlas/People/X.md", "test")  # no raise
+
+
+class TestParseSetValues(unittest.TestCase):
+    def test_malformed_item_raises(self):
+        from memex_update import parse_set_values
+        with self.assertRaises(RuntimeError):
+            parse_set_values(["OWNER_TIMEZONE"])
+        self.assertEqual(parse_set_values(["A=b=c"]), {"A": "b=c"})
+
+
 class TestPlanResolution(unittest.TestCase):
     def test_unresolved_plan_entries_ignore_resolved_items(self):
         plan = {
