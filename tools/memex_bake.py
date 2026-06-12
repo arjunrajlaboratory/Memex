@@ -534,6 +534,16 @@ def bake_engine(
                 bake_file(fp, dst, answers, normalized)
                 result.record(dst.relative_to(target), "hardened", fp)
 
+    # Hand-curated vault utilities (memex-doctor.sh etc.) — installed flat
+    # into scripts/ alongside serve_quartz.sh.
+    extra_scripts = engine_dir / "hardened/scripts"
+    if extra_scripts.exists():
+        for fp in extra_scripts.iterdir():
+            if fp.is_file():
+                dst = target / "scripts" / fp.name
+                bake_file(fp, dst, answers, normalized)
+                result.record(dst.relative_to(target), "hardened", fp)
+
     for base_name, out_name in [("AGENTS.base.md", "AGENTS.md"), ("CLAUDE.base.md", "CLAUDE.md")]:
         text = bake((engine_dir / "hardened/contract" / base_name).read_text(), answers, normalized)
         if "pi" in packs:
