@@ -21,6 +21,9 @@ if (no_unbaked "$SELFTEST") >/dev/null 2>&1; then
 fi
 rm -rf "$SELFTEST"
 
+# Engine self-consistency gate (packs.json<->disk, token catalog, sections).
+python3 "$ENG/tools/audit_refs.py" "$ENG" >/dev/null || fail "audit_refs gate"
+
 # General optional-token regression gate: a blank optional answer must drop its
 # surrounding prose via {{?TOKEN}}…{{/TOKEN}} sections, NOT bake an empty `` pair
 # (or a dangling clause). Scans for empty inline-code that is not part of a ```

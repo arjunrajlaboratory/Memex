@@ -84,6 +84,7 @@ changing `packs.json` / `placeholders.json` / `scrub.json`, re-derive and re-che
 python3 tools/derive.py --src ~/code/your-source-vault --eng .     # rebuild packs/ + hardened/ (never writes to --src)
 python3 tools/audit_literals.py ./packs                   # must be AUDIT CLEAN
 python3 tools/audit_literals.py ./hardened                # must be AUDIT CLEAN
+python3 tools/audit_refs.py .                          # must be REFS CLEAN
 (cd tools && python3 -m unittest)                         # bake() unit tests
 tests/test_init.sh                                        # full init integration test (core + pi)
 ```
