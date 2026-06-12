@@ -193,5 +193,25 @@ class TestAnswersDefaults(unittest.TestCase):
         out = answers_with_defaults(manifest, {"QUARTZ_PORT": ""})
         self.assertEqual(out["QUARTZ_PORT"], "8181")
 
+class TestAnswerDerivation(unittest.TestCase):
+    def test_vault_path_and_slug_derived_from_target(self):
+        import pathlib
+        from memex_init import derive_path_answers
+        answers = {"VAULT_PATH": "/somewhere/else", "VAULT_NAME": "", "CC_PROJECT_SLUG": ""}
+        notes = derive_path_answers(answers, pathlib.Path("/tmp/my.vault"))
+        self.assertEqual(answers["VAULT_PATH"], "/tmp/my.vault")
+        self.assertEqual(answers["VAULT_NAME"], "my.vault")
+        self.assertEqual(answers["CC_PROJECT_SLUG"], "-tmp-my-vault")
+        self.assertTrue(any("VAULT_PATH" in n for n in notes))
+
+class TestAnswerValidation(unittest.TestCase):
+    def test_blank_required_and_bad_port_reported(self):
+        from memex_init import validate_answers
+        problems = validate_answers({"OWNER_NAME": "", "OWNER_PRIMARY_EMAIL": "a@b.co",
+                                     "TIMEZONE": "UTC", "QUARTZ_PORT": "eight"})
+        self.assertTrue(any("OWNER_NAME" in p for p in problems))
+        self.assertTrue(any("QUARTZ_PORT" in p for p in problems))
+        self.assertFalse(any("OWNER_PRIMARY_EMAIL" in p for p in problems))
+
 if __name__ == "__main__":
     unittest.main()

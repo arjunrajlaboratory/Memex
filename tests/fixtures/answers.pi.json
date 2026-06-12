@@ -3,7 +3,6 @@
   "OWNER_PRIMARY_EMAIL": "jane@example.com",
   "OWNER_FORWARDING_EMAIL": "jane@example.edu",
   "OWNER_SENDING_ACCOUNTS": "jane@lab.example.edu,jane@hospital.example.org",
-  "FRAMING": "Professor at Example University",
   "VAULT_PATH": "/tmp/example-vault-pi",
   "USER_HOME": "/Users/jane",
   "DRIVE_MOUNT": "GoogleDrive-jane@example.com",

@@ -8,8 +8,6 @@
       "literals": [] },
     { "token": "OWNER_SENDING_ACCOUNTS", "prompt": "Other email accounts you send from that the Gmail MCP cannot read (comma-separated, or blank)", "example": "you@school.edu,you@hospital.org",
       "literals": [] },
-    { "token": "FRAMING", "prompt": "One-line framing for briefings (your role/affiliation)", "example": "Director of Research at Example University; Professor in the Example Department",
-      "literals": [] },
     { "token": "VAULT_PATH", "prompt": "Absolute path where this vault lives", "example": "/Users/you/vault",
       "literals": [] },
     { "token": "USER_HOME", "prompt": "Your home directory absolute path", "example": "/Users/you",

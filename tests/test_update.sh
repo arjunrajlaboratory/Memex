@@ -239,7 +239,6 @@ cat > "$TMP/rejected-rename-plan.json" <<EOF
     "OWNER_PRIMARY_EMAIL": "jane@example.com",
     "OWNER_FORWARDING_EMAIL": "",
     "OWNER_SENDING_ACCOUNTS": "",
-    "FRAMING": "Example framing",
     "VAULT_PATH": "$RENAMEVAULT",
     "USER_HOME": "$TMP",
     "TIMEZONE": "America/New_York",

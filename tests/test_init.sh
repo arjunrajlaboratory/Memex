@@ -75,6 +75,9 @@ grep -q "^\.memex/$" "$TMP/core/.gitignore" || fail ".memex/ (manifest answers +
 [ -f "$TMP/core/CLAUDE.md" ] || fail "CLAUDE.md missing"
 [ -f "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/"
 [ -f "$TMP/core/scripts/launchd/com.memex.quartz.example-vault.plist" ] || fail "launchd plist missing/misnamed (should carry vault name)"
+# VAULT_PATH is derived from --target (fixture says /tmp/example-vault; init overrides)
+grep -q "$TMP/core/scripts/serve_quartz.sh" "$TMP/core/scripts/launchd/com.memex.quartz.example-vault.plist" \
+  || fail "plist VAULT_PATH not derived from --target"
 # sources config seed: present, default streams (email+slack on, calendar off), local git
 [ -f "$TMP/core/_config/sources.md" ] || fail "_config/sources.md seed missing"
 grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email stream not enabled by default"
