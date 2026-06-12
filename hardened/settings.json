@@ -1,4 +1,13 @@
 {
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -13,7 +22,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "^(Edit|Write)$",
         "hooks": [
           {
             "type": "command",

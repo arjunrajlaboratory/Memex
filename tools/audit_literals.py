@@ -4,7 +4,7 @@
 Usage: audit_literals.py <tree-to-scan> [--manifest placeholders.json]
 Exit 0 if every detected literal is covered by a manifest literal; 1 otherwise.
 """
-import argparse, json, pathlib, re, sys
+import argparse, json, os, pathlib, re, sys
 
 # Patterns that signal an instance-specific fact. Tunable. These are *detectors*,
 # not the replacements — the manifest holds the exact literals to swap.
@@ -22,7 +22,8 @@ SKIP_DIRS = {".git", "node_modules", "public", ".quartz-cache", "_archive", "Raw
 # log.md is history; the other two are pure data/lockfiles whose long hashes are
 # noise for the drive_id detector (npm integrity hashes, base64 emoji PNGs).
 SKIP_FILES = {"log.md", "package-lock.json", "emojimap.json"}
-TEXT_EXT = {".md", ".ts", ".tsx", ".sh", ".json", ".plist", ".py", ".scss"}
+TEXT_EXT = {".md", ".ts", ".tsx", ".sh", ".json", ".plist", ".py", ".scss", ".tex", ".sty", ".yaml", ".yml"}
+TEXT_NAMES = {"gitignore", ".gitignore"}  # covers engine's extensionless hardened/gitignore and dot-prefixed .gitignore files
 
 def covered_literals(manifest):
     out = set()
@@ -45,17 +46,21 @@ def main():
 
     hits = {}  # literal -> list of "file:line"
     root = pathlib.Path(args.tree)
-    for fp in root.rglob("*"):
-        if not fp.is_file() or fp.suffix not in TEXT_EXT: continue
-        if any(part in SKIP_DIRS for part in fp.parts): continue
-        if fp.name in SKIP_FILES: continue
-        for i, line in enumerate(fp.read_text(errors="ignore").splitlines(), 1):
-            for pat in PATTERNS.values():
-                for m in pat.findall(line):
-                    if m.startswith("EXAMPLE"):
-                        continue
-                    if m in covered: continue
-                    hits.setdefault(m, []).append(f"{fp.relative_to(root)}:{i}")
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for name in filenames:
+            fp = pathlib.Path(dirpath) / name
+            if fp.suffix not in TEXT_EXT and fp.name not in TEXT_NAMES:
+                continue
+            if fp.name in SKIP_FILES:
+                continue
+            for i, line in enumerate(fp.read_text(errors="ignore").splitlines(), 1):
+                for pat in PATTERNS.values():
+                    for m in pat.findall(line):
+                        if m.startswith("EXAMPLE"):
+                            continue
+                        if m in covered: continue
+                        hits.setdefault(m, []).append(f"{fp.relative_to(root)}:{i}")
 
     if not hits:
         print("AUDIT CLEAN: no uncovered instance literals."); return 0

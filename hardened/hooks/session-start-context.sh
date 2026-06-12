@@ -12,7 +12,7 @@ cd "$REPO_ROOT" || exit 0
 
 today="$(date +%Y-%m-%d)"
 
-echo "=== LifeOS vault session-start (hook) ==="
+echo "=== Memex vault session-start (hook) ==="
 echo
 
 # Recent log.md entries — newest are at the TOP of the file (preamble first).
@@ -23,15 +23,26 @@ if [ -f log.md ]; then
   echo
 fi
 
-# Open Task counts by status. `grep -l` returns 1 on no-match — swallow that.
+# Open Task counts by status — one awk pass over all Task files (the old
+# version ran grep -l six times over the same glob).
 task_glob="Ops/Tasks/Task*.md"
+task_scan=""
 if ls $task_glob >/dev/null 2>&1; then
+  task_scan="$(awk '
+    FNR==1 { seen=0 }
+    /^status:[[:space:]]*/ && !seen {
+      seen=1; s=$2; c[s]++
+      if (s == "needs_review") nr[FILENAME]=1
+    }
+    END {
+      for (k in c) printf "count %s %d\n", k, c[k]
+      for (f in nr) printf "review %s\n", f
+    }
+  ' $task_glob 2>/dev/null)"
   echo "Open tasks:"
   for s in next in_progress scheduled waiting needs_review; do
-    n=$( (grep -l "^status: ${s}$" $task_glob 2>/dev/null || true) | wc -l | tr -d ' ')
-    if [ "${n:-0}" != "0" ]; then
-      printf "  %-14s %s\n" "$s:" "$n"
-    fi
+    n="$(printf '%s\n' "$task_scan" | awk -v s="$s" '$1=="count" && $2==s {print $3}')"
+    [ -n "${n:-}" ] && printf "  %-14s %s\n" "$s:" "$n"
   done
   echo
 fi
@@ -53,26 +64,27 @@ if [ -d "Inbox" ]; then
   fi
 fi
 
-# needs_review tasks — different cut, surfaces agent work awaiting user
-if ls $task_glob >/dev/null 2>&1; then
-  needs_review_files="$( (grep -l "^status: needs_review$" $task_glob 2>/dev/null || true) )"
-  if [ -n "$needs_review_files" ]; then
-    echo
-    echo "Tasks awaiting your review (needs_review):"
-    printf '%s\n' "$needs_review_files" | while read -r f; do
-      [ -z "$f" ] && continue
-      title="$(awk -F'"' '/^title:/{print $2; exit}' "$f" 2>/dev/null)"
-      [ -z "$title" ] && title="$(basename "$f" .md)"
-      echo "  - $title"
-    done
-  fi
+# needs_review tasks — different cut, surfaces agent work awaiting user.
+# Task filenames contain spaces, so parse the awk "review <file>" lines with
+# cut -d' ' -f2- (NOT awk $2).
+needs_review_files="$(printf '%s\n' "${task_scan:-}" | grep '^review ' | cut -d' ' -f2-)"
+if [ -n "$needs_review_files" ]; then
+  echo
+  echo "Tasks awaiting your review (needs_review):"
+  printf '%s\n' "$needs_review_files" | while read -r f; do
+    [ -z "$f" ] && continue
+    title="$(awk -F'"' '/^title:/{print $2; exit}' "$f" 2>/dev/null)"
+    [ -z "$title" ] && title="$(basename "$f" .md)"
+    echo "  - $title"
+  done
 fi
 
 # Quartz dev server — start if not running on :{{QUARTZ_PORT}} (used by skills to open
 # readable artifacts in the browser; see memory feedback_open_artifacts_in_browser).
 if [ -d quartz ] && ! lsof -ti :{{QUARTZ_PORT}} >/dev/null 2>&1; then
   echo "Quartz: starting dev server on :{{QUARTZ_PORT}} (background)..."
-  ( cd quartz && npm run site:serve > /tmp/quartz-serve.log 2>&1 & disown ) >/dev/null 2>&1
+  mkdir -p outputs
+  ( cd quartz && npm run site:serve > "$REPO_ROOT/outputs/quartz-serve.log" 2>&1 & disown ) >/dev/null 2>&1
 elif lsof -ti :{{QUARTZ_PORT}} >/dev/null 2>&1; then
   echo "Quartz: dev server already up on http://localhost:{{QUARTZ_PORT}}"
 fi

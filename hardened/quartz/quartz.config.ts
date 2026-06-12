@@ -14,7 +14,7 @@ const config: QuartzConfig = {
     enablePopovers: true,
     analytics: null,
     locale: "en-US",
-    baseUrl: "localhost:8080",
+    baseUrl: "localhost:{{QUARTZ_PORT}}",
     ignorePatterns: [
       // Quartz / build artifacts
       "quartz",
@@ -24,6 +24,11 @@ const config: QuartzConfig = {
       // Vault internals — never published
       ".obsidian",
       ".claude",
+      ".memex",
+      // _config/sources.md carries the owner's email addresses and has no
+      // sensitivity: field, so the privacy filter would publish it.
+      "_config",
+      "_config/**",
       "Inbox",
       "Inbox/**",
       "_archive",

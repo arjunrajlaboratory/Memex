@@ -4,11 +4,11 @@ The distributable engine behind a [Memex vault](https://github.com/exampleorg/va
 discipline for an LLM-maintained knowledge base plus a librarian agent that grows structure on
 demand. Ships as **packs** you opt into, derived from a real vault but carrying none of its data.
 
-- **`core` pack** (always): the ~23 job-agnostic skills + the core typed-note schemas + templates +
+- **`core` pack** (always): the 24 job-agnostic skills + the core typed-note schemas + templates +
   workflows + prompts.
 - **`pi` pack** (optional): the academic-PI example — letters / CV / grants (`draft-letter`,
   `ingest-letters`, `cv-scan`, `cv-build` + the Letter/Grant schemas + CV LaTeX).
-- **hardened core** (always): the two discipline hooks + their `settings.json` wiring, the Quartz
+- **hardened core** (always): the three discipline hooks + their `settings.json` wiring, the Quartz
   static-site + dashboards emitter, the contract template, the vault `.gitignore`, the launchd
   durable-serve setup.
 
@@ -84,6 +84,7 @@ changing `packs.json` / `placeholders.json` / `scrub.json`, re-derive and re-che
 python3 tools/derive.py --src ~/code/your-source-vault --eng .     # rebuild packs/ + hardened/ (never writes to --src)
 python3 tools/audit_literals.py ./packs                   # must be AUDIT CLEAN
 python3 tools/audit_literals.py ./hardened                # must be AUDIT CLEAN
+python3 tools/audit_refs.py .                          # must be REFS CLEAN
 (cd tools && python3 -m unittest)                         # bake() unit tests
 tests/test_init.sh                                        # full init integration test (core + pi)
 ```

@@ -168,5 +168,79 @@ class TestSourcesConfigYaml(unittest.TestCase):
         self.assertIn("calendar: { enabled: true,", out)
         self.assertIn("git_mode: remote", out)
 
+class TestSeedSafety(unittest.TestCase):
+    def test_seeds_skip_existing_files(self):
+        import tempfile, pathlib
+        from memex_bake import _write_seed_files, BakeResult
+        with tempfile.TemporaryDirectory() as tmp:
+            target = pathlib.Path(tmp)
+            (target / "log.md").write_text("# log\nPRECIOUS HISTORY\n")
+            _write_seed_files(target, {"OWNER_NAME": "X"}, ["email"], "local", "2026-06-12", BakeResult())
+            self.assertIn("PRECIOUS HISTORY", (target / "log.md").read_text())
+            self.assertTrue((target / "index.md").exists())  # absent seeds still written
+
+class TestStripSectionsNested(unittest.TestCase):
+    def test_cross_token_nesting_resolves(self):
+        from memex_bake import strip_sections
+        text = "{{?A}}a {{?B}}b{{/B}} c{{/A}}"
+        self.assertEqual(strip_sections(text, {"A": "x", "B": ""}), "a  c")
+        self.assertEqual(strip_sections(text, {"A": "x", "B": "y"}), "a b c")
+
+class TestAnswersDefaults(unittest.TestCase):
+    def test_blank_port_gets_example(self):
+        from memex_bake import answers_with_defaults
+        manifest = {"placeholders": [{"token": "QUARTZ_PORT", "example": "8181"}]}
+        out = answers_with_defaults(manifest, {"QUARTZ_PORT": ""})
+        self.assertEqual(out["QUARTZ_PORT"], "8181")
+
+class TestAnswerDerivation(unittest.TestCase):
+    def test_vault_path_and_slug_derived_from_target(self):
+        import pathlib
+        from memex_init import derive_path_answers
+        answers = {"VAULT_PATH": "/somewhere/else", "VAULT_NAME": "", "CC_PROJECT_SLUG": ""}
+        notes = derive_path_answers(answers, pathlib.Path("/tmp/my.vault"))
+        self.assertEqual(answers["VAULT_PATH"], "/tmp/my.vault")
+        self.assertEqual(answers["VAULT_NAME"], "my.vault")
+        self.assertEqual(answers["CC_PROJECT_SLUG"], "-tmp-my-vault")
+        self.assertTrue(any("VAULT_PATH" in n for n in notes))
+
+    def test_slug_turns_every_non_alphanumeric_into_dash(self):
+        # Claude Code slugs '-' ALL non-alphanumerics, including underscores.
+        import pathlib
+        from memex_init import derive_path_answers
+        answers = {}
+        derive_path_answers(answers, pathlib.Path("/tmp/my_vault"))
+        self.assertEqual(answers["CC_PROJECT_SLUG"], "-tmp-my-vault")
+
+class TestAnswerValidation(unittest.TestCase):
+    def test_blank_required_and_bad_port_reported(self):
+        from memex_init import validate_answers
+        problems = validate_answers({"OWNER_NAME": "", "OWNER_PRIMARY_EMAIL": "a@b.co",
+                                     "TIMEZONE": "UTC", "QUARTZ_PORT": "eight"})
+        self.assertTrue(any("OWNER_NAME" in p for p in problems))
+        self.assertTrue(any("QUARTZ_PORT" in p for p in problems))
+        self.assertFalse(any("OWNER_PRIMARY_EMAIL" in p for p in problems))
+
+    def test_port_range_enforced(self):
+        from memex_init import validate_answers
+        base = {"OWNER_NAME": "J", "OWNER_PRIMARY_EMAIL": "a@b.co", "TIMEZONE": "UTC"}
+        self.assertTrue(any("QUARTZ_PORT" in p
+                            for p in validate_answers({**base, "QUARTZ_PORT": "0"})))
+        self.assertTrue(any("QUARTZ_PORT" in p
+                            for p in validate_answers({**base, "QUARTZ_PORT": "70000"})))
+        self.assertFalse(any("QUARTZ_PORT" in p
+                             for p in validate_answers({**base, "QUARTZ_PORT": "8181"})))
+
+    def test_bad_timezone_rejected_when_zoneinfo_available(self):
+        try:
+            import zoneinfo
+            zoneinfo.ZoneInfo("UTC")
+        except Exception:
+            self.skipTest("zoneinfo/tzdata unavailable on this system")
+        from memex_init import validate_answers
+        problems = validate_answers({"OWNER_NAME": "J", "OWNER_PRIMARY_EMAIL": "a@b.co",
+                                     "TIMEZONE": "Not/AZone"})
+        self.assertTrue(any("TIMEZONE" in p for p in problems))
+
 if __name__ == "__main__":
     unittest.main()

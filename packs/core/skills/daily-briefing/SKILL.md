@@ -192,7 +192,7 @@ The file is the artifact, and the user wants to read it in the browser (rendered
 ```
 # 1. Ensure Quartz dev server is up on :{{QUARTZ_PORT}}
 if ! lsof -ti :{{QUARTZ_PORT}} >/dev/null 2>&1; then
-  ( cd {{VAULT_PATH}}/quartz && npm run site:serve > /tmp/quartz-serve.log 2>&1 & disown )
+  ( cd {{VAULT_PATH}}/quartz && npm run site:serve > {{VAULT_PATH}}/outputs/quartz-serve.log 2>&1 & disown )
   # Wait for boot — Quartz parses 240+ markdown files, ~4–8s
   for i in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1

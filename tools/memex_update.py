@@ -13,6 +13,7 @@ import datetime
 import difflib
 import io
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,7 @@ from memex_bake import (
     load_engine_layout,
     manifest_files_for_tree,
     normalize_git_mode,
+    placeholder_allows_blank,
     read_json,
     sha256_file,
     write_json,
@@ -41,6 +43,36 @@ from memex_bake import (
 
 RENAME_SIMILARITY_THRESHOLD = 0.82
 ENGINE_FILE_CLASSES = {"framework", "hybrid"}
+DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def assert_safe_rel_path(rel: str, origin: str) -> None:
+    """Manifest/plan paths are consumed by copy/delete operations against the
+    vault. In an LLM-maintained vault those files are agent-writable, so a
+    poisoned entry must never escape the vault root."""
+    raw = str(rel).replace("\\", "/")
+    p = pathlib.PurePosixPath(raw)
+    if p.is_absolute() or raw.startswith("~") or DRIVE_RE.match(raw) or ".." in p.parts or not raw.strip():
+        raise RuntimeError(f"unsafe path {rel!r} in {origin}; refusing")
+
+
+def validate_plan_paths(plan: dict[str, Any]) -> None:
+    entries = plan.get("entries", [])
+    if not isinstance(entries, list):
+        raise RuntimeError("malformed plan: entries must be a list")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError("malformed plan: entries must be objects")
+        for key in ("path", "new_path", "archive_path", "aside_path"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                assert_safe_rel_path(value, f"plan entry {key}")
+        raw_extra = entry.get("extra_paths", [])
+        if isinstance(raw_extra, str):
+            raw_extra = [raw_extra]
+        for extra in raw_extra:
+            if isinstance(extra, str) and extra:
+                assert_safe_rel_path(extra, "plan entry extra_paths")
 
 
 class Disposition:
@@ -106,9 +138,10 @@ def parse_set_values(items: list[str] | None) -> dict[str, str]:
     """Parse repeated --set TOKEN=VALUE pairs into a dict."""
     out: dict[str, str] = {}
     for item in items or []:
-        if "=" in item:
-            key, value = item.split("=", 1)
-            out[key.strip()] = value
+        if "=" not in item:
+            raise RuntimeError(f"--set expects TOKEN=VALUE, got {item!r}")
+        key, value = item.split("=", 1)
+        out[key.strip()] = value
     return out
 
 
@@ -116,7 +149,8 @@ def prune_finished_work_dirs(vault_dir: pathlib.Path) -> None:
     """Remove past .memex/update-work/* runs that are complete or dry-run previews,
     so staging trees don't accumulate. Pending runs are kept (a merge may be in
     flight); `abort` removes those explicitly. Work dirs with no inline plan are
-    kept because a custom --plan may still point at their staged/version files."""
+    kept out of conservatism: dirs written by older tool versions may lack a
+    readable plan.json, and deleting blind could discard an undo archive."""
     base = vault_dir / ".memex/update-work"
     if not base.exists():
         return
@@ -144,7 +178,7 @@ def pending_update_plans(vault_dir: pathlib.Path) -> list[pathlib.Path]:
             status = read_json(plan).get("status")
         except (ValueError, OSError):
             continue
-        if status in {"pending", "commit-failed"}:
+        if status in {"pending", "commit-failed", "applying"}:
             pending.append(plan)
     return pending
 
@@ -152,7 +186,7 @@ def pending_update_plans(vault_dir: pathlib.Path) -> list[pathlib.Path]:
 def strip_work_heavy(work_dir: pathlib.Path) -> None:
     """Drop the bulky staged tree + per-file version copies once they are no
     longer needed, keeping the small plan.json for review."""
-    for sub in ("staged", "versions"):
+    for sub in ("staged", "versions", "merged"):
         shutil.rmtree(work_dir / sub, ignore_errors=True)
 
 
@@ -176,6 +210,27 @@ def content_similarity(left: pathlib.Path, right: pathlib.Path) -> float:
             return 1.0
         return 0.0
     return difflib.SequenceMatcher(None, left_text, right_text).ratio()
+
+
+def three_way_merge(current: pathlib.Path, baseline: pathlib.Path, staged: pathlib.Path) -> str | None:
+    """Clean 3-way merge text, or None on conflict / unavailable git."""
+    try:
+        # bytes mode: text=True would decode with errors='strict' under the
+        # locale codec and crash (or mangle) on non-UTF-8 input.
+        proc = subprocess.run(
+            ["git", "merge-file", "--stdout", str(current), str(baseline), str(staged)],
+            capture_output=True, check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if proc.returncode != 0:  # >0: conflicts; <0: error
+        return None
+    try:
+        return proc.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        # Undecodable bytes: decline the auto-merge and fall back to manual
+        # resolution rather than risk corrupting content.
+        return None
 
 
 def staged_version_path(work_dir: pathlib.Path, bucket: str, rel: str, src: pathlib.Path | None) -> str | None:
@@ -202,7 +257,8 @@ def add_version_paths(
 
 def run_git(vault_dir: pathlib.Path, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args],
+        # quotepath off so non-ASCII paths come back verbatim, not octal-escaped
+        ["git", "-c", "core.quotepath=off", *args],
         cwd=str(vault_dir),
         text=True,
         capture_output=True,
@@ -235,8 +291,11 @@ def is_git_repo(vault_dir: pathlib.Path) -> bool:
 
 
 def assert_clean_git(vault_dir: pathlib.Path) -> None:
-    out = run_git(vault_dir, ["status", "--porcelain", "--untracked-files=all"])
-    if out.stdout.strip():
+    # .memex/ is engine state and always update-owned; an abandoned update can
+    # leave a staged .memex/manifest.json deletion (untrack_memex_state) that
+    # the user cannot meaningfully "commit or stash". Only refuse on real dirt.
+    dirty = {path for path in dirty_paths(vault_dir) if not path.startswith(".memex/")}
+    if dirty:
         raise RuntimeError(
             "refusing: git working tree is dirty. Commit or stash local changes before running update."
         )
@@ -263,7 +322,7 @@ def ensure_update_branch(vault_dir: pathlib.Path, version: str) -> str:
     current = run_git(vault_dir, ["branch", "--show-current"], check=False).stdout.strip()
     if current == branch:
         return branch
-    exists = run_git(vault_dir, ["rev-parse", "--verify", branch], check=False)
+    exists = run_git(vault_dir, ["rev-parse", "--verify", f"refs/heads/{branch}"], check=False)
     if exists.returncode == 0:
         raise RuntimeError(
             f"update branch {branch} already exists; switch to it to continue that update "
@@ -271,6 +330,17 @@ def ensure_update_branch(vault_dir: pathlib.Path, version: str) -> str:
         )
     run_git(vault_dir, ["switch", "-c", branch])
     return branch
+
+
+def untrack_memex_state(vault_dir: pathlib.Path) -> None:
+    """.memex/ is gitignored as of engine 0.x, but vaults installed by older
+    engines committed .memex/manifest.json (which embeds the user's answers).
+    gitignore does not untrack already-tracked files, so the next update would
+    leave a permanently dirty worktree. Untrack once; the removal rides the
+    update commit."""
+    tracked = run_git(vault_dir, ["ls-files", "--", ".memex"], check=False).stdout.strip()
+    if tracked:
+        run_git(vault_dir, ["rm", "-r", "--cached", "-q", "--", ".memex"], check=False)
 
 
 def filter_unignored(vault_dir: pathlib.Path, paths: set[str] | list[str]) -> list[str]:
@@ -288,10 +358,16 @@ def filter_unignored(vault_dir: pathlib.Path, paths: set[str] | list[str]) -> li
 
 def commit_update(vault_dir: pathlib.Path, version: str, paths: set[str] | None = None) -> bool:
     if paths:
-        addable = []
-        for path in filter_unignored(vault_dir, paths):
-            if (vault_dir / path).exists() or run_git(vault_dir, ["ls-files", "--error-unmatch", "--", path], check=False).returncode == 0:
-                addable.append(path)
+        unignored = filter_unignored(vault_dir, paths)
+        existing = [p for p in unignored if (vault_dir / p).exists()]
+        missing = [p for p in unignored if not (vault_dir / p).exists()]
+        tracked_missing: list[str] = []
+        if missing:
+            # One batched ls-files call instead of one subprocess per path.
+            out = run_git(vault_dir, ["ls-files", "--", *missing], check=False)
+            tracked = {line for line in out.stdout.splitlines() if line}
+            tracked_missing = [p for p in missing if p in tracked]
+        addable = existing + tracked_missing
         if addable:
             run_git(vault_dir, ["add", "--", *addable])
     else:
@@ -314,7 +390,10 @@ def extract_engine_commit(engine_dir: pathlib.Path, commit: str, dest: pathlib.P
         raise RuntimeError(f"cannot reconstruct baseline from engine commit {commit}: {stderr}")
     dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as tar:
-        tar.extractall(dest)
+        try:
+            tar.extractall(dest, filter="data")
+        except TypeError:  # Python < 3.12 has no filter= parameter
+            tar.extractall(dest)
     return dest
 
 
@@ -380,13 +459,6 @@ def fill_new_answers(
     return answers_with_defaults(placeholder_manifest, updated), added
 
 
-def placeholder_allows_blank(placeholder: dict[str, Any]) -> bool:
-    if placeholder.get("optional") is True or placeholder.get("allow_blank") is True:
-        return True
-    prompt = str(placeholder.get("prompt", "")).lower()
-    return "or blank" in prompt
-
-
 def missing_required_tokens(placeholder_manifest: dict[str, Any], added_tokens: list[str]) -> list[str]:
     placeholders = {placeholder["token"]: placeholder for placeholder in placeholder_manifest["placeholders"]}
     return [
@@ -405,24 +477,50 @@ def detect_renames(
     baseline_dir: pathlib.Path,
     staged_dir: pathlib.Path,
 ) -> list[dict[str, Any]]:
-    candidates: list[dict[str, Any]] = []
-    used_removed: set[str] = set()
-    used_new: set[str] = set()
+    texts: dict[str, str | None] = {}
+
+    def text_of(root: pathlib.Path, rel: str) -> str | None:
+        key = f"{root}:{rel}"
+        if key not in texts:
+            texts[key] = text_for_similarity(root / rel)
+        return texts[key]
+
+    scored: list[tuple[float, str, str]] = []
     for old_path in sorted(removed_paths):
         old_suffix = pathlib.PurePosixPath(old_path).suffix
-        best: tuple[float, str] | None = None
-        for new_path in sorted(new_paths - used_new):
+        old_text = text_of(baseline_dir, old_path)
+        for new_path in sorted(new_paths):
             if old_suffix and pathlib.PurePosixPath(new_path).suffix != old_suffix:
                 continue
             if old_meta[old_path].get("kind") != new_meta[new_path].get("kind"):
                 continue
-            score = content_similarity(baseline_dir / old_path, staged_dir / new_path)
-            if best is None or score > best[0]:
-                best = (score, new_path)
-        if best and best[0] >= RENAME_SIMILARITY_THRESHOLD:
-            used_removed.add(old_path)
-            used_new.add(best[1])
-            candidates.append({"old_path": old_path, "new_path": best[1], "similarity": round(best[0], 4)})
+            new_text = text_of(staged_dir, new_path)
+            if old_text is None or new_text is None:
+                score = content_similarity(baseline_dir / old_path, staged_dir / new_path)
+            else:
+                if min(len(old_text), len(new_text)) < 0.4 * max(len(old_text), len(new_text), 1):
+                    continue  # size prefilter: can't reach the similarity threshold
+                score = difflib.SequenceMatcher(None, old_text, new_text).ratio()
+            if score >= RENAME_SIMILARITY_THRESHOLD:
+                scored.append((score, old_path, new_path))
+    scored.sort(key=lambda t: (-t[0], t[1], t[2]))  # best-score-first greedy: an
+    used_old: set[str] = set()                       # earlier alphabetical pair can no
+    used_new: set[str] = set()                       # longer steal a better later match
+    candidates: list[dict[str, Any]] = []
+    for score, old_path, new_path in scored:
+        if old_path in used_old or new_path in used_new:
+            continue
+        used_old.add(old_path)
+        used_new.add(new_path)
+        candidates.append({
+            "old_path": old_path,
+            "new_path": new_path,
+            "similarity": round(score, 4),
+            # Internal, unrounded score for threshold gates (rounding 0.99949
+            # up to 0.9995 must not flip an auto-rename decision). Never copied
+            # into persisted plan entries.
+            "similarity_raw": score,
+        })
     return candidates
 
 
@@ -489,6 +587,25 @@ def classify_update(
         entry["staged_path"] = staged_version_path(work_dir, "staged", new_path, staged_dir / new_path)
         if disposition == Disposition.RENAME_COLLISION:
             entry["collision_path"] = staged_version_path(work_dir, "collision", new_path, new_current_path)
+            if (
+                not edited
+                and new_current_path.is_file()
+                and sha256_file(new_current_path) == sha256_file(staged_dir / new_path)
+            ):
+                # The destination already holds exactly the staged bytes (e.g.
+                # a non-git abort left an applied auto-rename's copy behind):
+                # nothing to reconcile at new_path; only the stale old path
+                # remains, which apply_safe_operations removes (with undo).
+                entry.update({"resolved": True, "resolution": "identical-content"})
+                entries.append(entry)
+                continue
+        if disposition == Disposition.RENAME_CANDIDATE and not edited and item["similarity_raw"] >= 0.9995:
+            # Near-identical content, no local edit, free destination: the move
+            # is mechanical, no judgement needed. Gate on the raw score so a
+            # display-rounded 0.9995 (e.g. true 0.99949) cannot sneak through.
+            entry.update({"resolved": True, "resolution": "auto-rename"})
+            entries.append(entry)
+            continue
         entries.append(entry)
         unresolved.append(entry)
 
@@ -497,10 +614,12 @@ def classify_update(
         baseline = baseline_dir / rel
         staged = staged_dir / rel
         meta = old_fw[rel]
-        if not baseline.exists():
-            disposition = Disposition.EDITED
-        elif not current.exists():
+        # Order matters: a locally-deleted file with a missing baseline is still
+        # DELETED_LOCAL, not EDITED (there is no current content to have edited).
+        if not current.exists():
             disposition = Disposition.DELETED_LOCAL
+        elif not baseline.exists():
+            disposition = Disposition.EDITED
         else:
             current_hash = sha256_file(current)
             baseline_hash = meta.get("sha256") or sha256_file(baseline)
@@ -527,7 +646,34 @@ def classify_update(
                 staged_dir=staged_dir,
                 rel=rel,
             )
-            unresolved.append(entry)
+            merged: str | None = None
+            if (
+                disposition == Disposition.EDITED
+                and meta.get("kind") == "prose"
+                and baseline.exists()
+                and current.exists()
+                and staged.exists()
+            ):
+                # Local edit + engine change that don't overlap merge cleanly;
+                # a no-op engine change (staged == baseline) merges trivially
+                # and auto-keeps the local edit.
+                merged = three_way_merge(current, baseline, staged)
+            if merged is not None:
+                merged_path = work_dir / "merged" / rel
+                merged_path.parent.mkdir(parents=True, exist_ok=True)
+                # Encode + write_bytes: byte-exact UTF-8 output with no
+                # platform newline translation (write_text would default to
+                # locale encoding and universal-newline mapping).
+                merged_path.write_bytes(merged.encode("utf-8"))
+                entry.update(
+                    {
+                        "resolved": True,
+                        "resolution": "auto-merged",
+                        "merged_path": merged_path.as_posix(),
+                    }
+                )
+            else:
+                unresolved.append(entry)
         entries.append(entry)
 
     for rel in sorted(brand_new_paths - renamed_new):
@@ -542,6 +688,14 @@ def classify_update(
             "applied": False,
         }
         if disposition == Disposition.COLLISION:
+            # Byte-identical vault content (e.g. the user pre-copied the file
+            # from a newer engine): nothing to reconcile. is_file() guards a
+            # directory collision, which must stay an unresolved COLLISION
+            # (staged_version_path already handles directories gracefully).
+            if (vault_dir / rel).is_file() and sha256_file(vault_dir / rel) == (meta.get("sha256") or sha256_file(staged_dir / rel)):
+                entry.update({"resolved": True, "resolution": "identical-content", "applied": True})
+                entries.append(entry)
+                continue
             add_version_paths(
                 entry,
                 work_dir=work_dir,
@@ -630,7 +784,11 @@ def plan_update_paths(plan: dict[str, Any]) -> set[str]:
 def assert_only_plan_paths_dirty(vault_dir: pathlib.Path, plan: dict[str, Any]) -> None:
     allowed = plan_update_paths(plan)
     dirty = dirty_paths(vault_dir)
-    unexpected = sorted(path for path in dirty if path not in allowed)
+    # .memex/ is engine state and always update-owned; older vaults may have
+    # tracked files there whose staged removal (untrack_memex_state) shows dirty.
+    unexpected = sorted(
+        path for path in dirty if path not in allowed and not path.startswith(".memex/")
+    )
     if unexpected:
         preview = ", ".join(unexpected[:5])
         suffix = "" if len(unexpected) <= 5 else f", ... and {len(unexpected) - 5} more"
@@ -645,12 +803,16 @@ def apply_safe_operations(
     *,
     vault_dir: pathlib.Path,
     staged_dir: pathlib.Path,
+    work_dir: pathlib.Path,
     prune_removed: bool,
 ) -> None:
     for entry in entries:
         rel = entry["path"]
         disposition = entry["disposition"]
         if disposition == Disposition.REPLACE_UNTOUCHED:
+            # Archive the original first: non-git vaults have no other recovery.
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
             copy_file(staged_dir / rel, vault_dir / rel)
             entry["applied"] = True
         elif disposition == Disposition.NEW:
@@ -660,7 +822,29 @@ def apply_safe_operations(
             if not (vault_dir / rel).exists():
                 copy_file(staged_dir / rel, vault_dir / rel)
                 entry["applied"] = True
+        elif disposition == Disposition.EDITED and entry.get("resolution") == "auto-merged" and entry.get("merged_path"):
+            # Archive the original first: non-git vaults have no other recovery.
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
+            copy_file(pathlib.Path(entry["merged_path"]), vault_dir / rel)
+            entry["applied"] = True
+        elif disposition == Disposition.RENAME_CANDIDATE and entry.get("resolution") == "auto-rename":
+            copy_file(staged_dir / entry["new_path"], vault_dir / entry["new_path"])
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
+            remove_file(vault_dir / rel)
+            entry["applied"] = True
+        elif disposition == Disposition.RENAME_COLLISION and entry.get("resolution") == "identical-content":
+            # Destination already holds the staged bytes (classify verified);
+            # mirror auto-rename minus the copy: archive + remove the old path.
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
+            remove_file(vault_dir / rel)
+            entry["applied"] = True
         elif disposition == Disposition.REMOVED_UPSTREAM and prune_removed:
+            # Archive the original first: non-git vaults have no other recovery.
+            if (vault_dir / rel).exists():
+                copy_file(vault_dir / rel, work_dir / "undo" / rel)
             remove_file(vault_dir / rel)
             entry["applied"] = True
         elif disposition in AUTO_APPLIED_DISPOSITIONS:
@@ -685,6 +869,7 @@ def write_plan(
     answers: dict[str, Any],
     packs: list[str],
     engine_dir: pathlib.Path,
+    vault_dir: pathlib.Path,
     work_dir: pathlib.Path,
     entries: list[dict[str, Any]],
     unresolved: list[dict[str, Any]],
@@ -692,8 +877,9 @@ def write_plan(
     branch: str | None,
     previous_branch: str | None = None,
     dry_run: bool = False,
+    status_override: str | None = None,
 ) -> dict[str, Any]:
-    status = "dry-run" if dry_run else ("pending" if unresolved else "complete")
+    status = status_override or ("dry-run" if dry_run else ("pending" if unresolved else "complete"))
     payload = {
         "status": status,
         "dry_run": dry_run,
@@ -711,10 +897,12 @@ def write_plan(
         "answers": answers,
         "added_tokens": added_tokens,
         "branch": branch,
-        "work_dir": work_dir.as_posix(),
+        # Stored vault-relative so the plan survives a vault move (work_dir is
+        # always under the vault).
+        "work_dir": work_dir.relative_to(vault_dir).as_posix(),
         "entries": entries,
         "summary": summarize(entries, unresolved),
-        "finalize_command": f"python3 {pathlib.Path(__file__).as_posix()} finalize --eng {engine_dir.as_posix()} --vault <vault> --plan {plan_path.as_posix()}",
+        "finalize_command": f"python3 {pathlib.Path(__file__).resolve().as_posix()} finalize --eng {engine_dir.as_posix()} --vault <vault> --plan {plan_path.as_posix()}",
     }
     write_json(plan_path, payload)
     return payload
@@ -729,11 +917,13 @@ def prepare_update(args: argparse.Namespace) -> int:
         return 1
 
     manifest = read_json(manifest_path)
-    packs = manifest.get("packs", ["core"])
-    placeholder_manifest = read_json(engine_dir / "placeholders.json")
-    base_answers = dict(manifest.get("answers", {}))
-    base_answers.update(parse_set_values(getattr(args, "set_values", [])))
     try:
+        for rel in manifest.get("files", {}):
+            assert_safe_rel_path(rel, ".memex/manifest.json files")
+        packs = manifest.get("packs", ["core"])
+        placeholder_manifest = read_json(engine_dir / "placeholders.json")
+        base_answers = dict(manifest.get("answers", {}))
+        base_answers.update(parse_set_values(getattr(args, "set_values", [])))
         answers, added_tokens = fill_new_answers(
             placeholder_manifest,
             base_answers,
@@ -767,6 +957,10 @@ def prepare_update(args: argparse.Namespace) -> int:
             )
 
         version = engine_version(engine_dir)
+        now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        work_dir = vault_dir / ".memex/update-work" / f"{version}-{now}"
+        plan_path = work_dir / "plan.json"
+
         git_branch: str | None = None
         previous_branch: str | None = None
         git_on = answers["GIT_MODE"] != "none" and is_git_repo(vault_dir)
@@ -778,9 +972,30 @@ def prepare_update(args: argparse.Namespace) -> int:
             previous_branch = None if current_branch == update_branch else current_branch
         if git_on and not args.no_git_branch and not args.dry_run:
             git_branch = ensure_update_branch(vault_dir, version)
+            untrack_memex_state(vault_dir)
 
-        now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        work_dir = vault_dir / ".memex/update-work" / f"{version}-{now}"
+        if not args.dry_run:
+            # Arm the pending-update guard the moment the vault is mutated
+            # (branch created, .memex state untracked): a crash before the full
+            # provisional plan below (e.g. Ctrl-C at the prune prompt) must
+            # still leave a plan on disk that abort can act on.
+            write_plan(
+                plan_path=plan_path,
+                manifest=manifest,
+                answers=answers,
+                packs=packs,
+                engine_dir=engine_dir,
+                vault_dir=vault_dir,
+                work_dir=work_dir,
+                entries=[],
+                unresolved=[],
+                added_tokens=added_tokens,
+                branch=git_branch,
+                previous_branch=previous_branch,
+                dry_run=False,
+                status_override="applying",
+            )
+
         staged_dir = work_dir / "staged"
         source_map = bake_engine(
             engine_dir,
@@ -798,7 +1013,7 @@ def prepare_update(args: argparse.Namespace) -> int:
             work_dir=work_dir,
         )
         layout = load_engine_layout(engine_dir)
-        entries, unresolved, _staged_meta = classify_update(
+        entries, unresolved, staged_meta = classify_update(
             manifest=manifest,
             layout=layout,
             baseline_dir=baseline_dir,
@@ -812,24 +1027,49 @@ def prepare_update(args: argparse.Namespace) -> int:
         if not prune_removed:
             removed_count = sum(1 for entry in entries if entry["disposition"] == Disposition.REMOVED_UPSTREAM)
             if removed_count:
-                value = input(f"Prune {removed_count} untouched files removed upstream? [y/N]: ").strip().lower()
+                value = prompt_input(f"Prune {removed_count} untouched files removed upstream? [y/N]: ").strip().lower()
                 prune_removed = value in {"y", "yes"}
 
         if not args.dry_run:
+            # Write a provisional plan before touching the vault: a crash
+            # mid-apply must leave a plan on disk (it carries the undo/work
+            # paths and keeps the pending-update guard armed).
+            write_plan(
+                plan_path=plan_path,
+                manifest=manifest,
+                answers=answers,
+                packs=packs,
+                engine_dir=engine_dir,
+                vault_dir=vault_dir,
+                work_dir=work_dir,
+                entries=entries,
+                unresolved=unresolved,
+                added_tokens=added_tokens,
+                branch=git_branch,
+                previous_branch=previous_branch,
+                dry_run=False,
+                status_override="applying",
+            )
             apply_safe_operations(
                 entries,
                 vault_dir=vault_dir,
                 staged_dir=staged_dir,
+                work_dir=work_dir,
                 prune_removed=prune_removed,
             )
 
-        plan_path = pathlib.Path(args.plan) if args.plan else work_dir / "plan.json"
+        # In the no-unresolved path, hold "applying" until the manifest write
+        # and commit below succeed: marking "complete" early would disarm the
+        # pending guard and let prune_finished_work_dirs reap the undo archive
+        # after a crash between here and the commit.
+        hold_applying = bool(not unresolved and not args.dry_run)
         plan = write_plan(
             plan_path=plan_path,
             manifest=manifest,
             answers=answers,
             packs=packs,
             engine_dir=engine_dir,
+            vault_dir=vault_dir,
             work_dir=work_dir,
             entries=entries,
             unresolved=unresolved,
@@ -837,6 +1077,7 @@ def prepare_update(args: argparse.Namespace) -> int:
             branch=git_branch,
             previous_branch=previous_branch,
             dry_run=args.dry_run,
+            status_override="applying" if hold_applying else None,
         )
 
         if not unresolved and not args.dry_run:
@@ -847,6 +1088,8 @@ def prepare_update(args: argparse.Namespace) -> int:
                 source_map=source_map,
                 answers=answers,
                 packs=packs,
+                # classify_update already hashed the staged tree; reuse it.
+                files=staged_meta,
             )
             if git_on and not args.no_git_branch:
                 try:
@@ -888,8 +1131,28 @@ def finalize_update(args: argparse.Namespace) -> int:
         print(f"error: plan not found: {plan_path}")
         return 1
     plan = read_json(plan_path)
+    try:
+        validate_plan_paths(plan)
+    except RuntimeError as exc:
+        print(f"error: {exc}")
+        return 1
     if plan.get("dry_run") or plan.get("status") == "dry-run":
         print("error: cannot finalize a dry-run plan; rerun prepare without --dry-run")
+        return 1
+    if plan.get("status") == "applying":
+        print(
+            "error: plan is mid-apply (prepare did not finish); "
+            f"run abort --plan {plan_path} and re-run prepare"
+        )
+        return 1
+    # The plan's entries were reviewed against a specific engine tree; a moved
+    # or since-pulled engine checkout would rewrite manifest/baseline for
+    # content the user never saw.
+    plan_to = plan.get("engine_to") or {}
+    current_commit = engine_commit(engine_dir)
+    if plan_to.get("commit") and current_commit and plan_to["commit"] != current_commit:
+        print(f"error: engine checkout {current_commit} does not match the plan's engine_to "
+              f"{plan_to['commit']}; check out that commit (or re-run prepare)")
         return 1
     answers = plan.get("answers", {})
     packs = plan.get("packs", ["core"])
@@ -943,7 +1206,12 @@ def finalize_update(args: argparse.Namespace) -> int:
     write_json(plan_path, plan)
     work_dir = plan.get("work_dir")
     if work_dir:
-        strip_work_heavy(pathlib.Path(work_dir))
+        wd = pathlib.Path(work_dir)
+        wd = vault_dir / wd if not wd.is_absolute() else wd  # old plans stored absolute
+        # work_dir lives under the vault by construction; never clean elsewhere
+        # (the plan file is agent-writable).
+        if wd.resolve().is_relative_to(vault_dir):
+            strip_work_heavy(wd)
     print(f"finalize: manifest and baseline refreshed for engine {version}")
     return 0
 
@@ -958,9 +1226,27 @@ def abort_update(args: argparse.Namespace) -> int:
         print(f"error: plan not found: {plan_path}")
         return 1
     plan = read_json(plan_path)
-    if not is_git_repo(vault_dir):
-        print("abort: not a git repo; remove update changes manually if needed.")
+    try:
+        validate_plan_paths(plan)
+    except RuntimeError as exc:
+        print(f"error: {exc}")
         return 1
+    if not is_git_repo(vault_dir):
+        # Without git there is nothing to restore files from, but the pending
+        # guard must still disarm or every future prepare is blocked. Flip the
+        # plan to "aborted" (not pending) and keep the work dir: its undo/
+        # archive is the only copy of the replaced/pruned originals.
+        plan["status"] = "aborted"
+        plan["aborted_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        write_json(plan_path, plan)
+        undo_dir = plan_path.parent / "undo"
+        print(
+            "abort: vault is not a git repo, so file-level restoration is unavailable; "
+            "marked the plan aborted so a new prepare can run."
+        )
+        if undo_dir.is_dir():
+            print(f"abort: originals of replaced/pruned files are archived under {undo_dir} for manual recovery")
+        return 0
     paths = plan_update_paths(plan)
     branch = plan.get("branch")
     previous = plan.get("previous_branch")
@@ -973,37 +1259,65 @@ def abort_update(args: argparse.Namespace) -> int:
     ]
     if tracked:
         run_git(vault_dir, ["restore", "--source=HEAD", "--staged", "--worktree", "--", *tracked], check=False)
+    # untrack_memex_state stages a .memex deletion; ls-files above no longer
+    # sees those paths, so re-stage them from HEAD explicitly. On vaults that
+    # never tracked .memex this is a no-op (next prepare untracks again).
+    run_git(vault_dir, ["restore", "--staged", "--", ".memex"], check=False)
 
-    # Remove untracked files the update added (new framework files, freshly seeded files).
+    # Remove untracked files the update added (new framework files, freshly
+    # seeded files). Not gated on applied=True: a crash mid-apply leaves the
+    # provisional plan with applied=False; the ls-files + is_file checks below
+    # keep this safe for files the update never actually created.
     for entry in plan.get("entries", []):
-        if entry.get("applied") and entry.get("disposition") in ABORT_UNTRACKED_DISPOSITIONS:
+        if entry.get("disposition") in ABORT_UNTRACKED_DISPOSITIONS:
             rel = entry.get("path")
-            if not rel:
-                continue
-            in_index = run_git(vault_dir, ["ls-files", "--error-unmatch", "--", rel], check=False)
-            target = vault_dir / rel
-            if in_index.returncode != 0 and target.is_file():
-                target.unlink()
+        elif entry.get("disposition") == Disposition.RENAME_CANDIDATE:
+            # An auto-rename copied staged content to new_path, which was free
+            # before the update (RENAME_CANDIDATE means no pre-existing
+            # destination), so removing it cannot lose user content. Not gated
+            # on applied/resolution for the same crash-mid-apply reason above.
+            # RENAME_COLLISION is deliberately excluded: its new_path
+            # pre-existed and may be user content.
+            rel = entry.get("new_path")
+        else:
+            continue
+        if not rel:
+            continue
+        in_index = run_git(vault_dir, ["ls-files", "--error-unmatch", "--", rel], check=False)
+        target = vault_dir / rel
+        if in_index.returncode != 0 and target.is_file():
+            target.unlink()
 
     current = run_git(vault_dir, ["branch", "--show-current"], check=False).stdout.strip()
     returned_to = current or previous or "<unknown>"
+    switch_failed = False
     if branch and current == branch:
         if previous and previous != branch:
             switched = run_git(vault_dir, ["switch", previous], check=False)
             if switched.returncode == 0:
+                returned_to = previous
                 unique = run_git(vault_dir, ["rev-list", f"{previous}..{branch}"], check=False).stdout.strip()
                 if not unique:
                     run_git(vault_dir, ["branch", "-D", branch], check=False)
             else:
                 returned_to = current
+                switch_failed = True
         else:
             returned_to = current
 
     work_dir = plan.get("work_dir")
     if work_dir:
-        shutil.rmtree(pathlib.Path(work_dir), ignore_errors=True)
+        wd = pathlib.Path(work_dir)
+        wd = vault_dir / wd if not wd.is_absolute() else wd  # old plans stored absolute
+        # work_dir lives under the vault by construction; never delete elsewhere
+        # (the plan file is agent-writable).
+        if wd.resolve().is_relative_to(vault_dir):
+            shutil.rmtree(wd, ignore_errors=True)
     if branch and returned_to == branch:
-        print(f"abort: reverted update changes; stayed on {branch} (no previous branch recorded)")
+        if switch_failed:
+            print(f"abort: reverted update changes; could not switch back to {previous}; staying on {branch}")
+        else:
+            print(f"abort: reverted update changes; stayed on {branch} (no previous branch recorded)")
     else:
         print(f"abort: reverted update changes; returned to {returned_to}")
     return 0
@@ -1016,7 +1330,6 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--eng", required=True)
     prepare.add_argument("--vault", default=".")
-    prepare.add_argument("--plan")
     prepare.add_argument("--non-interactive", action="store_true")
     prepare.add_argument("--yes-prune", action="store_true")
     prepare.add_argument("--dry-run", action="store_true")

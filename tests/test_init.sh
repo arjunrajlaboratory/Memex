@@ -1,17 +1,28 @@
 #!/bin/zsh
 set -e
 ENG="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d)"; trap "rm -rf $TMP" EXIT
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $1"; exit 1; }
 
 # tokens that MUST be fully baked away (catalogued instance tokens). Templater
 # tokens (e.g. {{YYYYMMDD}}) are NOT in this list and are allowed to remain.
 TOKENS=$(python3 -c "import json;print(' '.join(p['token'] for p in json.load(open('$ENG/placeholders.json'))['placeholders']))")
 no_unbaked() {  # $1 = dir
-  for t in $TOKENS; do
+  for t in ${=TOKENS}; do
     if grep -rq "{{$t}}" "$1" 2>/dev/null; then grep -rl "{{$t}}" "$1" | head; fail "unbaked token {{$t}} in $1"; fi
   done
 }
+
+# Self-test: the gate must actually fire — guards against the zsh word-splitting
+# regression that silently made this gate vacuous.
+SELFTEST="$TMP/selftest"; mkdir -p "$SELFTEST"; echo '{{OWNER_NAME}}' > "$SELFTEST/x.md"
+if (no_unbaked "$SELFTEST") >/dev/null 2>&1; then
+  fail "no_unbaked gate is vacuous (did not flag a planted token)"
+fi
+rm -rf "$SELFTEST"
+
+# Engine self-consistency gate (packs.json<->disk, token catalog, sections).
+python3 "$ENG/tools/audit_refs.py" "$ENG" >/dev/null || fail "audit_refs gate"
 
 # General optional-token regression gate: a blank optional answer must drop its
 # surrounding prose via {{?TOKEN}}…{{/TOKEN}} sections, NOT bake an empty `` pair
@@ -34,6 +45,7 @@ PY
 "$ENG/bin/memex-init" --target "$TMP/core" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
 
 [ -d "$TMP/core/Atlas/Concepts" ] || fail "scaffold dirs missing"
+[ -d "$TMP/core/Ops/Calendars" ] || fail "Ops/Calendars scaffold missing"
 [ -d "$TMP/core/Drafts" ] || fail "Drafts/ scaffold dir missing"
 [ -f "$TMP/core/Drafts/README.md" ] || fail "Drafts/README.md seed missing"
 [ -f "$TMP/core/_config/overrides.md" ] || fail "_config/overrides.md seed missing"
@@ -61,12 +73,21 @@ PY
 [ -f "$TMP/core/.gitignore" ] || fail "vault .gitignore missing"
 [ -f "$TMP/core/.memex/manifest.json" ] || fail ".memex/manifest.json missing"
 [ -f "$TMP/core/.memex/baseline/.claude/skills/triage-inbox/SKILL.md" ] || fail "framework baseline missing"
-grep -q ".memex/baseline/" "$TMP/core/.gitignore" || fail "baseline should be gitignored"
-grep -q ".memex/update-work/" "$TMP/core/.gitignore" || fail "update workdir should be gitignored"
+grep -q "^\.memex/$" "$TMP/core/.gitignore" || fail ".memex/ (manifest answers + local state) should be gitignored"
 [ -f "$TMP/core/AGENTS.md" ] || fail "AGENTS.md missing"
 [ -f "$TMP/core/CLAUDE.md" ] || fail "CLAUDE.md missing"
-[ -f "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/"
-[ -f "$TMP/core/scripts/launchd/com.memex.quartz.plist" ] || fail "launchd plist missing/misnamed"
+[ -x "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/ or not executable"
+[ -x "$TMP/core/scripts/memex-doctor.sh" ] || fail "memex-doctor.sh not installed/executable"
+(cd "$TMP/core" && ./scripts/memex-doctor.sh >/dev/null) || fail "doctor reports FAIL on a fresh vault"
+# launchd identity is PATH-derived (CC_PROJECT_SLUG minus leading '-'), never
+# the shareable VAULT_NAME — two vaults from one answers file must not collide.
+CORE_LAUNCHD_ID="$(python3 -c "import re; print(re.sub(r'[^A-Za-z0-9]', '-', '$TMP/core').lstrip('-'))")"
+CORE_PLIST="$TMP/core/scripts/launchd/com.memex.quartz.${CORE_LAUNCHD_ID}.plist"
+[ -f "$CORE_PLIST" ] || fail "launchd plist missing/misnamed (should carry path-derived id)"
+grep -q "com.memex.quartz.${CORE_LAUNCHD_ID}" "$CORE_PLIST" || fail "plist Label should carry path-derived id"
+# VAULT_PATH is derived from --target (fixture says /tmp/example-vault; init overrides)
+grep -q "$TMP/core/scripts/serve_quartz.sh" "$CORE_PLIST" \
+  || fail "plist VAULT_PATH not derived from --target"
 # sources config seed: present, default streams (email+slack on, calendar off), local git
 [ -f "$TMP/core/_config/sources.md" ] || fail "_config/sources.md seed missing"
 grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email stream not enabled by default"
@@ -102,6 +123,12 @@ PY
 # ---------- core+pi init ----------
 "$ENG/bin/memex-init" --target "$TMP/pi" --packs core,pi --answers "$ENG/tests/fixtures/answers.pi.json" >/dev/null
 [ -f "$TMP/pi/.claude/skills/draft-letter/SKILL.md" ] || fail "pi skill missing in pi init"
+[ -f "$TMP/pi/Atlas/Letters/index.md" ] || fail "pi Letters registry not seeded"
+[ -f "$TMP/pi/Atlas/Grants/index.md" ] || fail "pi Grants registry not seeded"
+[ ! -e "$TMP/core/Atlas/Letters/index.md" ] || fail "Letters registry leaked into core init"
+[ -x "$TMP/pi/scripts/build_cv.sh" ] || fail "build_cv.sh not installed/executable"
+[ -x "$TMP/pi/scripts/merge_letterhead.py" ] || [ -f "$TMP/pi/scripts/merge_letterhead.py" ] || fail "merge_letterhead.py not installed"
+[ ! -e "$TMP/core/scripts/build_cv.sh" ] || fail "pi script leaked into core init"
 grep -qi "draft-letter\|letter" "$TMP/pi/CLAUDE.md" || fail "pi fragment not merged into contract"
 no_unbaked "$TMP/pi"
 # set OWNER_FORWARDING_EMAIL: the optional clause + hedge bake in (the kept branch)

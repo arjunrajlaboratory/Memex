@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Durable Quartz dev-server launcher, designed to be run by a launchd LaunchAgent
-# (com.memex.quartz) so the local site at http://localhost:{{QUARTZ_PORT}} stays up
+# (com.memex.quartz.{{MEMEX_LAUNCHD_ID}}) so the local site at http://localhost:{{QUARTZ_PORT}} stays up
 # across sleep/wake and is independent of any terminal or Claude Code session.
 #
 # launchd gives jobs a minimal PATH with no nvm, so we source nvm here and let it

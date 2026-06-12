@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -e
 ENG="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d)"; trap "rm -rf $TMP" EXIT
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $1"; exit 1; }
 
 NEXT="$TMP/engine-next"
@@ -50,7 +50,11 @@ PY
 git -C "$VAULT" config user.email test@example.com
 git -C "$VAULT" config user.name "Memex Test"
 git -C "$VAULT" add .
+# Simulate a vault installed by an older engine that committed .memex state
+# (now gitignored, hence -f); the update must untrack it once.
+git -C "$VAULT" add -f .memex/manifest.json
 git -C "$VAULT" commit -m "init" >/dev/null
+[ -n "$(git -C "$VAULT" ls-files .memex/)" ] || fail "migration setup: .memex/manifest.json should start tracked"
 
 cat >> "$VAULT/.claude/skills/email/SKILL.md" <<'EOF'
 
@@ -94,9 +98,42 @@ assert counts.get("removed-upstream", 0) >= 1, counts
 assert counts.get("replace-untouched", 0) >= 1, counts
 PY
 
+# the engine did not change the email skill, so the local edit 3-way-merges
+# cleanly and is auto-applied; the collision fixture keeps the plan pending
+python3 - "$PLAN" <<'PY'
+import json, pathlib, sys
+plan = json.loads(pathlib.Path(sys.argv[1]).read_text())
+auto = [e for e in plan["entries"] if e.get("resolution") == "auto-merged"]
+assert auto, "expected at least one auto-merged entry (email skill local edit)"
+assert all(e["applied"] for e in auto), auto
+ident = [e for e in plan["entries"] if e.get("resolution") == "identical-content"]
+PY
+grep -q "Local email skill edit that must survive" "$VAULT/.claude/skills/email/SKILL.md" || fail "auto-merge lost the local edit"
+
 if "$NEXT/bin/memex-update" finalize --vault "$VAULT" --plan "$PLAN" >/dev/null 2>&1; then
   fail "finalize should refuse a pending unresolved plan"
 fi
+
+# finalize must refuse a mid-apply plan (crash during prepare's safe ops)
+python3 - "$PLAN" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+plan = json.loads(path.read_text())
+plan["status"] = "applying"
+path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n")
+PY
+APPLYING_OUT="$TMP/applying-finalize.out"
+if "$NEXT/bin/memex-update" finalize --vault "$VAULT" --plan "$PLAN" >"$APPLYING_OUT" 2>&1; then
+  fail "finalize should refuse a mid-apply (applying) plan"
+fi
+grep -q "mid-apply" "$APPLYING_OUT" || fail "applying refusal should mention mid-apply"
+python3 - "$PLAN" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+plan = json.loads(path.read_text())
+plan["status"] = "pending"
+path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n")
+PY
 
 python3 - "$PLAN" "$NEXT/tools" <<'PY'
 import json, pathlib, sys
@@ -122,6 +159,7 @@ assert m["answers"].get("OWNER_TIMEZONE") == "America/New_York", m["answers"].ge
 PY
 grep -q "Update test marker:" "$VAULT/.memex/baseline/.claude/skills/triage-inbox/SKILL.md" || fail "baseline not refreshed to new engine"
 [ -z "$(git -C "$VAULT" status --porcelain)" ] || fail "worktree should be clean after finalize"
+[ -z "$(git -C "$VAULT" ls-files .memex/)" ] || fail "tracked .memex state was not untracked by the update"
 
 cat > "$VAULT/Atlas/Projects/Unrelated.md" <<'EOF'
 # Unrelated
@@ -239,7 +277,6 @@ cat > "$TMP/rejected-rename-plan.json" <<EOF
     "OWNER_PRIMARY_EMAIL": "jane@example.com",
     "OWNER_FORWARDING_EMAIL": "",
     "OWNER_SENDING_ACCOUNTS": "",
-    "FRAMING": "Example framing",
     "VAULT_PATH": "$RENAMEVAULT",
     "USER_HOME": "$TMP",
     "TIMEZONE": "America/New_York",
@@ -275,8 +312,9 @@ git -C "$ABORTVAULT" config user.name "Memex Test"
 git -C "$ABORTVAULT" add .
 git -C "$ABORTVAULT" commit -m "init" >/dev/null
 ABORT_BRANCH="$(git -C "$ABORTVAULT" branch --show-current)"
-mkdir -p "$ABORTVAULT/.claude/skills/email"
-printf '\nlocal edit to force a pending plan\n' >> "$ABORTVAULT/.claude/skills/email/SKILL.md"
+# Both sides append at EOF of the same file (engine adds the timezone marker),
+# so the 3-way merge conflicts and the plan stays pending.
+printf '\nCONFLICTING LOCAL LINE at the same spot\n' >> "$ABORTVAULT/.claude/skills/triage-inbox/SKILL.md"
 git -C "$ABORTVAULT" add .
 git -C "$ABORTVAULT" commit -m "local edit" >/dev/null
 "$NEXT/bin/memex-update" --vault "$ABORTVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null
@@ -292,10 +330,58 @@ ABORT_PLAN="$(ls "$ABORTVAULT"/.memex/update-work/0.2.0-*/plan.json)"
 # ---------- git-off pending update blocks a second prepare ----------
 PENDINGVAULT="$TMP/pending-nogit-vault"
 "$ENG/bin/memex-init" --target "$PENDINGVAULT" --packs core --answers "$ENG/tests/fixtures/answers.nogit.json" >/dev/null
-printf '\nlocal edit to force a pending plan\n' >> "$PENDINGVAULT/.claude/skills/email/SKILL.md"
+# conflicting edit (engine appends its marker to the same file) keeps the plan pending
+printf '\nCONFLICTING LOCAL LINE at the same spot\n' >> "$PENDINGVAULT/.claude/skills/triage-inbox/SKILL.md"
 "$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null
 if "$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null 2>&1; then
   fail "second prepare should refuse while a git-off update is pending"
 fi
 
-echo "PASS: memex-update safe ops + pending plan + finalize + refuse + no-conflict + abort"
+# ---------- non-git abort disarms the pending guard, keeps the undo archive ----------
+PENDING_PLAN="$(ls "$PENDINGVAULT"/.memex/update-work/0.2.0-*/plan.json)"
+PENDING_WORK="$(dirname "$PENDING_PLAN")"
+[ -d "$PENDING_WORK/undo" ] || fail "non-git abort setup: expected an undo archive in the pending work dir"
+"$NEXT/bin/memex-update" abort --vault "$PENDINGVAULT" --plan "$PENDING_PLAN" >/dev/null || fail "non-git abort should exit 0"
+[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$PENDING_PLAN")" = "aborted" ] \
+  || fail "non-git abort should mark the plan aborted"
+[ -d "$PENDING_WORK/undo" ] || fail "non-git abort must preserve the undo archive"
+"$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null \
+  || fail "third prepare after non-git abort should succeed"
+
+# ---------- abort removes an applied auto-rename's new path ----------
+NEXT2="$TMP/engine-next-rename"
+mkdir -p "$NEXT2"
+( cd "$NEXT" && tar -cf - . ) | ( cd "$NEXT2" && tar -xf - )
+# identical content at a new path -> similarity 1.0 -> auto-rename
+mv "$NEXT2/packs/core/skills/observe-manual-patterns" "$NEXT2/packs/core/skills/observe-manual-patterns-v2"
+RENAMEABORTVAULT="$TMP/rename-abort-vault"
+"$ENG/bin/memex-init" --target "$RENAMEABORTVAULT" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
+git -C "$RENAMEABORTVAULT" config user.email test@example.com
+git -C "$RENAMEABORTVAULT" config user.name "Memex Test"
+git -C "$RENAMEABORTVAULT" add .
+git -C "$RENAMEABORTVAULT" commit -m "init" >/dev/null
+RENAME_ABORT_BRANCH="$(git -C "$RENAMEABORTVAULT" branch --show-current)"
+# conflicting edit (NEXT2 inherits NEXT's triage-inbox marker) keeps the plan pending
+printf '\nCONFLICTING LOCAL LINE at the same spot\n' >> "$RENAMEABORTVAULT/.claude/skills/triage-inbox/SKILL.md"
+git -C "$RENAMEABORTVAULT" add .
+git -C "$RENAMEABORTVAULT" commit -m "local edit" >/dev/null
+"$NEXT2/bin/memex-update" --vault "$RENAMEABORTVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null
+[ -e "$RENAMEABORTVAULT/.claude/skills/observe-manual-patterns-v2/SKILL.md" ] || fail "auto-rename did not create the new path"
+[ ! -e "$RENAMEABORTVAULT/.claude/skills/observe-manual-patterns/SKILL.md" ] || fail "auto-rename did not remove the old path"
+RENAME_ABORT_PLAN="$(ls "$RENAMEABORTVAULT"/.memex/update-work/0.2.0-*/plan.json)"
+python3 - "$RENAME_ABORT_PLAN" <<'PY'
+import json, pathlib, sys
+plan = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert plan["status"] == "pending", plan["status"]
+auto = [e for e in plan["entries"] if e.get("resolution") == "auto-rename"]
+assert auto, "expected an auto-rename entry"
+assert all(e["applied"] for e in auto), auto
+assert all("similarity_raw" not in e for e in plan["entries"]), "similarity_raw must not be persisted"
+PY
+"$NEXT2/bin/memex-update" abort --vault "$RENAMEABORTVAULT" --plan "$RENAME_ABORT_PLAN" >/dev/null
+[ -e "$RENAMEABORTVAULT/.claude/skills/observe-manual-patterns/SKILL.md" ] || fail "abort did not restore the auto-renamed old path"
+[ ! -e "$RENAMEABORTVAULT/.claude/skills/observe-manual-patterns-v2/SKILL.md" ] || fail "abort did not remove the auto-renamed new path"
+[ "$(git -C "$RENAMEABORTVAULT" branch --show-current)" = "$RENAME_ABORT_BRANCH" ] || fail "rename abort did not return to the original branch"
+[ -z "$(git -C "$RENAMEABORTVAULT" status --porcelain)" ] || fail "rename abort left the worktree dirty"
+
+echo "PASS: memex-update safe ops + pending plan + finalize + refuse + no-conflict + abort + non-git abort + rename abort"

@@ -116,7 +116,8 @@
     ],
     "cv": true,
     "scripts": [
-      "merge_letterhead.py"
+      "merge_letterhead.py",
+      "build_cv.sh"
     ]
   },
   "hardened": {
@@ -126,8 +127,9 @@
       "log-mutation.sh"
     ],
     "contract": [
-      "AGENTS.md",
-      "CLAUDE.md"
+      "AGENTS.base.md",
+      "CLAUDE.base.md",
+      "pi-fragment.md"
     ],
     "quartz": true,
     "launchd": [

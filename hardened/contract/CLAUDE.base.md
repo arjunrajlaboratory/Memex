@@ -7,7 +7,7 @@ This repository is a personal Memex vault (see [README.md](README.md)). When Cla
 1. Read `AGENTS.md`. Decide which role you're playing (`agent:capture`, `agent:librarian`, `agent:planner`, `agent:executor:<type>`, `agent:tracker`, `agent:auditor`) and what you may write. If unclear, ask.
 2. Read the most recent entries in `log.md` to see what happened since the last session.
 3. If today's briefing exists (`Ops/Briefings/<today>.md`), skim it.
-4. The build plan and "what's done so far" live in `IMPLEMENTATION_PLAN.md` — the Changelog and Resume-here sections are the source of truth for state.
+4. Recent state lives in `log.md` (newest entries at top) and `Ops/Tasks/` — `/session-start` summarizes both.
 
 ## Framework updates and overrides
 
@@ -98,7 +98,7 @@ Run locally:
 ```
 cd quartz
 npm install              # first time only
-npm run site:serve       # http://localhost:8080, watches for changes
+npm run site:serve       # http://localhost:{{QUARTZ_PORT}}, watches for changes
 ```
 
 Build once (no server):
@@ -136,7 +136,7 @@ The result names the file (`<result>.md`) and is what every `[[<result>]]` point
 
 ### URL slugs — don't link the raw filename
 
-When opening a note in the browser (`open "http://localhost:8181/<path>"`), the path is **not** the raw filename — Quartz slugifies it, and using the raw name with spaces 404s. The transform (verified 2026-05-31):
+When opening a note in the browser (`open "http://localhost:{{QUARTZ_PORT}}/<path>"`), the path is **not** the raw filename — Quartz slugifies it, and using the raw name with spaces 404s. The transform (verified 2026-05-31):
 
 - A single space → `-` — `Alex Kim` → `Alex-Kim`
 - ` - ` (space-hyphen-space, the common `Type - Title` and date separators) → `---` (**three** dashes) — `Review - 2026-W22` → `Review---2026-W22`; `ExampleProject - Growth and Marketing` → `ExampleProject---Growth-and-Marketing`
@@ -144,16 +144,17 @@ When opening a note in the browser (`open "http://localhost:8181/<path>"`), the 
 - The `.md` extension is dropped; no `.html` in the URL.
 - `/`, `:`, `#`, `|`, `^` are **hazards, not transforms** — a well-formed title never contains them (see `safe_title` above). Inside the URL `/` is a real path separator and `#` starts the fragment, so a stray one silently mis-routes the link. If you ever see one in a slug, the title needs fixing, not the URL.
 
-So `Ops/Reviews/Review - 2026-W22.md` opens at `http://localhost:8181/Ops/Reviews/Review---2026-W22`, **not** `…/Review - 2026-W22`. When unsure of a slug, either check `quartz/public/<path>.html` (the built filename IS the slug) or `curl -s -o /dev/null -w "%{http_code}"` the candidate URL before sending it.
+So `Ops/Reviews/Review - 2026-W22.md` opens at `http://localhost:{{QUARTZ_PORT}}/Ops/Reviews/Review---2026-W22`, **not** `…/Review - 2026-W22`. When unsure of a slug, either check `quartz/public/<path>.html` (the built filename IS the slug) or `curl -s -o /dev/null -w "%{http_code}"` the candidate URL before sending it.
 
 ## Hooks (auto-discipline)
 
-Two hooks live in `.claude/hooks/` and are wired up in `.claude/settings.json` — both fire silently and best-effort, so a hook failure can never break a session.
+Three hooks live in `.claude/hooks/` and are wired up in `.claude/settings.json` — all fire silently and best-effort, so a hook failure can never break a session.
 
 | Hook | Event | What it does |
 | --- | --- | --- |
 | `session-start-context.sh` | `SessionStart` (matchers: `startup`, `resume`, `clear`) | Emits a one-time dashboard at session start: 5 most-recent `log.md` entries, open Task counts by status, today's briefing existence, `Inbox/` top-level state, list of `needs_review` Task titles. Removes the cold-scan most agents do at the top of a vault session. |
 | `bump-updated.sh` | `PostToolUse` (matchers: `Edit`, `Write`) | After any `Edit`/`Write` to an `.md` file under `Atlas/`, `Ops/{Tasks,Followups,Briefings,Reviews}/`, walks the YAML frontmatter and sets `updated:` to today. Skips `_archive/`, `Inbox/`, `_schemas/`, `_templates/`, `_workflows/`, `Raw/`. Idempotent. |
+| `log-mutation.sh` | `PostToolUse` (matchers: `Edit`, `Write`) | After any `Edit`/`Write` to a typed note, auto-appends a placeholder line to `log.md` so no mutation goes unrecorded; the agent rewrites the placeholder with a real one-line summary at the end of the workflow. |
 
 You can still set `updated:` explicitly when writing or editing a typed note — the hook just enforces the rule when you forget. `created:` is never touched by the hook.
 
@@ -166,7 +167,7 @@ You can still set `updated:` explicitly when writing or editing a typed note —
 
 ### Prefer skill invocation over manual mechanics
 
-The vault ships 19 skills at `.claude/skills/` (see table above). For any matching natural-language phrasing — "close this task", "ingest this article", "set up project X", "weekly review", etc. — invoke the skill via the `Skill` tool rather than reproducing its mechanics by hand. The skills enforce the schema rules, the `log.md` append discipline, the parent-page bookkeeping (`# Current next actions`, `# Changelog`, area links), and the cascading state changes (unblocks, surfacing followups) that are easy to forget under fatigue. Manual edits are still fine for one-off adjustments that don't have a skill, but anytime you find yourself opening 3+ files to do "the X workflow", check whether `Skill` already wraps it.
+The vault ships 24 skills at `.claude/skills/` (see table above). For any matching natural-language phrasing — "close this task", "ingest this article", "set up project X", "weekly review", etc. — invoke the skill via the `Skill` tool rather than reproducing its mechanics by hand. The skills enforce the schema rules, the `log.md` append discipline, the parent-page bookkeeping (`# Current next actions`, `# Changelog`, area links), and the cascading state changes (unblocks, surfacing followups) that are easy to forget under fatigue. Manual edits are still fine for one-off adjustments that don't have a skill, but anytime you find yourself opening 3+ files to do "the X workflow", check whether `Skill` already wraps it.
 
 ### In-app TodoWrite is not the vault tracker
 
@@ -278,11 +279,11 @@ Hard rules: default `sensitivity: private`. Never invent personal facts — ever
 - **Sonnet** is sufficient for: transcribing structured content, applying a known schema, summarizing one source, drafting a single email, querying one slice of the vault.
 - **Opus** for: daily briefings (cross-vault synthesis), weekly reviews, lint passes, and any task that needs judgment across many entities at once.
 
-The full per-phase guidance lived in `IMPLEMENTATION_PLAN.md`'s Model-selection table for the build; steady-state defaults follow the same logic.
+Steady-state defaults follow the same logic for any new workflow: bulk mechanical work to Sonnet, cross-entity judgment to Opus.
 
 ## Known Bases version quirks (as of 2026-05-17)
 
-The vault was built against Obsidian Bases 1.7+ but the installed version has these quirks. If you author or patch a view file (`*.base`), use the workarounds below; full notes in `IMPLEMENTATION_PLAN.md` Changelog.
+The vault was built against Obsidian Bases 1.7+ but the installed version has these quirks. If you author or patch a view file (`*.base`), use the workarounds below.
 
 - `note.status in [...]` not supported → use `or:` block of `==`.
 - `note.status not in [...]` → use `and:` block of `!=`.
@@ -330,4 +331,4 @@ Decisions) do — use a private repo.
 
 ## Out of scope (v0.1)
 
-External integrations not yet wired: email send, mobile voice notes, TaskNotes HTTP API, scheduled tracker daemon. (Email/Slack **capture** landed via `capture-comms` + `reconcile-from-comms`, wired into the daily briefing by default — see the skills table. Google Calendar event creation for Tasks landed via `create-task`. Wider Drive sync still deferred.) See "Out of scope" in `IMPLEMENTATION_PLAN.md`.
+External integrations not yet wired: email send, mobile voice notes, TaskNotes HTTP API, scheduled tracker daemon. (Email/Slack **capture** landed via `capture-comms` + `reconcile-from-comms`, wired into the daily briefing by default — see the skills table. Google Calendar event creation for Tasks landed via `create-task`. Wider Drive sync still deferred.)

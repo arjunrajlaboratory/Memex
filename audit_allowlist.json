@@ -1,20 +1,21 @@
 {
-  "_comment": "Detector hits that are NOT owner instance-facts and are acceptable to ship as-is. Three groups: (1) vendored Quartz strings; (2) institution names + already-fake examples in illustrative skill text; (3) generic example content. NOTE for distribution: the pi-pack/CV items were genericized before any third-party distribution per the spec §5 privacy-as-failsafe pre-distribution gate.",
+  "_comment": "Detector hits that are NOT owner instance-facts and are acceptable to ship as-is. Four groups: (1) vendored Quartz strings; (2) institution names + already-fake examples in illustrative skill text; (3) generic example content; (4) vendored res.sty LaTeX-class author credits (Michael DeCorte's 1988/1989 addresses incl. one BITNET-style %-routed address). NOTE for distribution: the pi-pack/CV items were genericized before any third-party distribution per the spec \u00a75 privacy-as-failsafe pre-distribution gate.",
   "allow": [
     "noreply@anthropic.com",
-
     "j.zhao2k19@gmail.com",
     "Example U",
     "exampleu",
     "seas.exampleu",
     "List_of_ISO_639_language_codes",
     "MDEwOlJlcG9zaXRvcnkzODcyMTMyMDg",
-
     "bob@x.com",
     "colleague@example.edu",
     "you-secondary@example.edu",
     "chair@example.edu",
     "help@example.com",
-    "service@example.org"
+    "service@example.org",
+    "mrd@sun.soe.clarkson.edu",
+    "mrd@clutx.bitnet",
+    "CHAA006%vaxb.rhbnc.ac.uk@NSS.Cs.Ucl.AC.UK"
   ]
 }

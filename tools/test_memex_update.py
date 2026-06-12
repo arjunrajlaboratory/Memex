@@ -7,6 +7,7 @@ from memex_bake import BakeResult, sha256_file
 from memex_update import (
     Disposition,
     classify_update,
+    detect_renames,
     fill_new_answers,
     missing_required_tokens,
     plan_update_paths,
@@ -118,7 +119,16 @@ class TestUpdateClassification(unittest.TestCase):
             self.assertEqual(by_path[".gitignore"]["class"], "hybrid")
             self.assertEqual(by_path[".gitignore"]["disposition"], Disposition.UNCHANGED)
             self.assertEqual(by_path["_config/overrides.md"]["disposition"], Disposition.SEED_IF_ABSENT)
-            self.assertEqual(len(unresolved), 3)
+            # The identical-content rename (similarity 1.0, no local edit) is
+            # auto-resolved; edited + collision remain unresolved.
+            rename = next(e for e in entries if e["disposition"] == Disposition.RENAME_CANDIDATE)
+            self.assertTrue(rename["resolved"])
+            self.assertEqual(rename["resolution"], "auto-rename")
+            self.assertEqual(len(unresolved), 2)
+            self.assertEqual(
+                {e["disposition"] for e in unresolved},
+                {Disposition.EDITED, Disposition.COLLISION},
+            )
 
     def test_rename_candidate_with_existing_destination_is_collision(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -205,6 +215,69 @@ class TestUpdateClassification(unittest.TestCase):
             self.assertIsNotNone(entries[0]["staged_path"])
 
 
+class TestDetectRenames(unittest.TestCase):
+    def test_score_sorted_greedy_lets_best_global_pairs_win(self):
+        # a.md matches new1.md at ~0.92 and new2.md at ~0.90; b.md matches
+        # new1.md at ~0.99. Alphabetical greedy would let a.md claim new1.md
+        # first; score-sorted greedy must give new1.md to b.md (best global
+        # pair) and pair a.md with new2.md.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            baseline = root / "baseline"
+            staged = root / "staged"
+
+            common = "0123456789\n" * 12  # short enough to dodge autojunk
+            write(baseline / "a.md", common + "z" * 20)
+            write(baseline / "b.md", common + "vv")
+            write(staged / "new1.md", common + "qq")
+            write(staged / "new2.md", common + "wwwwwwww")
+
+            meta = {"class": "framework", "kind": "prose", "pack": "core"}
+            candidates = detect_renames(
+                removed_paths={"a.md", "b.md"},
+                new_paths={"new1.md", "new2.md"},
+                old_meta={"a.md": dict(meta), "b.md": dict(meta)},
+                new_meta={"new1.md": dict(meta), "new2.md": dict(meta)},
+                baseline_dir=baseline,
+                staged_dir=staged,
+            )
+
+            pairing = {item["old_path"]: item["new_path"] for item in candidates}
+            self.assertEqual(pairing, {"b.md": "new1.md", "a.md": "new2.md"})
+            scores = {item["old_path"]: item["similarity"] for item in candidates}
+            self.assertGreater(scores["b.md"], scores["a.md"])
+            # Best pair is emitted first (score-sorted).
+            self.assertEqual(candidates[0]["old_path"], "b.md")
+
+
+class TestThreeWayMerge(unittest.TestCase):
+    def test_clean_and_conflicting(self):
+        import tempfile, pathlib
+        from memex_update import three_way_merge
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            (d / "base").write_text("a\nb\nc\n")
+            (d / "current").write_text("a\nb LOCAL\nc\n")
+            (d / "staged").write_text("a\nb\nc\nENGINE\n")
+            merged = three_way_merge(d / "current", d / "base", d / "staged")
+            self.assertIn("b LOCAL", merged)
+            self.assertIn("ENGINE", merged)
+            (d / "staged2").write_text("a\nb ENGINE\nc\n")
+            self.assertIsNone(three_way_merge(d / "current", d / "base", d / "staged2"))
+
+    def test_declines_undecodable_bytes(self):
+        # A clean merge whose result contains invalid UTF-8 must decline
+        # (return None) rather than crash or corrupt content on decode.
+        import tempfile, pathlib
+        from memex_update import three_way_merge
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            (d / "base").write_bytes(b"a\nb\nc\n")
+            (d / "current").write_bytes(b"a\nb\nc\n")
+            (d / "staged").write_bytes(b"a\nb\nc\n\xff\xfe latin-1 garbage\n")
+            self.assertIsNone(three_way_merge(d / "current", d / "base", d / "staged"))
+
+
 class TestNewTokenDetection(unittest.TestCase):
     def test_noninteractive_new_tokens_use_existing_defaults(self):
         placeholders = {
@@ -256,6 +329,32 @@ class TestNewTokenDetection(unittest.TestCase):
             missing_required_tokens(placeholders, ["OWNER_SENDING_ACCOUNTS", "NEW_REQUIRED", "QUARTZ_PORT"]),
             ["NEW_REQUIRED"],
         )
+
+
+class TestSafeRelPath(unittest.TestCase):
+    def test_rejects_absolute_and_parent_and_drive(self):
+        from memex_update import assert_safe_rel_path
+        for bad in ("/etc/passwd", "../escape.md", "a/../../b", "~root/x", "C:/x"):
+            with self.assertRaises(RuntimeError):
+                assert_safe_rel_path(bad, "test")
+        assert_safe_rel_path("Atlas/People/X.md", "test")  # no raise
+
+
+class TestValidatePlanPaths(unittest.TestCase):
+    def test_non_dict_entries_raise(self):
+        from memex_update import validate_plan_paths
+        for bad in (["not-a-dict"], [None], [["path"]], [{"path": "ok.md"}, 7]):
+            with self.assertRaises(RuntimeError):
+                validate_plan_paths({"entries": bad})
+        validate_plan_paths({"entries": [{"path": "Atlas/X.md"}]})  # no raise
+
+
+class TestParseSetValues(unittest.TestCase):
+    def test_malformed_item_raises(self):
+        from memex_update import parse_set_values
+        with self.assertRaises(RuntimeError):
+            parse_set_values(["OWNER_TIMEZONE"])
+        self.assertEqual(parse_set_values(["A=b=c"]), {"A": "b=c"})
 
 
 class TestPlanResolution(unittest.TestCase):
