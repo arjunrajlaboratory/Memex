@@ -73,7 +73,7 @@ PY
 grep -q "^\.memex/$" "$TMP/core/.gitignore" || fail ".memex/ (manifest answers + local state) should be gitignored"
 [ -f "$TMP/core/AGENTS.md" ] || fail "AGENTS.md missing"
 [ -f "$TMP/core/CLAUDE.md" ] || fail "CLAUDE.md missing"
-[ -f "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/"
+[ -x "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/ or not executable"
 [ -f "$TMP/core/scripts/launchd/com.memex.quartz.example-vault.plist" ] || fail "launchd plist missing/misnamed (should carry vault name)"
 # VAULT_PATH is derived from --target (fixture says /tmp/example-vault; init overrides)
 grep -q "$TMP/core/scripts/serve_quartz.sh" "$TMP/core/scripts/launchd/com.memex.quartz.example-vault.plist" \

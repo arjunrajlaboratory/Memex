@@ -2,8 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- Per-vault Label: launchd keys agents by Label, so a fixed name would
+       make a second vault's agent collide with the first. -->
   <key>Label</key>
-  <string>com.memex.quartz</string>
+  <string>com.memex.quartz.{{VAULT_NAME}}</string>
 
   <key>ProgramArguments</key>
   <array>
@@ -12,19 +14,24 @@
   </array>
 
   <!-- Start at login, and keep it alive: launchd respawns the server within
-       seconds if it ever exits (crash, or a sleep/wake that killed it). -->
+       seconds if it ever exits (crash, or a sleep/wake that killed it).
+       ThrottleInterval prevents a tight crash loop when node_modules is missing. -->
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
 
   <key>WorkingDirectory</key>
   <string>{{VAULT_PATH}}/quartz</string>
 
+  <!-- Vault-local log: /tmp is world-writable (symlink hazard) and one fixed
+       path interleaved every vault's output. -->
   <key>StandardOutPath</key>
-  <string>/tmp/quartz-serve.log</string>
+  <string>{{VAULT_PATH}}/outputs/quartz-serve.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/quartz-serve.log</string>
+  <string>{{VAULT_PATH}}/outputs/quartz-serve.log</string>
 
   <key>ProcessType</key>
   <string>Background</string>
