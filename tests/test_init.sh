@@ -42,6 +42,7 @@ PY
 "$ENG/bin/memex-init" --target "$TMP/core" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
 
 [ -d "$TMP/core/Atlas/Concepts" ] || fail "scaffold dirs missing"
+[ -d "$TMP/core/Ops/Calendars" ] || fail "Ops/Calendars scaffold missing"
 [ -d "$TMP/core/Drafts" ] || fail "Drafts/ scaffold dir missing"
 [ -f "$TMP/core/Drafts/README.md" ] || fail "Drafts/README.md seed missing"
 [ -f "$TMP/core/_config/overrides.md" ] || fail "_config/overrides.md seed missing"
@@ -69,12 +70,11 @@ PY
 [ -f "$TMP/core/.gitignore" ] || fail "vault .gitignore missing"
 [ -f "$TMP/core/.memex/manifest.json" ] || fail ".memex/manifest.json missing"
 [ -f "$TMP/core/.memex/baseline/.claude/skills/triage-inbox/SKILL.md" ] || fail "framework baseline missing"
-grep -q ".memex/baseline/" "$TMP/core/.gitignore" || fail "baseline should be gitignored"
-grep -q ".memex/update-work/" "$TMP/core/.gitignore" || fail "update workdir should be gitignored"
+grep -q "^\.memex/$" "$TMP/core/.gitignore" || fail ".memex/ (manifest answers + local state) should be gitignored"
 [ -f "$TMP/core/AGENTS.md" ] || fail "AGENTS.md missing"
 [ -f "$TMP/core/CLAUDE.md" ] || fail "CLAUDE.md missing"
 [ -f "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/"
-[ -f "$TMP/core/scripts/launchd/com.memex.quartz.plist" ] || fail "launchd plist missing/misnamed"
+[ -f "$TMP/core/scripts/launchd/com.memex.quartz.example-vault.plist" ] || fail "launchd plist missing/misnamed (should carry vault name)"
 # sources config seed: present, default streams (email+slack on, calendar off), local git
 [ -f "$TMP/core/_config/sources.md" ] || fail "_config/sources.md seed missing"
 grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email stream not enabled by default"
@@ -110,6 +110,9 @@ PY
 # ---------- core+pi init ----------
 "$ENG/bin/memex-init" --target "$TMP/pi" --packs core,pi --answers "$ENG/tests/fixtures/answers.pi.json" >/dev/null
 [ -f "$TMP/pi/.claude/skills/draft-letter/SKILL.md" ] || fail "pi skill missing in pi init"
+[ -f "$TMP/pi/Atlas/Letters/index.md" ] || fail "pi Letters registry not seeded"
+[ -f "$TMP/pi/Atlas/Grants/index.md" ] || fail "pi Grants registry not seeded"
+[ ! -e "$TMP/core/Atlas/Letters/index.md" ] || fail "Letters registry leaked into core init"
 grep -qi "draft-letter\|letter" "$TMP/pi/CLAUDE.md" || fail "pi fragment not merged into contract"
 no_unbaked "$TMP/pi"
 # set OWNER_FORWARDING_EMAIL: the optional clause + hedge bake in (the kept branch)

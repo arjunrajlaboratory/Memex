@@ -65,6 +65,7 @@ SCAFFOLD_DIRS = [
     "Atlas/Interactions",
     "Ops/Tasks",
     "Ops/Briefings",
+    "Ops/Calendars",
     "Ops/Reviews",
     "Ops/Followups",
     "Ops/Views",
@@ -88,9 +89,12 @@ LOCATION_MAP = {
     "scripts": "scripts",
 }
 
+# All of .memex/ stays machine-local: the manifest embeds the user's full
+# answers dict (name, emails, paths, Drive IDs), and the baseline cache /
+# update staging are derived state — none of it should ever be committed
+# (in remote git mode a committed manifest would push personal data).
 GITIGNORE_LOCAL_ENTRIES = [
-    ".memex/baseline/",
-    ".memex/update-work/",
+    ".memex/",
 ]
 
 
@@ -135,7 +139,12 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def strip_sections(text: str, answers: dict[str, str]) -> str:
-    """Resolve {{?TOKEN}}...{{/TOKEN}} / {{^TOKEN}}...{{/TOKEN}} spans."""
+    """Resolve {{?TOKEN}}...{{/TOKEN}} / {{^TOKEN}}...{{/TOKEN}} spans.
+
+    Iterates to a fixed point so cross-token nesting like
+    {{?A}}...{{?B}}...{{/B}}...{{/A}} resolves inner sections kept by an
+    outer pass instead of leaving raw inner markers behind.
+    """
 
     def repl(m: re.Match[str]) -> str:
         sigil, token, body = m.group(1), m.group(2), m.group(3)
@@ -145,30 +154,39 @@ def strip_sections(text: str, answers: dict[str, str]) -> str:
         keep = nonblank if sigil == "?" else not nonblank
         return body if keep else ""
 
-    return SECTION_RE.sub(repl, text)
+    prev = None
+    while prev != text:
+        prev = text
+        text = SECTION_RE.sub(repl, text)
+    return text
 
 
-def bake(text: str, answers: dict[str, Any]) -> str:
+def normalize_answers(answers: dict[str, Any]) -> dict[str, str]:
+    return {k: str(v) for k, v in answers.items() if not isinstance(v, (list, dict))}
+
+
+def bake(text: str, answers: dict[str, Any], normalized: dict[str, str] | None = None) -> str:
     """Replace catalogued {{TOKEN}}s with answers, preserving unknown tokens."""
-    normalized = {k: str(v) for k, v in answers.items() if not isinstance(v, (list, dict))}
+    normalized = normalized if normalized is not None else normalize_answers(answers)
     text = strip_sections(text, normalized)
     return TOKEN_RE.sub(lambda m: normalized.get(m.group(1), m.group(0)), text)
 
 
-def bake_file(src: pathlib.Path, dst: pathlib.Path, answers: dict[str, Any]) -> None:
+def bake_file(src: pathlib.Path, dst: pathlib.Path, answers: dict[str, Any], normalized: dict[str, str] | None = None) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.suffix in TEXT_EXTS:
-        dst.write_text(bake(src.read_text(errors="ignore"), answers))
+        dst.write_text(bake(src.read_text(errors="ignore"), answers, normalized))
         shutil.copymode(src, dst)
     else:
         shutil.copy2(src, dst)
 
 
-def bake_tree(src: pathlib.Path, dst: pathlib.Path, answers: dict[str, Any], result: BakeResult | None = None, pack: str | None = None) -> None:
+def bake_tree(src: pathlib.Path, dst: pathlib.Path, answers: dict[str, Any], result: BakeResult | None = None, pack: str | None = None, normalized: dict[str, str] | None = None) -> None:
+    normalized = normalized if normalized is not None else normalize_answers(answers)
     for fp in src.rglob("*"):
         if fp.is_file():
             rel = fp.relative_to(src)
-            bake_file(fp, dst / rel, answers)
+            bake_file(fp, dst / rel, answers, normalized)
             if result is not None:
                 result.record(rel, pack, fp)
 
@@ -280,12 +298,35 @@ planning-only.
 
 
 def answers_with_defaults(manifest: dict[str, Any], answers: dict[str, Any]) -> dict[str, Any]:
-    """Ensure every catalogued token has a value."""
+    """Ensure every catalogued token has a value.
+
+    Port tokens additionally treat a BLANK answer as unanswered — a blank port
+    would otherwise bake `--port ` (empty flag value) into quartz scripts.
+    """
     out = dict(answers)
     for ph in manifest["placeholders"]:
-        if ph["token"] not in out:
-            out[ph["token"]] = ph.get("example", "") if ph["token"] in PORT_TOKENS else ""
+        token = ph["token"]
+        if token not in out:
+            out[token] = ph.get("example", "") if token in PORT_TOKENS else ""
+        elif token in PORT_TOKENS and not str(out[token]).strip():
+            out[token] = ph.get("example", "")
     return out
+
+
+def placeholder_allows_blank(placeholder: dict[str, Any]) -> bool:
+    if placeholder.get("optional") is True or placeholder.get("allow_blank") is True:
+        return True
+    prompt = str(placeholder.get("prompt", "")).lower()
+    return "or blank" in prompt
+
+
+def validate_packs(engine_dir: pathlib.Path, packs: list[str]) -> None:
+    known = set(read_json(engine_dir / "packs.json")) - {"hardened"}
+    unknown = [p for p in packs if p not in known]
+    if unknown:
+        raise ValueError(
+            f"unknown pack(s): {', '.join(unknown)} (known: {', '.join(sorted(known))})"
+        )
 
 
 def engine_version(engine_dir: pathlib.Path) -> str:
@@ -397,10 +438,14 @@ def _write_seed_files(target: pathlib.Path, answers: dict[str, Any], streams: li
         "instead of editing `.claude/skills/`, `_schemas/`, `_templates/`, "
         "`_workflows/`, `Agents/Prompts/`, `scripts/`, or `quartz/` in place.\n"
     )
+    # Seeds are write-once: never clobber an existing file (re-running init with
+    # --force must not reset log.md / _config/overrides.md). Existing seeds are
+    # still recorded so the manifest carries seed entries either way.
     for rel, text in seeds.items():
         path = target / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
         result.record(rel, None, None)
 
 
@@ -426,6 +471,7 @@ def bake_engine(
     today = today or datetime.date.today().isoformat()
     streams = parse_streams(answers.get("STREAMS")) if streams is None else streams
     git_mode = normalize_git_mode(answers.get("GIT_MODE")) if git_mode is None else git_mode
+    normalized = normalize_answers(answers)
 
     if include_scaffold:
         for d in SCAFFOLD_DIRS:
@@ -443,7 +489,7 @@ def bake_engine(
                     if fp.is_file():
                         rel = fp.relative_to(srcd)
                         dst = target / dest / rel
-                        bake_file(fp, dst, answers)
+                        bake_file(fp, dst, answers, normalized)
                         result.record(dst.relative_to(target), pack, fp)
 
     hooks = engine_dir / "hardened/hooks"
@@ -451,17 +497,17 @@ def bake_engine(
         for fp in hooks.rglob("*"):
             if fp.is_file():
                 dst = target / ".claude/hooks" / fp.relative_to(hooks)
-                bake_file(fp, dst, answers)
+                bake_file(fp, dst, answers, normalized)
                 result.record(dst.relative_to(target), "hardened", fp)
 
     settings = engine_dir / "hardened/settings.json"
     if settings.exists():
-        bake_file(settings, target / ".claude/settings.json", answers)
+        bake_file(settings, target / ".claude/settings.json", answers, normalized)
         result.record(".claude/settings.json", "hardened", settings)
 
     gitignore = engine_dir / "hardened/gitignore"
     if gitignore.exists():
-        bake_file(gitignore, target / ".gitignore", answers)
+        bake_file(gitignore, target / ".gitignore", answers, normalized)
         ensure_gitignore_entries(target)
         result.record(".gitignore", None, gitignore)
 
@@ -470,7 +516,7 @@ def bake_engine(
         for fp in quartz.rglob("*"):
             if fp.is_file():
                 dst = target / "quartz" / fp.relative_to(quartz)
-                bake_file(fp, dst, answers)
+                bake_file(fp, dst, answers, normalized)
                 result.record(dst.relative_to(target), "hardened", fp)
 
     launchd = engine_dir / "hardened/launchd"
@@ -478,16 +524,20 @@ def bake_engine(
         for fp in launchd.iterdir():
             if fp.is_file():
                 if fp.suffix == ".plist":
-                    dst = target / "scripts/launchd/com.memex.quartz.plist"
+                    # Carry the vault name in the plist filename so multiple
+                    # vaults' launchd agents do not collide on one machine.
+                    vault_name = str(answers.get("VAULT_NAME", "")).strip()
+                    plist_name = f"com.memex.quartz.{vault_name}.plist" if vault_name else "com.memex.quartz.plist"
+                    dst = target / "scripts/launchd" / plist_name
                 else:
                     dst = target / "scripts" / fp.name
-                bake_file(fp, dst, answers)
+                bake_file(fp, dst, answers, normalized)
                 result.record(dst.relative_to(target), "hardened", fp)
 
     for base_name, out_name in [("AGENTS.base.md", "AGENTS.md"), ("CLAUDE.base.md", "CLAUDE.md")]:
-        text = bake((engine_dir / "hardened/contract" / base_name).read_text(), answers)
+        text = bake((engine_dir / "hardened/contract" / base_name).read_text(), answers, normalized)
         if "pi" in packs:
-            frag = bake((engine_dir / "hardened/contract/pi-fragment.md").read_text(), answers)
+            frag = bake((engine_dir / "hardened/contract/pi-fragment.md").read_text(), answers, normalized)
             text = text.replace("<!-- PI_CONTRACT_FRAGMENT -->", frag)
         else:
             text = text.replace("<!-- PI_CONTRACT_FRAGMENT -->", "")
@@ -496,6 +546,29 @@ def bake_engine(
 
     if include_seeds:
         _write_seed_files(target, answers, streams, git_mode, today, result)
+
+    if include_seeds and "pi" in packs:
+        registries = {
+            "Atlas/Letters/index.md": (
+                "---\ntype: config\nscope: letters-registry\n---\n\n# Letters\n\n"
+                "Registry/landing page for Letter notes. The canonical letters live in Google Drive\n"
+                f"(`recommendation_letters`, folder ID `{answers.get('LETTERS_DRIVE_ID', '')}`); the letterhead\n"
+                f"template is Drive ID `{answers.get('LETTERHEAD_TEMPLATE_ID', '')}`.\n\n"
+                "Record per-recipient Drive subfolder IDs here as `/ingest-letters` discovers them:\n\n"
+                "| Recipient | Drive folder ID |\n| --- | --- |\n"
+            ),
+            "Atlas/Grants/index.md": (
+                "---\ntype: config\nscope: grants-registry\n---\n\n# Grants\n\n"
+                "The canonical registry of all Grant notes. One row per grant; `/dashboards/` views build on it.\n\n"
+                "| Grant | Status | Mechanism | Due |\n| --- | --- | --- | --- |\n"
+            ),
+        }
+        for rel, text in registries.items():
+            path = target / rel
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+            result.record(rel, "pi", None)
 
     return result
 

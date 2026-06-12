@@ -168,5 +168,30 @@ class TestSourcesConfigYaml(unittest.TestCase):
         self.assertIn("calendar: { enabled: true,", out)
         self.assertIn("git_mode: remote", out)
 
+class TestSeedSafety(unittest.TestCase):
+    def test_seeds_skip_existing_files(self):
+        import tempfile, pathlib
+        from memex_bake import _write_seed_files, BakeResult
+        with tempfile.TemporaryDirectory() as tmp:
+            target = pathlib.Path(tmp)
+            (target / "log.md").write_text("# log\nPRECIOUS HISTORY\n")
+            _write_seed_files(target, {"OWNER_NAME": "X"}, ["email"], "local", "2026-06-12", BakeResult())
+            self.assertIn("PRECIOUS HISTORY", (target / "log.md").read_text())
+            self.assertTrue((target / "index.md").exists())  # absent seeds still written
+
+class TestStripSectionsNested(unittest.TestCase):
+    def test_cross_token_nesting_resolves(self):
+        from memex_bake import strip_sections
+        text = "{{?A}}a {{?B}}b{{/B}} c{{/A}}"
+        self.assertEqual(strip_sections(text, {"A": "x", "B": ""}), "a  c")
+        self.assertEqual(strip_sections(text, {"A": "x", "B": "y"}), "a b c")
+
+class TestAnswersDefaults(unittest.TestCase):
+    def test_blank_port_gets_example(self):
+        from memex_bake import answers_with_defaults
+        manifest = {"placeholders": [{"token": "QUARTZ_PORT", "example": "8181"}]}
+        out = answers_with_defaults(manifest, {"QUARTZ_PORT": ""})
+        self.assertEqual(out["QUARTZ_PORT"], "8181")
+
 if __name__ == "__main__":
     unittest.main()

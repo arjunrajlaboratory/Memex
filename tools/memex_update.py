@@ -32,6 +32,7 @@ from memex_bake import (
     load_engine_layout,
     manifest_files_for_tree,
     normalize_git_mode,
+    placeholder_allows_blank,
     read_json,
     sha256_file,
     write_json,
@@ -378,13 +379,6 @@ def fill_new_answers(
         else:
             updated[token] = placeholder.get("example", "") if token in PORT_TOKENS else ""
     return answers_with_defaults(placeholder_manifest, updated), added
-
-
-def placeholder_allows_blank(placeholder: dict[str, Any]) -> bool:
-    if placeholder.get("optional") is True or placeholder.get("allow_blank") is True:
-        return True
-    prompt = str(placeholder.get("prompt", "")).lower()
-    return "or blank" in prompt
 
 
 def missing_required_tokens(placeholder_manifest: dict[str, Any], added_tokens: list[str]) -> list[str]:

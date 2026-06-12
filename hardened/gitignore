@@ -76,3 +76,10 @@ Drafts/**/*.tar
 Drafts/**/*.gz
 Drafts/**/*.tgz
 Drafts/**/*.7z
+
+# Claude Code machine-local permission grants — never commit
+.claude/settings.local.json
+
+# Memex local state: manifest (contains your answers: name, emails, paths,
+# Drive IDs), baseline cache, and update staging. Machine-local by design.
+.memex/

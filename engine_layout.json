@@ -27,7 +27,9 @@
     "_config/overrides.md",
     "Inbox/README.md",
     "outputs/README.md",
-    "Drafts/README.md"
+    "Drafts/README.md",
+    "Atlas/Letters/index.md",
+    "Atlas/Grants/index.md"
   ],
   "data": [
     "Atlas/**",
