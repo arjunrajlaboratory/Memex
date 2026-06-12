@@ -390,7 +390,7 @@ def ensure_gitignore_entries(vault_dir: pathlib.Path, entries: list[str] | None 
     with gitignore.open("a") as f:
         if existing and existing[-1].strip():
             f.write("\n")
-        f.write("\n# Memex local update state\n")
+        f.write("\n# Memex local state (manifest incl. answers, baseline, update staging)\n")
         for entry in to_add:
             f.write(entry + "\n")
 
@@ -552,8 +552,8 @@ def bake_engine(
             "Atlas/Letters/index.md": (
                 "---\ntype: config\nscope: letters-registry\n---\n\n# Letters\n\n"
                 "Registry/landing page for Letter notes. The canonical letters live in Google Drive\n"
-                f"(`recommendation_letters`, folder ID `{answers.get('LETTERS_DRIVE_ID', '')}`); the letterhead\n"
-                f"template is Drive ID `{answers.get('LETTERHEAD_TEMPLATE_ID', '')}`.\n\n"
+                f"(`recommendation_letters`, folder ID {_inline_or_none(str(answers.get('LETTERS_DRIVE_ID', '')).strip())}); the letterhead\n"
+                f"template is Drive ID {_inline_or_none(str(answers.get('LETTERHEAD_TEMPLATE_ID', '')).strip())}.\n\n"
                 "Record per-recipient Drive subfolder IDs here as `/ingest-letters` discovers them:\n\n"
                 "| Recipient | Drive folder ID |\n| --- | --- |\n"
             ),
