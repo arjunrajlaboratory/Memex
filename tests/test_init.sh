@@ -116,6 +116,9 @@ PY
 [ -f "$TMP/pi/Atlas/Letters/index.md" ] || fail "pi Letters registry not seeded"
 [ -f "$TMP/pi/Atlas/Grants/index.md" ] || fail "pi Grants registry not seeded"
 [ ! -e "$TMP/core/Atlas/Letters/index.md" ] || fail "Letters registry leaked into core init"
+[ -x "$TMP/pi/scripts/build_cv.sh" ] || fail "build_cv.sh not installed/executable"
+[ -x "$TMP/pi/scripts/merge_letterhead.py" ] || [ -f "$TMP/pi/scripts/merge_letterhead.py" ] || fail "merge_letterhead.py not installed"
+[ ! -e "$TMP/core/scripts/build_cv.sh" ] || fail "pi script leaked into core init"
 grep -qi "draft-letter\|letter" "$TMP/pi/CLAUDE.md" || fail "pi fragment not merged into contract"
 no_unbaked "$TMP/pi"
 # set OWNER_FORWARDING_EMAIL: the optional clause + hedge bake in (the kept branch)

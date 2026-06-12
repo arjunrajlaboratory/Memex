@@ -116,7 +116,8 @@
     ],
     "cv": true,
     "scripts": [
-      "merge_letterhead.py"
+      "merge_letterhead.py",
+      "build_cv.sh"
     ]
   },
   "hardened": {
