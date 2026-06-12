@@ -54,9 +54,9 @@ Procedure:
    }
    ```
 
-   Use the real pack list. The finalize step writes `.memex/manifest.json`, refreshes `.memex/baseline/`, and appends the local baseline ignore rules to `.gitignore`.
+   Use the real pack list. The finalize step writes `.memex/manifest.json`, refreshes `.memex/baseline/`, and ensures `.memex/` is in `.gitignore` (the manifest embeds the interview answers — name, emails, paths — so all of `.memex/` stays machine-local and never appears in the git diff).
 
-4. Commit the reconciliation in the local vault. The review surface should show framework changes plus `.memex/manifest.json`, while `.memex/baseline/` remains ignored.
+4. Commit the reconciliation in the local vault. The review surface should show framework changes only; everything under `.memex/` is gitignored by design.
 
 Report:
 

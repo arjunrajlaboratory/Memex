@@ -17,7 +17,7 @@ hand-curated and survive re-derives; nothing to do for those.)
 | `hardened/hooks/session-start-context.sh` | `.claude/hooks/session-start-context.sh` | "Memex" branding (was "LifeOS"), single awk pass for task counts + needs_review (was 6 greps), quartz log to `outputs/quartz-serve.log` (was world-writable `/tmp`). |
 | `hardened/settings.json` | `.claude/settings.json` | `permissions.deny` block (`.env*`, `secrets/**`, force-push) + anchored PostToolUse matcher `^(Edit\|Write)$`. |
 | `hardened/launchd/com.you.memex-quartz.plist` | `scripts/launchd/…` | Label `com.memex.quartz.{{VAULT_NAME}}` (source vault: its real vault name), `ThrottleInterval 10`, logs to `{{VAULT_PATH}}/outputs/quartz-serve.log`. |
-| `hardened/launchd/serve_quartz.sh` | `scripts/serve_quartz.sh` | Mode 755 (exec bit only; content unchanged). |
+| `hardened/launchd/serve_quartz.sh` | `scripts/serve_quartz.sh` | Mode 755 (exec bit only; content unchanged). Note: mode-only changes do NOT propagate to already-installed vaults (the updater compares content) — `chmod +x` installed copies manually if you run the script directly; the launchd path is unaffected (plist invokes via `/bin/zsh`). |
 | `hardened/quartz/quartz/cli/handlers.js` | `quartz/quartz/cli/handlers.js` | `server.listen(argv.port, "127.0.0.1")` + `WebSocketServer({ host: "127.0.0.1", … })` — serve mode includes private notes; must not bind the LAN. |
 | `hardened/quartz/quartz.config.ts` | `quartz/quartz.config.ts` | `ignorePatterns` += `.memex`, `_config`, `_config/**`; `baseUrl: "localhost:<your port>"` (derive tokenizes the port literal). |
 | `hardened/quartz/package.json` | `quartz/package.json` | `site:build:public` no longer sets the phantom `QUARTZ_PUBLIC_BUILD` env var (read nowhere). |
@@ -34,9 +34,15 @@ hand-curated and survive re-derives; nothing to do for those.)
   the update commit. The old manifest content remains in git *history*; if the
   vault pushed to a remote and that matters, rewrite history manually.
 - **The launchd plist is renamed** to `com.memex.quartz.<vault-name>.plist`
-  with a matching Label. The updater auto-resolves the rename (identical
-  content ⇒ auto-rename), but a *loaded* LaunchAgent still points at the old
-  path — `launchctl bootout` the old label and bootstrap the new plist once.
+  with a matching Label. Because the plist *content* also changed in this
+  release (Label, log paths, ThrottleInterval), the updater classifies the old
+  file as `removed-upstream` and the new one as `new` — NOT as a rename. The
+  new plist installs automatically; the old one is pruned with
+  `--non-interactive`/`--yes-prune`, but an interactive update's prune prompt
+  defaults to "no", leaving the stale plist behind — answer yes, or delete
+  `scripts/launchd/com.memex.quartz.plist` manually. A *loaded* LaunchAgent
+  still points at the old path either way — `launchctl bootout` the old label
+  and bootstrap the new plist once.
 - **The auto-merge tier** now resolves clean 3-way prose merges, byte-identical
   collisions, and exact renames without writing them to the plan as unresolved;
   only genuinely conflicting edits need agent/manual review.

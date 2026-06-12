@@ -107,7 +107,7 @@ The artifact is the new Source note at `Atlas/Sources/<title>.md`. The user read
 
 ```bash
 if ! lsof -ti :{{QUARTZ_PORT}} >/dev/null 2>&1; then
-  ( cd {{VAULT_PATH}}/quartz && npm run site:serve > /tmp/quartz-serve.log 2>&1 & disown )
+  ( cd {{VAULT_PATH}}/quartz && npm run site:serve > {{VAULT_PATH}}/outputs/quartz-serve.log 2>&1 & disown )
   for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; lsof -ti :{{QUARTZ_PORT}} >/dev/null 2>&1 && break; done
 fi
 open "http://localhost:{{QUARTZ_PORT}}/Atlas/Sources/<title>"
