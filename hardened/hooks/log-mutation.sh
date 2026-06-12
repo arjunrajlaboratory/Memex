@@ -1,97 +1,102 @@
 #!/usr/bin/env bash
 # PostToolUse hook: auto-append a placeholder log line for any Edit/Write to a
 # typed vault note. The vault's discipline ("every mutation logged") is
-# systematically dropped by skill-driven sessions — the 2026-05-24 audit found
-# 5+ sessions doing 10-60 vault edits with zero log.md touches. This hook
-# guarantees something gets recorded; the agent rewrites the placeholder with a
-# real summary at workflow end.
+# systematically dropped by skill-driven sessions — this hook guarantees
+# something gets recorded; the agent rewrites the placeholder with a real
+# summary at workflow end.
 #
 # Deliberately NOT using `set -e` — a hook must never break a session.
-#
 # Hook input arrives as JSON on stdin per Claude Code PostToolUse spec.
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)" || exit 0
 cd "$REPO_ROOT" || exit 0
 
-# Read hook input (best-effort — fall back to env if stdin is empty)
 hook_input="$(cat 2>/dev/null || true)"
-file_path="$(printf '%s' "$hook_input" | python3 -c "
-import sys, json
+# Cheap prefilter before paying python3 startup: must mention a file_path at all.
+case "$hook_input" in *'"file_path"'*) ;; *) exit 0 ;; esac
+
+# NB: program via -c (command substitution), NOT `python3 - << heredoc` — a
+# heredoc would override the pipe as stdin and json.load would read EOF.
+printf '%s' "$hook_input" | python3 -c "$(cat << 'PYEOF'
+import datetime, json, os, sys, tempfile
+
 try:
-    d = json.load(sys.stdin)
-    p = d.get('tool_input', {}).get('file_path', '') or ''
-    print(p)
+    import fcntl
+except ImportError:  # non-POSIX: degrade to unlocked (still atomic via os.replace)
+    fcntl = None
+
+root = sys.argv[1]
+try:
+    payload = json.load(sys.stdin)
 except Exception:
-    pass
-" 2>/dev/null)"
+    sys.exit(0)
+file_path = (payload.get("tool_input") or {}).get("file_path") or ""
+if not file_path or file_path.endswith("/log.md"):
+    sys.exit(0)
+prefix = root.rstrip("/") + "/"
+if not file_path.startswith(prefix):       # only this vault's files
+    sys.exit(0)
+rel = file_path[len(prefix):]
+parts = rel.split("/")
+typed = rel.endswith(".md") and (
+    (parts[0] == "Atlas" and len(parts) >= 3)
+    or (parts[0] == "Ops" and len(parts) >= 3
+        and parts[1] in {"Tasks", "Followups", "Briefings", "Reviews"})
+)
+if not typed or any(seg in rel for seg in ("_archive", "Inbox/", "_schemas", "_templates", "_workflows")):
+    sys.exit(0)
 
-[ -z "$file_path" ] && exit 0
-
-# Never log a write to log.md itself (would infinite-loop)
-[[ "$file_path" == */log.md ]] && exit 0
-
-# Only handle paths inside this vault
-[[ "$file_path" != "$REPO_ROOT"/* ]] && exit 0
-rel_path="${file_path#$REPO_ROOT/}"
-
-# Filter: only typed vault notes (mirror bump-updated.sh's path filter)
-case "$rel_path" in
-  Atlas/*/*.md|Ops/Tasks/*.md|Ops/Followups/*.md|Ops/Briefings/*.md|Ops/Reviews/*.md) ;;
-  *) exit 0 ;;
-esac
-
-# Skip archive / inbox / schemas / templates / workflows
-case "$rel_path" in
-  *_archive*|*Inbox/*|*_schemas*|*_templates*|*_workflows*) exit 0 ;;
-esac
-
-basename="$(basename "$rel_path" .md)"
-ts="$(date +%Y-%m-%dT%H:%M:%S%z | sed -E 's/([+-][0-9]{2})([0-9]{2})$/\1:\2/')"
-
-# Dedupe: skip if a placeholder for this basename was added in the last 60s.
-# Without dedupe, 10 consecutive Edits to the same Task produce 10 placeholders.
-if [ -f log.md ]; then
-  recent_line="$(grep -F "[[$basename]]" log.md 2>/dev/null | head -1)"
-  if [ -n "$recent_line" ]; then
-    ts_recent="$(printf '%s' "$recent_line" | awk '{print $1}')"
-    if [ -n "$ts_recent" ]; then
-      now_epoch="$(date +%s)"
-      # macOS date format: handle the ISO-8601 with colon in TZ
-      ts_clean="$(printf '%s' "$ts_recent" | sed 's/://3')"
-      recent_epoch="$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "$ts_clean" +%s 2>/dev/null || echo 0)"
-      if [ "$recent_epoch" -gt 0 ]; then
-        diff=$((now_epoch - recent_epoch))
-        [ "$diff" -ge 0 ] && [ "$diff" -lt 60 ] && exit 0
-      fi
-    fi
-  fi
-fi
-
-new_line="${ts} — agent:auto — touch — [[${basename}]] — auto-placeholder via PostToolUse hook (Edit/Write); rewrite at end-of-workflow with real summary."
-
-# Insert after the preamble, before the first dated entry (or append).
-python3 - "$new_line" << 'PYEOF'
-import sys
-new = sys.argv[1]
-path = 'log.md'
+base = os.path.basename(rel)[:-3]
+now = datetime.datetime.now().astimezone()
+log_path = os.path.join(root, "log.md")
+lock_dir = os.path.join(root, ".memex")
+os.makedirs(lock_dir, exist_ok=True)
+lock = open(os.path.join(lock_dir, "log.lock"), "w")
+if fcntl is not None:
+    fcntl.flock(lock, fcntl.LOCK_EX)   # released on process exit
 try:
-    with open(path, 'r') as f:
+    with open(log_path) as f:
         lines = f.readlines()
 except FileNotFoundError:
     sys.exit(0)
-inserted = False
-for i, line in enumerate(lines):
-    if line.startswith('20') and 'T' in line[:11] and '—' in line:
-        lines.insert(i, new + '\n')
-        inserted = True
+
+# Dedupe: skip if the most recent line for this note is < 60s old (10
+# consecutive Edits to one Task must not produce 10 placeholders).
+needle = f"[[{base}]]"
+for line in lines:
+    if needle in line:
+        try:
+            prev = datetime.datetime.fromisoformat(line.split(" ")[0])
+            if 0 <= (now - prev).total_seconds() < 60:
+                sys.exit(0)
+        except (ValueError, TypeError):
+            pass
         break
-if not inserted:
-    if lines and not lines[-1].endswith('\n'):
-        lines[-1] += '\n'
-    lines.append(new + '\n')
-with open(path, 'w') as f:
-    f.writelines(lines)
+
+new = (f"{now.isoformat(timespec='seconds')} — agent:auto — touch — [[{base}]] — "
+       "auto-placeholder via PostToolUse hook (Edit/Write); rewrite at end-of-workflow with real summary.\n")
+insert_at = len(lines)
+for i, line in enumerate(lines):   # newest entries live at the top, after the preamble
+    if line.startswith("20") and "T" in line[:11] and "—" in line:
+        insert_at = i
+        break
+if insert_at == len(lines) and lines and not lines[-1].endswith("\n"):
+    lines[-1] += "\n"
+lines.insert(insert_at, new)
+
+fd, tmp = tempfile.mkstemp(dir=root, prefix=".log.md.")
+try:
+    with os.fdopen(fd, "w") as f:
+        f.writelines(lines)
+    os.replace(tmp, log_path)      # atomic: a crash can never truncate the log
+except BaseException:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    raise
 PYEOF
+)" "$REPO_ROOT"
 
 exit 0
