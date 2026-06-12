@@ -15,7 +15,7 @@
     "quartz": "./quartz/bootstrap-cli.mjs",
     "docs": "npx quartz build --serve -d docs",
     "site:build": "npx quartz build -d ..",
-    "site:build:public": "QUARTZ_PUBLIC_BUILD=true npx quartz build -d ..",
+    "site:build:public": "npx quartz build -d ..",
     "site:serve": "QUARTZ_INCLUDE_PRIVATE=true npx quartz build -d .. --serve --watch --port {{QUARTZ_PORT}} --wsPort {{QUARTZ_WS_PORT}}",
     "check": "tsc --noEmit && npx prettier . --check",
     "format": "npx prettier . --write",

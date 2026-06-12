@@ -453,8 +453,11 @@ export async function handleBuild(argv) {
       return serve()
     })
 
-    server.listen(argv.port)
-    const wss = new WebSocketServer({ port: argv.wsPort })
+    // Bind loopback only: site:serve runs with QUARTZ_INCLUDE_PRIVATE=true
+    // under a KeepAlive launchd agent, so an all-interfaces bind would expose
+    // the entire vault (private notes included) to the LAN around the clock.
+    server.listen(argv.port, "127.0.0.1")
+    const wss = new WebSocketServer({ host: "127.0.0.1", port: argv.wsPort })
     wss.on("connection", (ws) => connections.push(ws))
     console.log(
       styleText(
