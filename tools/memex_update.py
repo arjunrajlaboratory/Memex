@@ -57,7 +57,10 @@ def assert_safe_rel_path(rel: str, origin: str) -> None:
 
 
 def validate_plan_paths(plan: dict[str, Any]) -> None:
-    for entry in plan.get("entries", []):
+    entries = plan.get("entries", [])
+    if not isinstance(entries, list):
+        raise RuntimeError("malformed plan: entries must be a list")
+    for entry in entries:
         if not isinstance(entry, dict):
             raise RuntimeError("malformed plan: entries must be objects")
         for key in ("path", "new_path", "archive_path", "aside_path"):
@@ -334,10 +337,16 @@ def filter_unignored(vault_dir: pathlib.Path, paths: set[str] | list[str]) -> li
 
 def commit_update(vault_dir: pathlib.Path, version: str, paths: set[str] | None = None) -> bool:
     if paths:
-        addable = []
-        for path in filter_unignored(vault_dir, paths):
-            if (vault_dir / path).exists() or run_git(vault_dir, ["ls-files", "--error-unmatch", "--", path], check=False).returncode == 0:
-                addable.append(path)
+        unignored = filter_unignored(vault_dir, paths)
+        existing = [p for p in unignored if (vault_dir / p).exists()]
+        missing = [p for p in unignored if not (vault_dir / p).exists()]
+        tracked_missing: list[str] = []
+        if missing:
+            # One batched ls-files call instead of one subprocess per path.
+            out = run_git(vault_dir, ["ls-files", "--", *missing], check=False)
+            tracked = {line for line in out.stdout.splitlines() if line}
+            tracked_missing = [p for p in missing if p in tracked]
+        addable = existing + tracked_missing
         if addable:
             run_git(vault_dir, ["add", "--", *addable])
     else:
@@ -447,24 +456,42 @@ def detect_renames(
     baseline_dir: pathlib.Path,
     staged_dir: pathlib.Path,
 ) -> list[dict[str, Any]]:
-    candidates: list[dict[str, Any]] = []
-    used_removed: set[str] = set()
-    used_new: set[str] = set()
+    texts: dict[str, str | None] = {}
+
+    def text_of(root: pathlib.Path, rel: str) -> str | None:
+        key = f"{root}:{rel}"
+        if key not in texts:
+            texts[key] = text_for_similarity(root / rel)
+        return texts[key]
+
+    scored: list[tuple[float, str, str]] = []
     for old_path in sorted(removed_paths):
         old_suffix = pathlib.PurePosixPath(old_path).suffix
-        best: tuple[float, str] | None = None
-        for new_path in sorted(new_paths - used_new):
+        old_text = text_of(baseline_dir, old_path)
+        for new_path in sorted(new_paths):
             if old_suffix and pathlib.PurePosixPath(new_path).suffix != old_suffix:
                 continue
             if old_meta[old_path].get("kind") != new_meta[new_path].get("kind"):
                 continue
-            score = content_similarity(baseline_dir / old_path, staged_dir / new_path)
-            if best is None or score > best[0]:
-                best = (score, new_path)
-        if best and best[0] >= RENAME_SIMILARITY_THRESHOLD:
-            used_removed.add(old_path)
-            used_new.add(best[1])
-            candidates.append({"old_path": old_path, "new_path": best[1], "similarity": round(best[0], 4)})
+            new_text = text_of(staged_dir, new_path)
+            if old_text is None or new_text is None:
+                score = content_similarity(baseline_dir / old_path, staged_dir / new_path)
+            else:
+                if min(len(old_text), len(new_text)) < 0.4 * max(len(old_text), len(new_text), 1):
+                    continue  # size prefilter: can't reach the similarity threshold
+                score = difflib.SequenceMatcher(None, old_text, new_text).ratio()
+            if score >= RENAME_SIMILARITY_THRESHOLD:
+                scored.append((score, old_path, new_path))
+    scored.sort(key=lambda t: (-t[0], t[1], t[2]))  # best-score-first greedy: an
+    used_old: set[str] = set()                       # earlier alphabetical pair can no
+    used_new: set[str] = set()                       # longer steal a better later match
+    candidates: list[dict[str, Any]] = []
+    for score, old_path, new_path in scored:
+        if old_path in used_old or new_path in used_new:
+            continue
+        used_old.add(old_path)
+        used_new.add(new_path)
+        candidates.append({"old_path": old_path, "new_path": new_path, "similarity": round(score, 4)})
     return candidates
 
 
@@ -884,7 +911,7 @@ def prepare_update(args: argparse.Namespace) -> int:
             work_dir=work_dir,
         )
         layout = load_engine_layout(engine_dir)
-        entries, unresolved, _staged_meta = classify_update(
+        entries, unresolved, staged_meta = classify_update(
             manifest=manifest,
             layout=layout,
             baseline_dir=baseline_dir,
@@ -959,6 +986,8 @@ def prepare_update(args: argparse.Namespace) -> int:
                 source_map=source_map,
                 answers=answers,
                 packs=packs,
+                # classify_update already hashed the staged tree; reuse it.
+                files=staged_meta,
             )
             if git_on and not args.no_git_branch:
                 try:
@@ -1101,8 +1130,21 @@ def abort_update(args: argparse.Namespace) -> int:
         print(f"error: {exc}")
         return 1
     if not is_git_repo(vault_dir):
-        print("abort: not a git repo; remove update changes manually if needed.")
-        return 1
+        # Without git there is nothing to restore files from, but the pending
+        # guard must still disarm or every future prepare is blocked. Flip the
+        # plan to "aborted" (not pending) and keep the work dir: its undo/
+        # archive is the only copy of the replaced/pruned originals.
+        plan["status"] = "aborted"
+        plan["aborted_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        write_json(plan_path, plan)
+        undo_dir = plan_path.parent / "undo"
+        print(
+            "abort: vault is not a git repo, so file-level restoration is unavailable; "
+            "marked the plan aborted so a new prepare can run."
+        )
+        if undo_dir.is_dir():
+            print(f"abort: originals of replaced/pruned files are archived under {undo_dir} for manual recovery")
+        return 0
     paths = plan_update_paths(plan)
     branch = plan.get("branch")
     previous = plan.get("previous_branch")
@@ -1136,6 +1178,7 @@ def abort_update(args: argparse.Namespace) -> int:
 
     current = run_git(vault_dir, ["branch", "--show-current"], check=False).stdout.strip()
     returned_to = current or previous or "<unknown>"
+    switch_failed = False
     if branch and current == branch:
         if previous and previous != branch:
             switched = run_git(vault_dir, ["switch", previous], check=False)
@@ -1146,6 +1189,7 @@ def abort_update(args: argparse.Namespace) -> int:
                     run_git(vault_dir, ["branch", "-D", branch], check=False)
             else:
                 returned_to = current
+                switch_failed = True
         else:
             returned_to = current
 
@@ -1158,7 +1202,10 @@ def abort_update(args: argparse.Namespace) -> int:
         if wd.resolve().is_relative_to(vault_dir):
             shutil.rmtree(wd, ignore_errors=True)
     if branch and returned_to == branch:
-        print(f"abort: reverted update changes; stayed on {branch} (no previous branch recorded)")
+        if switch_failed:
+            print(f"abort: reverted update changes; could not switch back to {previous}; staying on {branch}")
+        else:
+            print(f"abort: reverted update changes; stayed on {branch} (no previous branch recorded)")
     else:
         print(f"abort: reverted update changes; returned to {returned_to}")
     return 0

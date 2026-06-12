@@ -323,4 +323,15 @@ if "$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNE
   fail "second prepare should refuse while a git-off update is pending"
 fi
 
-echo "PASS: memex-update safe ops + pending plan + finalize + refuse + no-conflict + abort"
+# ---------- non-git abort disarms the pending guard, keeps the undo archive ----------
+PENDING_PLAN="$(ls "$PENDINGVAULT"/.memex/update-work/0.2.0-*/plan.json)"
+PENDING_WORK="$(dirname "$PENDING_PLAN")"
+[ -d "$PENDING_WORK/undo" ] || fail "non-git abort setup: expected an undo archive in the pending work dir"
+"$NEXT/bin/memex-update" abort --vault "$PENDINGVAULT" --plan "$PENDING_PLAN" >/dev/null || fail "non-git abort should exit 0"
+[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$PENDING_PLAN")" = "aborted" ] \
+  || fail "non-git abort should mark the plan aborted"
+[ -d "$PENDING_WORK/undo" ] || fail "non-git abort must preserve the undo archive"
+"$NEXT/bin/memex-update" --vault "$PENDINGVAULT" --non-interactive --set OWNER_TIMEZONE=America/New_York >/dev/null \
+  || fail "third prepare after non-git abort should succeed"
+
+echo "PASS: memex-update safe ops + pending plan + finalize + refuse + no-conflict + abort + non-git abort"

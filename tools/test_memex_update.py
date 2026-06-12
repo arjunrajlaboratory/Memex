@@ -7,6 +7,7 @@ from memex_bake import BakeResult, sha256_file
 from memex_update import (
     Disposition,
     classify_update,
+    detect_renames,
     fill_new_answers,
     missing_required_tokens,
     plan_update_paths,
@@ -203,6 +204,41 @@ class TestUpdateClassification(unittest.TestCase):
             self.assertIsNone(entries[0]["current_path"])
             self.assertIsNotNone(entries[0]["baseline_path"])
             self.assertIsNotNone(entries[0]["staged_path"])
+
+
+class TestDetectRenames(unittest.TestCase):
+    def test_score_sorted_greedy_lets_best_global_pairs_win(self):
+        # a.md matches new1.md at ~0.92 and new2.md at ~0.90; b.md matches
+        # new1.md at ~0.99. Alphabetical greedy would let a.md claim new1.md
+        # first; score-sorted greedy must give new1.md to b.md (best global
+        # pair) and pair a.md with new2.md.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            baseline = root / "baseline"
+            staged = root / "staged"
+
+            common = "0123456789\n" * 12  # short enough to dodge autojunk
+            write(baseline / "a.md", common + "z" * 20)
+            write(baseline / "b.md", common + "vv")
+            write(staged / "new1.md", common + "qq")
+            write(staged / "new2.md", common + "wwwwwwww")
+
+            meta = {"class": "framework", "kind": "prose", "pack": "core"}
+            candidates = detect_renames(
+                removed_paths={"a.md", "b.md"},
+                new_paths={"new1.md", "new2.md"},
+                old_meta={"a.md": dict(meta), "b.md": dict(meta)},
+                new_meta={"new1.md": dict(meta), "new2.md": dict(meta)},
+                baseline_dir=baseline,
+                staged_dir=staged,
+            )
+
+            pairing = {item["old_path"]: item["new_path"] for item in candidates}
+            self.assertEqual(pairing, {"b.md": "new1.md", "a.md": "new2.md"})
+            scores = {item["old_path"]: item["similarity"] for item in candidates}
+            self.assertGreater(scores["b.md"], scores["a.md"])
+            # Best pair is emitted first (score-sorted).
+            self.assertEqual(candidates[0]["old_path"], "b.md")
 
 
 class TestNewTokenDetection(unittest.TestCase):

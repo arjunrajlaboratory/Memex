@@ -600,14 +600,19 @@ def write_manifest_and_baseline(
     answers: dict[str, Any],
     packs: list[str],
     installed_at: str | None = None,
+    files: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Write `.memex/manifest.json` and refresh baseline from staged framework."""
+    """Write `.memex/manifest.json` and refresh baseline from staged framework.
+
+    `files` lets callers that already hashed the staged tree (via
+    manifest_files_for_tree) reuse that work instead of rehashing here."""
     layout = load_engine_layout(engine_dir)
     today = datetime.date.today().isoformat()
     manifest_path = vault_dir / ".memex/manifest.json"
     previous = read_json(manifest_path) if manifest_path.exists() else {}
     installed = installed_at or previous.get("installed_at") or today
-    files = manifest_files_for_tree(staged_dir, source_map, layout)
+    if files is None:
+        files = manifest_files_for_tree(staged_dir, source_map, layout)
     baseline = vault_dir / ".memex/baseline"
     if baseline.exists():
         shutil.rmtree(baseline)
