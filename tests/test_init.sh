@@ -1,17 +1,25 @@
 #!/bin/zsh
 set -e
 ENG="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d)"; trap "rm -rf $TMP" EXIT
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $1"; exit 1; }
 
 # tokens that MUST be fully baked away (catalogued instance tokens). Templater
 # tokens (e.g. {{YYYYMMDD}}) are NOT in this list and are allowed to remain.
 TOKENS=$(python3 -c "import json;print(' '.join(p['token'] for p in json.load(open('$ENG/placeholders.json'))['placeholders']))")
 no_unbaked() {  # $1 = dir
-  for t in $TOKENS; do
+  for t in ${=TOKENS}; do
     if grep -rq "{{$t}}" "$1" 2>/dev/null; then grep -rl "{{$t}}" "$1" | head; fail "unbaked token {{$t}} in $1"; fi
   done
 }
+
+# Self-test: the gate must actually fire — guards against the zsh word-splitting
+# regression that silently made this gate vacuous.
+SELFTEST="$TMP/selftest"; mkdir -p "$SELFTEST"; echo '{{OWNER_NAME}}' > "$SELFTEST/x.md"
+if (no_unbaked "$SELFTEST") >/dev/null 2>&1; then
+  fail "no_unbaked gate is vacuous (did not flag a planted token)"
+fi
+rm -rf "$SELFTEST"
 
 # General optional-token regression gate: a blank optional answer must drop its
 # surrounding prose via {{?TOKEN}}…{{/TOKEN}} sections, NOT bake an empty `` pair

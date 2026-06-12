@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -e
 ENG="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d)"; trap "rm -rf $TMP" EXIT
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $1"; exit 1; }
 
 NEXT="$TMP/engine-next"
