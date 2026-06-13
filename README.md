@@ -87,7 +87,13 @@ python3 tools/audit_literals.py ./hardened                # must be AUDIT CLEAN
 python3 tools/audit_refs.py .                          # must be REFS CLEAN
 (cd tools && python3 -m unittest)                         # bake() unit tests
 tests/test_init.sh                                        # full init integration test (core + pi)
+tests/test_hooks.sh                                       # hook behavior + bash 3.2 parse guard (#13)
 ```
+
+Run `tests/test_hooks.sh` on macOS (system bash 3.2): it exercises `log-mutation.sh` under
+`/bin/bash` and statically forbids the heredoc-in-`$()` form that bash 3.2 can't parse. Since the
+hooks are derived from the source vault, re-deriving from a source whose hook still has that pattern
+would reintroduce the bug — this gate catches that.
 
 `derive.py` never modifies the source vault, and its selective wipe never touches the hand-curated
 `hardened/contract/` (AGENTS.base.md, CLAUDE.base.md, pi-fragment.md).
