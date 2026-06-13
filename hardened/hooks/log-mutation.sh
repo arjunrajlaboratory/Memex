@@ -16,9 +16,13 @@ hook_input="$(cat 2>/dev/null || true)"
 # Cheap prefilter before paying python3 startup: must mention a file_path at all.
 case "$hook_input" in *'"file_path"'*) ;; *) exit 0 ;; esac
 
-# NB: program via -c (command substitution), NOT `python3 - << heredoc` — a
-# heredoc would override the pipe as stdin and json.load would read EOF.
-printf '%s' "$hook_input" | python3 -c "$(cat << 'PYEOF'
+# NB: payload delivered via env var (HOOK_INPUT), not stdin — that frees stdin
+# so the program can be fed through a plain heredoc to `python3 -`. Avoid the
+# `python3 -c "$(cat << heredoc)"` form (a heredoc nested in $(…)): macOS's
+# system bash 3.2 doesn't skip heredoc bodies when scanning for the closing `)`,
+# so the Python source's quotes parse as shell and abort with a syntax error.
+# See issue #13.
+HOOK_INPUT="$hook_input" python3 - "$REPO_ROOT" <<'PYEOF'
 import datetime, json, os, sys, tempfile
 
 try:
@@ -28,7 +32,7 @@ except ImportError:  # non-POSIX: degrade to unlocked (still atomic via os.repla
 
 root = sys.argv[1]
 try:
-    payload = json.load(sys.stdin)
+    payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
 except Exception:
     sys.exit(0)
 file_path = (payload.get("tool_input") or {}).get("file_path") or ""
@@ -97,6 +101,5 @@ except BaseException:
         pass
     raise
 PYEOF
-)" "$REPO_ROOT"
 
 exit 0
