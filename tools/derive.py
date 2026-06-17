@@ -134,8 +134,9 @@ def main():
 
     # Wipe only what derive regenerates. packs/ is fully derived. Under hardened/,
     # the hooks/launchd/quartz dirs + settings.json/gitignore files are derived —
-    # but hardened/contract/ AND hardened/scripts/ (memex-doctor.sh) are
-    # HAND-CURATED and must survive re-derives.
+    # but hardened/contract/, hardened/scripts/ (memex-doctor.sh), AND
+    # hardened/systemd/ (the Linux durable-serve unit) are HAND-CURATED and must
+    # survive re-derives, so they are deliberately absent from the wipe list below.
     shutil.rmtree(ENG / "packs", ignore_errors=True)
     for sub in ("hooks", "launchd", "quartz"):
         shutil.rmtree(ENG / "hardened" / sub, ignore_errors=True)

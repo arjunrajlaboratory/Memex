@@ -88,6 +88,13 @@ grep -q "com.memex.quartz.${CORE_LAUNCHD_ID}" "$CORE_PLIST" || fail "plist Label
 # VAULT_PATH is derived from --target (fixture says /tmp/example-vault; init overrides)
 grep -q "$TMP/core/scripts/serve_quartz.sh" "$CORE_PLIST" \
   || fail "plist VAULT_PATH not derived from --target"
+# Linux durable-serve: the systemd unit carries the same path-derived id, is
+# token-free, and points ExecStart at this vault's serve_quartz.sh.
+CORE_UNIT="$TMP/core/scripts/systemd/memex-quartz.${CORE_LAUNCHD_ID}.service"
+[ -f "$CORE_UNIT" ] || fail "systemd unit missing/misnamed (should carry path-derived id)"
+grep -q "$TMP/core/scripts/serve_quartz.sh" "$CORE_UNIT" \
+  || fail "systemd unit ExecStart not derived from --target"
+grep -q "{{" "$CORE_UNIT" && fail "systemd unit has unbaked {{TOKENS}}" || true
 # sources config seed: present, default streams (email+slack on, calendar off), local git
 [ -f "$TMP/core/_config/sources.md" ] || fail "_config/sources.md seed missing"
 grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email stream not enabled by default"

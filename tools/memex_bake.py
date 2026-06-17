@@ -29,6 +29,7 @@ TEXT_EXTS = {
     ".sh",
     ".json",
     ".plist",
+    ".service",
     ".scss",
     ".py",
     ".tex",
@@ -541,6 +542,22 @@ def bake_engine(
                     dst = target / "scripts/launchd" / plist_name
                 else:
                     dst = target / "scripts" / fp.name
+                bake_file(fp, dst, answers, normalized)
+                result.record(dst.relative_to(target), "hardened", fp)
+
+    # Linux/WSL2 durable-serve: the systemd user-service equivalent of the macOS
+    # launchd plist above. Hand-curated (like hardened/scripts/), so it's not
+    # derived/wiped. The unit filename carries the path-derived vault id so two
+    # vaults' services never collide — exactly as the plist filename does.
+    systemd = engine_dir / "hardened/systemd"
+    if systemd.exists():
+        for fp in systemd.iterdir():
+            if fp.is_file():
+                if fp.suffix == ".service":
+                    unit_name = f"memex-quartz.{launchd_id}.service" if launchd_id else "memex-quartz.service"
+                    dst = target / "scripts/systemd" / unit_name
+                else:
+                    dst = target / "scripts/systemd" / fp.name
                 bake_file(fp, dst, answers, normalized)
                 result.record(dst.relative_to(target), "hardened", fp)
 

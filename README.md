@@ -9,8 +9,8 @@ demand. Ships as **packs** you opt into, derived from a real vault but carrying 
 - **`pi` pack** (optional): the academic-PI example — letters / CV / grants (`draft-letter`,
   `ingest-letters`, `cv-scan`, `cv-build` + the Letter/Grant schemas + CV LaTeX).
 - **hardened core** (always): the three discipline hooks + their `settings.json` wiring, the Quartz
-  static-site + dashboards emitter, the contract template, the vault `.gitignore`, the launchd
-  durable-serve setup.
+  static-site + dashboards emitter, the contract template, the vault `.gitignore`, and the
+  durable-serve setup (launchd on macOS, systemd on Linux/WSL2).
 
 Instance-specific facts (your name, emails, paths, Drive IDs) live as `{{TOKENS}}` and are baked in
 at setup. See the companion design docs in the source vault (the productization design blueprint and
@@ -40,8 +40,20 @@ files were installed in `.memex/manifest.json`. Framework files are engine-owned
 put durable local preferences in `_config/overrides.md` (or `_config/sources.md` for stream settings).
 If you edit a framework file in place, Memex treats that as a local fork and the update flow will
 surface it for merge/choice instead of silently overwriting it. Each vault uses a distinct Quartz port
-so several can run at once. To serve durably (auto-start at login, survive sleep), install the LaunchAgent in
-`<vault>/scripts/launchd/` (copy the plist to `~/Library/LaunchAgents/` and `launchctl bootstrap`).
+so several can run at once. To serve durably (auto-start at login, survive sleep):
+
+- **macOS** — install the LaunchAgent in `<vault>/scripts/launchd/`: copy the plist to
+  `~/Library/LaunchAgents/` and `launchctl bootstrap gui/$(id -u) <plist>`.
+- **Linux / WSL2** — install the systemd user service in `<vault>/scripts/systemd/`:
+  ```bash
+  cp <vault>/scripts/systemd/memex-quartz.*.service ~/.config/systemd/user/
+  loginctl enable-linger "$USER"          # run without an active login (and after the WSL VM boots)
+  systemctl --user daemon-reload
+  systemctl --user enable --now memex-quartz.*.service
+  ```
+  Both are pre-baked with this vault's path and port; each carries a per-vault id so multiple
+  vaults' services don't collide. The systemd unit reuses `scripts/serve_quartz.sh` (which sources
+  nvm), so Node ≥ 22 must be your nvm default.
 
 ## Updating an installed vault
 
