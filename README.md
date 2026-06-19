@@ -50,6 +50,26 @@ You pick what the engine installs at setup:
 
 ## Quickstart
 
+### The easy way — let Claude Code install it
+
+Memex is built to be driven by **[Claude Code](https://claude.com/claude-code)**, and setup is no
+exception: you don't have to run any of the commands below by hand. Clone (or download) this repo, open
+it in Claude Code, and just ask it to install Memex for you:
+
+> "Install Memex for me — stand up a new vault at `~/code/my-vault`."
+
+Claude Code walks you through the setup interview (your name, emails, paths, ports, which packs) and runs
+everything for you. When it's done, **open Claude Code in your new vault directory** and start driving
+your own Memex:
+
+```bash
+cd ~/code/my-vault && claude
+```
+
+### Manual setup
+
+Prefer to run it yourself? The same thing, step by step:
+
 ```bash
 # 1. Get the engine
 git clone https://github.com/arjunrajlaboratory/Memex.git
@@ -72,8 +92,22 @@ files were installed in `.memex/manifest.json`. Framework files are engine-owned
 put durable local preferences in `_config/overrides.md` (or `_config/sources.md` for stream settings).
 If you edit a framework file in place, Memex treats that as a local fork and the update flow will
 surface it for merge/choice instead of silently overwriting it. Each vault uses a distinct Quartz port
-so several can run at once. To serve durably (auto-start at login, survive sleep), install the LaunchAgent in
-`<vault>/scripts/launchd/` (copy the plist to `~/Library/LaunchAgents/` and `launchctl bootstrap`).
+so several can run at once. To serve durably (auto-start at login, survive sleep):
+
+- **macOS** — install the LaunchAgent in `<vault>/scripts/launchd/`: copy the plist to
+  `~/Library/LaunchAgents/` and `launchctl bootstrap gui/$(id -u) <plist>`.
+- **Linux / WSL2** — install the systemd user service in `<vault>/scripts/systemd/`:
+  ```bash
+  unit="memex-quartz.<vault-id>.service"  # use the filename in <vault>/scripts/systemd/
+  mkdir -p ~/.config/systemd/user
+  cp "<vault>/scripts/systemd/$unit" ~/.config/systemd/user/
+  loginctl enable-linger "$USER"          # run without an active login (and after the WSL VM boots)
+  systemctl --user daemon-reload
+  systemctl --user enable --now "$unit"
+  ```
+  Both are pre-baked with this vault's path and port; each carries a per-vault id so multiple
+  vaults' services don't collide. The systemd unit reuses `scripts/serve_quartz.sh` (which sources
+  nvm), so Node ≥ 22 must be your nvm default.
 
 ## Updating an installed vault
 

@@ -16,7 +16,7 @@ Exit 0 with "REFS CLEAN: ..." or list "REF PROBLEMS (n):" and exit 1.
 """
 import json, os, pathlib, re, sys
 
-TEXT_EXT = {".md", ".ts", ".tsx", ".sh", ".json", ".plist", ".py", ".scss", ".tex", ".sty", ".yaml", ".yml"}
+TEXT_EXT = {".md", ".ts", ".tsx", ".sh", ".json", ".plist", ".service", ".py", ".scss", ".tex", ".sty", ".yaml", ".yml"}
 TEXT_NAMES = {"gitignore", ".gitignore"}
 SKIP_DIRS = {".git", "node_modules", "public", ".quartz-cache", "__pycache__", ".venv"}
 TOKEN_RE = re.compile(r"\{\{([A-Z0-9_]+)\}\}")

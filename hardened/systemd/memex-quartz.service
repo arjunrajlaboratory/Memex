@@ -1,0 +1,31 @@
+[Unit]
+# Linux/WSL2 equivalent of the macOS launchd LaunchAgent
+# (hardened/launchd/com.you.memex-quartz.plist): a durable user service that
+# keeps the local Quartz site at http://localhost:{{QUARTZ_PORT}} up across
+# reboots / sleep-wake, independent of any terminal or Claude Code session.
+#
+# The unit name carries the per-vault id ({{MEMEX_LAUNCHD_ID}}) so a second
+# vault's service never collides with the first — exactly like the launchd Label.
+Description=Memex Quartz site ({{MEMEX_LAUNCHD_ID}}) — http://localhost:{{QUARTZ_PORT}}
+Documentation=https://quartz.jzhao.xyz/
+After=network-online.target
+Wants=network-online.target
+# Don't thrash if it can't start (e.g. node_modules missing, port taken):
+# give up after 5 starts in 60s. Mirrors launchd's ThrottleInterval guard.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory={{VAULT_PATH}}/quartz
+# Reuse the shared launcher: serve_quartz.sh sources nvm (systemd units don't
+# get nvm on PATH) and exec's `npm run site:serve`. It's invoked via bash — its
+# #!/bin/zsh shebang serves the macOS launchd path, but the body is bash- (and
+# bash-3.2-) compatible, and `bash <file>` ignores the shebang.
+ExecStart=/usr/bin/env bash "{{VAULT_PATH}}/scripts/serve_quartz.sh"
+# Keep it alive across crashes / sleep-wake, mirroring launchd KeepAlive.
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

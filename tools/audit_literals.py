@@ -22,7 +22,7 @@ SKIP_DIRS = {".git", "node_modules", "public", ".quartz-cache", "_archive", "Raw
 # log.md is history; the other two are pure data/lockfiles whose long hashes are
 # noise for the drive_id detector (npm integrity hashes, base64 emoji PNGs).
 SKIP_FILES = {"log.md", "package-lock.json", "emojimap.json"}
-TEXT_EXT = {".md", ".ts", ".tsx", ".sh", ".json", ".plist", ".py", ".scss", ".tex", ".sty", ".yaml", ".yml"}
+TEXT_EXT = {".md", ".ts", ".tsx", ".sh", ".json", ".plist", ".service", ".py", ".scss", ".tex", ".sty", ".yaml", ".yml"}
 TEXT_NAMES = {"gitignore", ".gitignore"}  # covers engine's extensionless hardened/gitignore and dot-prefixed .gitignore files
 
 def covered_literals(manifest):
