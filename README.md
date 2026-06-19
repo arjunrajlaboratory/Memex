@@ -1,27 +1,59 @@
-# memex-engine
+# Memex
 
-The distributable engine behind a [Memex vault](https://github.com/exampleorg/vault): a
-discipline for an LLM-maintained knowledge base plus a librarian agent that grows structure on
-demand. Ships as **packs** you opt into, derived from a real vault but carrying none of its data.
+> "A memex is a device in which an individual stores all his books, records, and communications, and
+> which is mechanized so that it may be consulted with exceeding speed and flexibility. It is an
+> enlarged intimate supplement to his memory."
+>
+> — Vannevar Bush, *As We May Think* (1945)
 
-- **`core` pack** (always): the 24 job-agnostic skills + the core typed-note schemas + templates +
-  workflows + prompts.
-- **`pi` pack** (optional): the academic-PI example — letters / CV / grants (`draft-letter`,
-  `ingest-letters`, `cv-scan`, `cv-build` + the Letter/Grant schemas + CV LaTeX).
-- **hardened core** (always): the three discipline hooks + their `settings.json` wiring, the Quartz
-  static-site + dashboards emitter, the contract template, the vault `.gitignore`, the launchd
-  durable-serve setup.
+**Memex is a second brain that helps you track your work** — a personal knowledge base that an AI
+agent (Claude Code) actively maintains for you. You talk to it in plain language, or drop files into
+it, and it files, links, researches, drafts, and keeps track of everything so you don't have to hold
+it all in your head.
 
-Instance-specific facts (your name, emails, paths, Drive IDs) live as `{{TOKENS}}` and are baked in
-at setup. See the companion design docs in the source vault (the productization design blueprint and
-`MEMEX_SPECIFICATION.md`).
+You don't learn an app. You just say what you want:
+
+- **"Here are some ideas — file them."** Brain-dump into the inbox (or drop in a folder of notes,
+  screenshots, and PDFs); Memex sorts each item into the right place — an idea, a task, a source, a
+  person — and tells you what it did.
+- **"Turn this idea into a project — research it, then help me execute it."** It researches the
+  outside landscape *and* your own vault, writes up what it found plus a proposed first step, promotes
+  the idea into a real project, and breaks it into tasks you can actually start.
+- **"Here's a stack of PDFs — turn them into a research topic."** It ingests each one as a source,
+  pulls out the threads, and assembles a linked topic page that ties them together.
+- **"Update this letter of recommendation using the new CV in my email."** It finds the CV in your
+  inbox, reads what changed, and redrafts the letter from your prior letters and your history with
+  the person. *(academic-PI pack)*
+- **"Where did we leave off?"** / **"Give me today's briefing."** A daily dashboard of what's due,
+  what's blocked, what came in over email and Slack, and the best next move.
+
+Under the hood it's just a folder of plain Markdown notes — typed and cross-linked (projects, tasks,
+people, sources, decisions, ideas) that you fully own: no proprietary format, no lock-in. The guiding
+principle is **capture first, structure on demand** — drop things in whenever they show up and let the
+agent file them later. The same vault also publishes as a browsable, searchable website with live
+dashboards.
+
+## The engine and your vault
+
+This repository is the **engine** — the skills, note types, and tooling that make Memex work. It
+doesn't hold any notes. When you set it up, the engine stands up **your own vault**: a separate folder
+(its own git repo) where your second brain actually lives — your projects, tasks, people, ideas, and
+notes. The engine stays generic; your vault holds your data. As the engine improves, you pull those
+improvements into your vault without disturbing anything that's yours.
+
+You pick what the engine installs at setup:
+
+- **core** (always): everything the second brain needs to run — the skills that capture, file,
+  research, and track your work, plus the note types they use.
+- **pi** (optional): an example tailored to an academic PI — drafting recommendation letters,
+  keeping a CV current, and tracking grants.
 
 ## Quickstart
 
 ```bash
 # 1. Get the engine
-git clone https://github.com/exampleorg/memex-engine.git
-cd memex-engine
+git clone https://github.com/arjunrajlaboratory/Memex.git
+cd Memex
 
 # 2. Stand up your own vault (interactive: asks your name, emails, paths, ports)
 bin/memex-init --target ~/code/my-vault --packs core --interview
