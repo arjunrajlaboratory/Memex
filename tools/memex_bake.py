@@ -551,14 +551,23 @@ def bake_engine(
     # vaults' services never collide — exactly as the plist filename does.
     systemd = engine_dir / "hardened/systemd"
     if systemd.exists():
+        # systemd treats % in directive values (ExecStart=, WorkingDirectory=,
+        # Description=, ...) as a unit specifier, so a literal % from a baked
+        # value — e.g. a vault under /home/u/100%memex — would make the unit
+        # fail to load ("Failed to resolve unit specifiers ... Invalid slot").
+        # Double % to %% in the substituted VALUES only; the template's own text
+        # is untouched, so any intentional %h/%i specifier an author writes there
+        # still survives.
+        systemd_normalized = {k: v.replace("%", "%%") for k, v in normalized.items()}
         for fp in systemd.iterdir():
             if fp.is_file():
                 if fp.suffix == ".service":
                     unit_name = f"memex-quartz.{launchd_id}.service" if launchd_id else "memex-quartz.service"
                     dst = target / "scripts/systemd" / unit_name
+                    bake_file(fp, dst, answers, systemd_normalized)
                 else:
                     dst = target / "scripts/systemd" / fp.name
-                bake_file(fp, dst, answers, normalized)
+                    bake_file(fp, dst, answers, normalized)
                 result.record(dst.relative_to(target), "hardened", fp)
 
     # Hand-curated vault utilities (memex-doctor.sh etc.) — installed flat

@@ -108,6 +108,18 @@ SPACE_UNIT="$TMP/core with spaces/scripts/systemd/memex-quartz.${SPACE_LAUNCHD_I
 SPACE_EXEC="ExecStart=/usr/bin/env bash \"$TMP/core with spaces/scripts/serve_quartz.sh\""
 grep -qF "$SPACE_EXEC" "$SPACE_UNIT" \
   || fail "space-path systemd ExecStart should quote the baked script path"
+
+# Regression: systemd reads % in directive values (ExecStart=/WorkingDirectory=)
+# as a unit specifier, so a literal % from the vault path must be baked as %% or
+# the unit fails to load ("Failed to resolve unit specifiers").
+"$ENG/bin/memex-init" --target "$TMP/core%pct" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
+PCT_LAUNCHD_ID="$(python3 -c "import re; print(re.sub(r'[^A-Za-z0-9]', '-', '$TMP/core%pct').lstrip('-'))")"
+PCT_UNIT="$TMP/core%pct/scripts/systemd/memex-quartz.${PCT_LAUNCHD_ID}.service"
+[ -f "$PCT_UNIT" ] || fail "percent-path systemd unit missing/misnamed"
+grep -qF "ExecStart=/usr/bin/env bash \"$TMP/core%%pct/scripts/serve_quartz.sh\"" "$PCT_UNIT" \
+  || fail "percent-path systemd ExecStart should escape % to %% (else systemd reads it as a specifier)"
+grep -qF "WorkingDirectory=$TMP/core%%pct/quartz" "$PCT_UNIT" \
+  || fail "percent-path systemd WorkingDirectory should escape % to %%"
 # sources config seed: present, default streams (email+slack on, calendar off), local git
 [ -f "$TMP/core/_config/sources.md" ] || fail "_config/sources.md seed missing"
 grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email stream not enabled by default"

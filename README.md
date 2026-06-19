@@ -107,7 +107,14 @@ so several can run at once. To serve durably (auto-start at login, survive sleep
   ```
   Both are pre-baked with this vault's path and port; each carries a per-vault id so multiple
   vaults' services don't collide. The systemd unit reuses `scripts/serve_quartz.sh` (which sources
-  nvm), so Node ≥ 22 must be your nvm default.
+  nvm), so Node ≥ 22 must be your nvm default. Logs go to the journal — `journalctl --user -u "$unit"`
+  (the macOS plist writes `outputs/quartz-serve.log` instead).
+
+  On **WSL2**, `systemctl` works only if systemd is enabled: put `systemd=true` under a `[boot]`
+  section in `/etc/wsl.conf`, then `wsl --shutdown` from Windows and reopen the distro. Without it the
+  commands above fail with "System has not been booted with systemd as init system." If `systemctl
+  --user` reports "Failed to connect to bus" over SSH or in a fresh shell, the user manager isn't up
+  yet — the `enable-linger` above starts it; reopen the shell if needed.
 
 ## Updating an installed vault
 

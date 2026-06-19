@@ -28,7 +28,7 @@ def bake_out(text, pairs):
 # bytes (letterhead .docx, images, fonts). ADD new text formats here — omitting
 # a text format causes its literals to leak un-tokenised into the template. The
 # Task-5 template audit is the backstop that would catch such a leak.
-TEXT_EXTS = {".md", ".ts", ".tsx", ".sh", ".json", ".plist", ".scss", ".py", ".tex", ".sty", ".yaml", ".yml"}
+TEXT_EXTS = {".md", ".ts", ".tsx", ".sh", ".json", ".plist", ".service", ".scss", ".py", ".tex", ".sty", ".yaml", ".yml"}
 
 # One source-resolver per packs.json section. derive and memex_bake's
 # LOCATION_MAP must stay in lockstep: every key here is installed by init via
