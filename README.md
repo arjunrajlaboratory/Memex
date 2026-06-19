@@ -50,6 +50,26 @@ You pick what the engine installs at setup:
 
 ## Quickstart
 
+### The easy way — let Claude Code install it
+
+Memex is built to be driven by **[Claude Code](https://claude.com/claude-code)**, and setup is no
+exception: you don't have to run any of the commands below by hand. Clone (or download) this repo, open
+it in Claude Code, and just ask it to install Memex for you:
+
+> "Install Memex for me — stand up a new vault at `~/code/my-vault`."
+
+Claude Code walks you through the setup interview (your name, emails, paths, ports, which packs) and runs
+everything for you. When it's done, **open Claude Code in your new vault directory** and start driving
+your own Memex:
+
+```bash
+cd ~/code/my-vault && claude
+```
+
+### Manual setup
+
+Prefer to run it yourself? The same thing, step by step:
+
 ```bash
 # 1. Get the engine
 git clone https://github.com/arjunrajlaboratory/Memex.git
