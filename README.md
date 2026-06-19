@@ -21,9 +21,9 @@ You don't learn an app. You just say what you want:
   the idea into a real project, and breaks it into tasks you can actually start.
 - **"Here's a stack of PDFs — turn them into a research topic."** It ingests each one as a source,
   pulls out the threads, and assembles a linked topic page that ties them together.
-- **"Update this letter of recommendation using the new CV in my email."** It finds the CV in your
-  inbox, reads what changed, and redrafts the letter from your prior letters and your history with
-  the person. *(academic-PI pack)*
+- **"Here's an updated CV — refresh this letter of recommendation."** Drop the new CV into the inbox;
+  Memex reads what changed and redrafts the letter from your prior letters and your history with the
+  person. *(academic-PI pack)*
 - **"Where did we leave off?"** / **"Give me today's briefing."** A daily dashboard of what's due,
   what's blocked, what came in over email and Slack, and the best next move.
 
