@@ -94,7 +94,20 @@ CORE_UNIT="$TMP/core/scripts/systemd/memex-quartz.${CORE_LAUNCHD_ID}.service"
 [ -f "$CORE_UNIT" ] || fail "systemd unit missing/misnamed (should carry path-derived id)"
 grep -q "$TMP/core/scripts/serve_quartz.sh" "$CORE_UNIT" \
   || fail "systemd unit ExecStart not derived from --target"
+CORE_EXEC="ExecStart=/usr/bin/env bash \"$TMP/core/scripts/serve_quartz.sh\""
+grep -qF "$CORE_EXEC" "$CORE_UNIT" \
+  || fail "systemd unit ExecStart should quote the baked script path"
 grep -q "{{" "$CORE_UNIT" && fail "systemd unit has unbaked {{TOKENS}}" || true
+
+# Regression: systemd splits ExecStart on whitespace, so vault paths containing
+# spaces must be baked as one quoted argv item.
+"$ENG/bin/memex-init" --target "$TMP/core with spaces" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
+SPACE_LAUNCHD_ID="$(python3 -c "import re; print(re.sub(r'[^A-Za-z0-9]', '-', '$TMP/core with spaces').lstrip('-'))")"
+SPACE_UNIT="$TMP/core with spaces/scripts/systemd/memex-quartz.${SPACE_LAUNCHD_ID}.service"
+[ -f "$SPACE_UNIT" ] || fail "space-path systemd unit missing/misnamed"
+SPACE_EXEC="ExecStart=/usr/bin/env bash \"$TMP/core with spaces/scripts/serve_quartz.sh\""
+grep -qF "$SPACE_EXEC" "$SPACE_UNIT" \
+  || fail "space-path systemd ExecStart should quote the baked script path"
 # sources config seed: present, default streams (email+slack on, calendar off), local git
 [ -f "$TMP/core/_config/sources.md" ] || fail "_config/sources.md seed missing"
 grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email stream not enabled by default"

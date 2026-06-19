@@ -22,7 +22,7 @@ WorkingDirectory={{VAULT_PATH}}/quartz
 # get nvm on PATH) and exec's `npm run site:serve`. It's invoked via bash — its
 # #!/bin/zsh shebang serves the macOS launchd path, but the body is bash- (and
 # bash-3.2-) compatible, and `bash <file>` ignores the shebang.
-ExecStart=/usr/bin/env bash {{VAULT_PATH}}/scripts/serve_quartz.sh
+ExecStart=/usr/bin/env bash "{{VAULT_PATH}}/scripts/serve_quartz.sh"
 # Keep it alive across crashes / sleep-wake, mirroring launchd KeepAlive.
 Restart=on-failure
 RestartSec=5
