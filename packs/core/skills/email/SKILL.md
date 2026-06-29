@@ -9,7 +9,7 @@ You are running as **`agent:executor`** for this skill (or `agent:capture` when 
 
 ## Why this skill exists
 
-Gmail is already wired into this vault (the Gmail MCP powers `ingest-person` backfill, `draft-letter` seeding, and `daily-briefing` calendar/inbox pulls). But "how to use email" lived only *inside* those skills. The recurring failure modes were (a) concluding "this isn't in Gmail" after a too-narrow query — a **technique** gap, not a capability gap — and (b) treating a miss in the connected mailbox as proof when the user may have sent from another account the Gmail MCP cannot read. See memories `feedback_gmail_search_technique` and `feedback_gmail_penn_mailbox_blind_spot`. This skill is the general, reusable place for email competence so any session can search/read/capture/draft well without reinventing it.
+Gmail is already wired into this vault (the Gmail MCP powers `ingest-person` backfill, `draft-letter` seeding, and `daily-briefing` calendar/inbox pulls). But "how to use email" lived only *inside* those skills. The recurring failure modes were (a) concluding "this isn't in Gmail" after a too-narrow query — a **technique** gap, not a capability gap; (b) treating a miss in the connected mailbox as proof when the user may have sent from another account the Gmail MCP cannot read; and (c) trusting a `search_threads` snapshot as a thread's current state when that index can be **stale** — observed days behind reality, and unchanged by re-running the same search — so only `get_thread` reflects the truth. See memories `feedback_gmail_search_technique` and `feedback_gmail_mcp_stale_reads`. This skill is the general, reusable place for email competence so any session can search/read/capture/draft well without reinventing it.
 
 ## Hard rules (non-negotiable)
 
@@ -53,9 +53,13 @@ Order of operations:
 
 Notes: `search_threads` returns snippets + headers only — **not full bodies**. **Mailbox visibility:** the Gmail MCP searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}. `{{OWNER_FORWARDING_EMAIL}}` forwards received mail into it, but sent mail from that address is invisible unless it was also sent through the connected mailbox{{/OWNER_FORWARDING_EMAIL}}{{?OWNER_SENDING_ACCOUNTS}}. Other sending accounts the user may use: `{{OWNER_SENDING_ACCOUNTS}}`; mail sent from those accounts is invisible to this Gmail MCP unless those mailboxes are separately connected{{/OWNER_SENDING_ACCOUNTS}}. For threads expected to be in the connected mailbox, assume a **query miss, not an access gap** until broad content-keyword search fails (memory `feedback_gmail_search_technique`). For mail sent from or housed in a non-connected account, an empty search is **inconclusive access-gap evidence**, not proof that the user did not send it.
 
+**Search can be stale — a separate axis from visibility.** `search_threads` is a possibly-stale cached index: observed days behind reality, and re-running the *same* search does **not** refresh it. This is orthogonal to mailbox visibility — it happens even inside the connected mailbox, for every user. So use search only to **locate** candidate threads; never judge a thread's latest state, or whether a recent message exists, from a search snippet. Confirm with `get_thread` (Step 2), which is live ground truth. A negative/empty search is therefore never proof a message wasn't sent (memory `feedback_gmail_mcp_stale_reads`).
+
 ## Step 2 — Read the actual thread
 
 To get bodies, call `mcp__claude_ai_Gmail__get_thread` with the `threadId` and `messageFormat: FULL_CONTENT`. Read the whole chain (both sides) before summarizing — snippets routinely hide the substance (a "thanks!" snippet can sit on a thread whose body is the actual decision).
+
+`get_thread(threadId)` is also the **authority on a thread's current state** — `search_threads` can lag it by days (see Step 1's stale-search note). So whenever the question is "did they reply?", "did I send it?", or "what's the latest?", decide from `get_thread`, never from a search snippet. If broad search turns up nothing, that is **"couldn't confirm,"** not proof it didn't happen — if the user says they sent it, believe them and reconcile state accordingly. Never emit "unsent (high confidence)" or "awaiting send" off an empty search.
 
 ## Step 3 — Do what was asked
 
@@ -92,4 +96,4 @@ Scheduling lives next door: if the email is about setting a time, the Calendar M
 - `create-task` / followups — action items an email creates.
 - `draft-letter` — letters of rec / cover / nomination (not plain replies).
 - `daily-briefing` — already pulls inbox + calendar; this skill is the on-demand counterpart.
-- Memories: `feedback_gmail_search_technique` (search broadly first), `feedback_enrich_people_from_gmail` (Person backfill).
+- Memories: `feedback_gmail_search_technique` (search broadly first), `feedback_gmail_mcp_stale_reads` (search index can be stale — confirm a thread's state with `get_thread`), `feedback_enrich_people_from_gmail` (Person backfill).

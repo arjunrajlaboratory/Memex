@@ -20,7 +20,10 @@ mail from that address, or from `mailboxes.other_sending_accounts`, is invisible
 mailboxes are separately connected. For outbound-contact tasks, an empty connected-mailbox
 `in:sent` result is therefore **inconclusive**, not evidence of "not sent"; surface it as
 "couldn't confirm from connected Gmail — did this go from another account?" instead of
-"awaiting send."
+"awaiting send." Independently of accounts, `search_threads` can return a **stale** cached view
+of even the connected mailbox — days behind reality, and unrefreshed by repeating the search — so
+confirm a specific thread with `get_thread(threadId)` and never read "not sent" off an empty
+search.
 
 ## Inputs to read
 

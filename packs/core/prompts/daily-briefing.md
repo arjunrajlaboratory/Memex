@@ -37,9 +37,11 @@ for enabled streams and `mailboxes.*`. Run `capture-comms` for {{date}}, then
 old. Tier-A reversible bookkeeping auto-applies; Tier-B proposals become `## 0. State
 confirmation needed` and are confirmed in one batch after the briefing. The Gmail MCP
 searches only `mailboxes.gmail_connected`: sent mail from `mailboxes.forwarding_in` or
-`mailboxes.other_sending_accounts` is invisible unless separately connected. For
-outbound-contact tasks, an empty connected-mailbox `in:sent` result is inconclusive,
-not proof of "not sent"; phrase those items as "couldn't confirm from connected Gmail"
+`mailboxes.other_sending_accounts` is invisible unless separately connected. Separately,
+`search_threads` can lag the connected mailbox itself (a stale cached view, days behind and
+unrefreshed by repeating the search). For outbound-contact tasks, an empty connected-mailbox
+`in:sent` result is inconclusive either way, not proof of "not sent"; confirm a specific thread
+with `get_thread(threadId)`, phrase unconfirmed items as "couldn't confirm from connected Gmail,"
 and ask the user.
 
 Gather the following inputs (read only what exists; skip gracefully if absent):

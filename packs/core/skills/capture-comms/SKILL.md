@@ -142,6 +142,13 @@ received. Received comms more often *open* loops (someone asks you for something
      `feedback_gmail_search_technique`). For sends from non-connected accounts, an empty `in:sent`
      result is an access gap and must be labeled **couldn't confirm**, not "not sent" or
      "awaiting send."
+   - **`search_threads` can be stale — separate from visibility.** The search index can sit days
+     behind reality even for the connected mailbox, and re-running the same query does not refresh
+     it. So an empty `in:sent` is never proof a send didn't happen, even when no other account is in
+     play: confirm a specific thread's latest state with `get_thread(threadId)` (live ground truth),
+     and label any unconfirmed send **couldn't confirm** — never "not sent" / "awaiting send." If the
+     user says they sent it, believe them and capture the loop accordingly (memory
+     `feedback_gmail_mcp_stale_reads`).
 
 4. **Scan Slack — both directions, including what I sent** (only if `slack` is enabled per Step 0).
    - Resolve the user's own Slack identity first (`slack_read_user_profile` /
@@ -211,4 +218,4 @@ Phase 1 (this skill) **never** does step 2 or 3. It only produces step 1's input
 - [[email]] — the broad-search technique + Gmail query cheat-sheet this reuses.
 - [[triage-inbox]] — consumes `Inbox/` items, including the `## Threads worth routing` entries.
 - `Daily comms digest and automated loop-closing` (idea) — full design rationale + phase 2 spec.
-- Memories: `feedback_gmail_search_technique` (search broadly first).
+- Memories: `feedback_gmail_search_technique` (search broadly first), `feedback_gmail_mcp_stale_reads` (search index can lag reality — confirm with `get_thread`).
