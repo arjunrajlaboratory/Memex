@@ -85,11 +85,12 @@ phase: 1-capture-only          # APPLIES NOTHING; phase 2 reconciles
 
 ### Action item format (the phase-2 API — keep it parseable)
 
-Mirror cv-scan's checkbox + provenance block exactly, so phase 2 can parse it deterministically:
+Mirror cv-scan's checkbox + provenance shape (one parseable `↳ key: value` line per field) so phase 2 can parse it deterministically:
 
 ```markdown
 - [ ] **<one-line description of the loop>**
       ↳ signal: <sent email to Alex / Slack DM I sent to Jordan / received from Riley>  ·  <date/time>
+      ↳ thread: <Gmail `threadId` for email items — lets phase 2 confirm via `get_thread` without re-searching; `n/a` for Slack>
       ↳ likely target: [[<Task or Person or Letter or Followup>]] (<type>)  — or `(no obvious target)`
       ↳ suggested action: <close task | bump last_contact | flip Letter drafting→submitted | mark Followup acted_on | create task>
       ↳ confidence: high | medium | low
@@ -132,7 +133,9 @@ received. Received comms more often *open* loops (someone asks you for something
      threads that skip the inbox).
    - **Sent: `in:sent newer_than:<window>`** — the loop-closing gold. What did *I* send today?
    - For any thread that looks loop-relevant, `get_thread` with `messageFormat: FULL_CONTENT` to
-     read the actual chain before classifying (snippets hide the substance).
+     read the actual chain before classifying (snippets hide the substance). Record that thread's
+     `threadId` in the action item's `↳ thread:` field so phase-2 reconcile can re-confirm via
+     `get_thread` without re-searching a possibly-stale index.
    - Mailbox visibility: the Gmail MCP searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}.
      `{{OWNER_FORWARDING_EMAIL}}` forwards received mail into it, but sent mail from that address
      is invisible unless it was also sent through the connected mailbox{{/OWNER_FORWARDING_EMAIL}}{{?OWNER_SENDING_ACCOUNTS}}.
@@ -142,6 +145,13 @@ received. Received comms more often *open* loops (someone asks you for something
      `feedback_gmail_search_technique`). For sends from non-connected accounts, an empty `in:sent`
      result is an access gap and must be labeled **couldn't confirm**, not "not sent" or
      "awaiting send."
+   - **`search_threads` can be stale — separate from visibility.** The search index can sit days
+     behind reality even for the connected mailbox, and re-running the same query does not refresh
+     it. So an empty `in:sent` is never proof a send didn't happen, even when no other account is in
+     play: confirm a specific thread's latest state with `get_thread(threadId)` (live ground truth),
+     and label any unconfirmed send **couldn't confirm** — never "not sent" / "awaiting send." If the
+     user says they sent it, believe them and capture the loop accordingly (memory
+     `feedback_gmail_mcp_stale_reads`).
 
 4. **Scan Slack — both directions, including what I sent** (only if `slack` is enabled per Step 0).
    - Resolve the user's own Slack identity first (`slack_read_user_profile` /
@@ -211,4 +221,4 @@ Phase 1 (this skill) **never** does step 2 or 3. It only produces step 1's input
 - [[email]] — the broad-search technique + Gmail query cheat-sheet this reuses.
 - [[triage-inbox]] — consumes `Inbox/` items, including the `## Threads worth routing` entries.
 - `Daily comms digest and automated loop-closing` (idea) — full design rationale + phase 2 spec.
-- Memories: `feedback_gmail_search_technique` (search broadly first).
+- Memories: `feedback_gmail_search_technique` (search broadly first), `feedback_gmail_mcp_stale_reads` (search index can lag reality — confirm with `get_thread`).

@@ -37,6 +37,13 @@ pre-flight — it relied on the user remembering; this reads the captured signal
   `mailboxes.forwarding_in` or `mailboxes.other_sending_accounts` is invisible unless those
   mailboxes are separately connected. If a proposal depends on "no sent email found" for one of
   those accounts, mark it inconclusive and ask the user; never assert "not sent" / "awaiting send."
+- **Stale search reads are not negative evidence either — a separate axis.** `search_threads`
+  returns a cached index that can lag reality by days even for the connected mailbox, and re-running
+  the same search does not refresh it. Before any proposal turns on "no sent email found," confirm
+  the specific thread with `get_thread` (live ground truth) — using the digest's recorded `↳ thread:`
+  id, or re-locating the thread by search first — rather than trusting an empty search result; an
+  empty search alone is "couldn't confirm," never "not sent" / "awaiting send." If the user says they
+  sent it, believe them and reconcile state accordingly (memory `feedback_gmail_mcp_stale_reads`).
 - **Honor sensitivity.** Anything the phase-1 file flagged `[sensitive — summarized]` (e.g. a career
   decision) is **always** propose-only and never auto-applied; do not expand the summary or quote it.
   Never lower a note's sensitivity.
@@ -84,8 +91,9 @@ job, and the mark is the idempotency key. For each reconciled item:
 
 1. **Resolve the date + load the files.** Date = today (or the date arg). `ls Inbox/comms/<date>/`.
    If the folder is missing, tell the user to run [[capture-comms]] first and stop. Read every
-   `*.md` there; parse each `## Action items` block (checkbox + the `↳ signal / likely target /
-   suggested action / confidence` fields). Read any existing `## Reconciliation` ledger.
+   `*.md` there; parse each `## Action items` block (checkbox + the `↳ signal / thread / likely
+   target / suggested action / confidence` fields — `thread` is the Gmail `threadId` for email
+   items, used in Step 3 to confirm via `get_thread`). Read any existing `## Reconciliation` ledger.
 
 2. **Merge cross-file duplicates.** The same loop can appear in both `email.md` and `slack.md`
    (e.g. a PR review requested by email + "ran codex" in Slack). Collapse to one reconciliation
@@ -94,11 +102,21 @@ job, and the mark is the idempotency key. For each reconciled item:
 3. **Resolve each `likely target` to a real note.** Confirm the wikilink resolves
    (`ls Atlas/... Ops/Tasks/...` or grep). If it says `(no obvious target)`, this is a *create*
    proposal (Tier B), not an update. If the link is wrong, search by person-name + subject keyword
-   (the way `observe-task-actuals` triangulates) before giving up. Re-read the comm thread via the
-   MCP tools only if you need to confirm the action truly happened. When re-reading email, first
-   check `_config/sources.md` for mailbox visibility. A miss in connected Gmail is only a query miss
-   for threads expected there; for non-connected sending accounts it is an access gap and should
-   become a Tier-B "couldn't confirm; did this go from <account>?" question.
+   (the way `observe-task-actuals` triangulates) before giving up. To confirm an action truly
+   happened, re-read the live thread **on its own channel** — confirmation never crosses sources
+   (an item's source is in the digest frontmatter and its `↳ signal`):
+   - **Email items** (`↳ thread:` holds a Gmail `threadId`): read it with `get_thread(threadId)`
+     (the authority on current state). If the id is missing (an older digest), re-locate the
+     candidate with `search_threads` first — search *locates*, `get_thread` *confirms* — just never
+     conclude from the search result itself, whose index can be stale. First check
+     `_config/sources.md` for mailbox visibility: a miss in connected Gmail can be a query miss *or*
+     a stale-index miss for threads expected there; for non-connected sending accounts it is an
+     access gap.
+   - **Slack items** (`↳ thread: n/a`): confirm from the captured Slack signal, or re-read the
+     Slack thread/channel with `slack_read_thread` / `slack_read_channel`. Never route a Slack
+     confirmation through Gmail `search_threads` / `get_thread`.
+   In every case confirm on the right channel before concluding, and if the action still can't be
+   confirmed make it a Tier-B "couldn't confirm; did this happen?" question — never "not sent."
 
 4. **Classify into Tier A or Tier B** per the table. Demote on low confidence / sensitivity / no match.
 

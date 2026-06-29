@@ -56,6 +56,8 @@ Tasks that Tier-A already advanced will read correctly through the rest of the b
 
 If the contact/send status depends on mail that may have been sent from a non-connected account, the comms pass can only return an **inconclusive** prompt ("couldn't confirm from connected Gmail; did this go from <account>?"). Never convert an empty connected-mailbox `in:sent` result into "not sent" / "awaiting send" when the relevant thread may live in `mailboxes.other_sending_accounts` or the forwarding-in account's own sent folder.
 
+There is a second, orthogonal reason never to read "not sent" off an empty search: `search_threads` can return a **stale** snapshot of the connected mailbox *itself* — observed days behind reality, and unchanged by re-running the same query — so an empty `in:sent` is not proof a send didn't happen even when no other account is in play. Confirm a specific thread with `get_thread(threadId)` (live ground truth), cap an unconfirmed send at "couldn't confirm," and if the user says they sent it, believe them and reconcile accordingly.
+
 ## Step 2 — Gather inputs (in parallel)
 
 Run these reads in parallel — one message, multiple tool calls. Read only what exists; skip gracefully if a folder is absent.
@@ -82,7 +84,7 @@ Also pull yesterday's briefing's "## Shutdown notes" section if present — it c
 
 When (a) and (b) point at the same note, keep the reconcile proposal (it carries the signal) and drop the duplicate. If Step 1b was skipped (no streams enabled, or the backfill guard fired), § 0 is just (b).
 
-For outbound-contact tasks (reply/send/email/follow-up tasks), do **not** infer "awaiting send" from stale note state alone when email is enabled. Step 1b's live comms capture (or a same-day `Inbox/comms/<date>/` digest) is the prerequisite. If the connected Gmail search missed the send but the task/person uses a non-connected sending account, render the item as "couldn't confirm from connected Gmail — may have gone from <account>" and ask the user, rather than asserting it remains open.
+For outbound-contact tasks (reply/send/email/follow-up tasks), do **not** infer "awaiting send" from stale note state alone when email is enabled. Step 1b's live comms capture (or a same-day `Inbox/comms/<date>/` digest) is the prerequisite. If the connected Gmail search missed the send but the task/person uses a non-connected sending account, render the item as "couldn't confirm from connected Gmail — may have gone from <account>" and ask the user, rather than asserting it remains open. The connected-mailbox search can also be **stale** (the Gmail index lags reality and a repeat search won't refresh it), so a send that search can't see is "couldn't confirm" even without a second account — verify the specific thread with `get_thread(threadId)` before asserting anything, and never emit "awaiting send" / "unsent" off an empty search.
 
 Four pre-flight queries (run in parallel):
 

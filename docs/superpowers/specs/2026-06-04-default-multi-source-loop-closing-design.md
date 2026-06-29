@@ -41,6 +41,14 @@ git mode.
    account visible. Non-connected sending accounts must be modeled explicitly and a
    sent-mail miss for them is inconclusive, not evidence of "not sent."
 
+   > **Addendum (later finding — orthogonal axis).** `search_threads` is *not* fully
+   > authoritative even for the connected mailbox: its index can be **stale** (observed
+   > days behind reality, and unrefreshed by re-running the same search). Search is for
+   > *locating* candidate threads only; `get_thread(threadId)` is the live ground truth
+   > for a thread's latest state and whether a message exists. An empty search is
+   > therefore "couldn't confirm," never "not sent" — for every user, regardless of how
+   > many accounts they have. See memory `feedback_gmail_mcp_stale_reads`.
+
 ## Architecture
 
 The briefing becomes the conductor; the existing skills stay the instruments.
