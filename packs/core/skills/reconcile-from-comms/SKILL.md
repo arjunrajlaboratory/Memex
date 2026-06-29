@@ -103,15 +103,20 @@ job, and the mark is the idempotency key. For each reconciled item:
    (`ls Atlas/... Ops/Tasks/...` or grep). If it says `(no obvious target)`, this is a *create*
    proposal (Tier B), not an update. If the link is wrong, search by person-name + subject keyword
    (the way `observe-task-actuals` triangulates) before giving up. To confirm an action truly
-   happened, read the live thread with `get_thread(threadId)` (the authority on current state).
-   Use the `↳ thread:` id the phase-1 digest recorded for the email item; if it's missing (older
-   digest, or a Slack-sourced item), re-locate the candidate with `search_threads` first — search
-   *locates*, `get_thread` *confirms* — just never conclude from the search result itself, whose
-   index can be stale. When re-reading email, first check `_config/sources.md` for mailbox
-   visibility. A miss in connected Gmail can be a query miss *or* a stale-index miss for threads
-   expected there; for non-connected sending accounts it is an access gap. In every case confirm
-   with `get_thread` before concluding, and if the send still can't be confirmed make it a Tier-B
-   "couldn't confirm; did this go out?" question — never "not sent."
+   happened, re-read the live thread **on its own channel** — confirmation never crosses sources
+   (an item's source is in the digest frontmatter and its `↳ signal`):
+   - **Email items** (`↳ thread:` holds a Gmail `threadId`): read it with `get_thread(threadId)`
+     (the authority on current state). If the id is missing (an older digest), re-locate the
+     candidate with `search_threads` first — search *locates*, `get_thread` *confirms* — just never
+     conclude from the search result itself, whose index can be stale. First check
+     `_config/sources.md` for mailbox visibility: a miss in connected Gmail can be a query miss *or*
+     a stale-index miss for threads expected there; for non-connected sending accounts it is an
+     access gap.
+   - **Slack items** (`↳ thread: n/a`): confirm from the captured Slack signal, or re-read the
+     Slack thread/channel with `slack_read_thread` / `slack_read_channel`. Never route a Slack
+     confirmation through Gmail `search_threads` / `get_thread`.
+   In every case confirm on the right channel before concluding, and if the action still can't be
+   confirmed make it a Tier-B "couldn't confirm; did this happen?" question — never "not sent."
 
 4. **Classify into Tier A or Tier B** per the table. Demote on low confidence / sensitivity / no match.
 
