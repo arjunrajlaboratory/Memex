@@ -91,8 +91,9 @@ job, and the mark is the idempotency key. For each reconciled item:
 
 1. **Resolve the date + load the files.** Date = today (or the date arg). `ls Inbox/comms/<date>/`.
    If the folder is missing, tell the user to run [[capture-comms]] first and stop. Read every
-   `*.md` there; parse each `## Action items` block (checkbox + the `↳ signal / likely target /
-   suggested action / confidence` fields). Read any existing `## Reconciliation` ledger.
+   `*.md` there; parse each `## Action items` block (checkbox + the `↳ signal / thread / likely
+   target / suggested action / confidence` fields — `thread` is the Gmail `threadId` for email
+   items, used in Step 3 to confirm via `get_thread`). Read any existing `## Reconciliation` ledger.
 
 2. **Merge cross-file duplicates.** The same loop can appear in both `email.md` and `slack.md`
    (e.g. a PR review requested by email + "ran codex" in Slack). Collapse to one reconciliation

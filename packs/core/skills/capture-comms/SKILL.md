@@ -85,7 +85,7 @@ phase: 1-capture-only          # APPLIES NOTHING; phase 2 reconciles
 
 ### Action item format (the phase-2 API — keep it parseable)
 
-Mirror cv-scan's checkbox + provenance block exactly, so phase 2 can parse it deterministically:
+Mirror cv-scan's checkbox + provenance shape (one parseable `↳ key: value` line per field) so phase 2 can parse it deterministically:
 
 ```markdown
 - [ ] **<one-line description of the loop>**
