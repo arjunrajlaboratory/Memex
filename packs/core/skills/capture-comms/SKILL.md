@@ -90,6 +90,7 @@ Mirror cv-scan's checkbox + provenance block exactly, so phase 2 can parse it de
 ```markdown
 - [ ] **<one-line description of the loop>**
       ↳ signal: <sent email to Alex / Slack DM I sent to Jordan / received from Riley>  ·  <date/time>
+      ↳ thread: <Gmail `threadId` for email items — lets phase 2 confirm via `get_thread` without re-searching; `n/a` for Slack>
       ↳ likely target: [[<Task or Person or Letter or Followup>]] (<type>)  — or `(no obvious target)`
       ↳ suggested action: <close task | bump last_contact | flip Letter drafting→submitted | mark Followup acted_on | create task>
       ↳ confidence: high | medium | low
@@ -132,7 +133,9 @@ received. Received comms more often *open* loops (someone asks you for something
      threads that skip the inbox).
    - **Sent: `in:sent newer_than:<window>`** — the loop-closing gold. What did *I* send today?
    - For any thread that looks loop-relevant, `get_thread` with `messageFormat: FULL_CONTENT` to
-     read the actual chain before classifying (snippets hide the substance).
+     read the actual chain before classifying (snippets hide the substance). Record that thread's
+     `threadId` in the action item's `↳ thread:` field so phase-2 reconcile can re-confirm via
+     `get_thread` without re-searching a possibly-stale index.
    - Mailbox visibility: the Gmail MCP searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}.
      `{{OWNER_FORWARDING_EMAIL}}` forwards received mail into it, but sent mail from that address
      is invisible unless it was also sent through the connected mailbox{{/OWNER_FORWARDING_EMAIL}}{{?OWNER_SENDING_ACCOUNTS}}.

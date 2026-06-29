@@ -39,11 +39,11 @@ pre-flight — it relied on the user remembering; this reads the captured signal
   those accounts, mark it inconclusive and ask the user; never assert "not sent" / "awaiting send."
 - **Stale search reads are not negative evidence either — a separate axis.** `search_threads`
   returns a cached index that can lag reality by days even for the connected mailbox, and re-running
-  the same search does not refresh it. Before any proposal turns on "no sent email found," re-confirm
-  the specific thread with `get_thread(threadId)` (live ground truth) rather than trusting an empty
-  search; an empty search alone is "couldn't confirm," never "not sent" / "awaiting send." If the
-  user says they sent it, believe them and reconcile state accordingly (memory
-  `feedback_gmail_mcp_stale_reads`).
+  the same search does not refresh it. Before any proposal turns on "no sent email found," confirm
+  the specific thread with `get_thread` (live ground truth) — using the digest's recorded `↳ thread:`
+  id, or re-locating the thread by search first — rather than trusting an empty search result; an
+  empty search alone is "couldn't confirm," never "not sent" / "awaiting send." If the user says they
+  sent it, believe them and reconcile state accordingly (memory `feedback_gmail_mcp_stale_reads`).
 - **Honor sensitivity.** Anything the phase-1 file flagged `[sensitive — summarized]` (e.g. a career
   decision) is **always** propose-only and never auto-applied; do not expand the summary or quote it.
   Never lower a note's sensitivity.
@@ -102,12 +102,15 @@ job, and the mark is the idempotency key. For each reconciled item:
    (`ls Atlas/... Ops/Tasks/...` or grep). If it says `(no obvious target)`, this is a *create*
    proposal (Tier B), not an update. If the link is wrong, search by person-name + subject keyword
    (the way `observe-task-actuals` triangulates) before giving up. To confirm an action truly
-   happened, re-read the thread with `get_thread(threadId)` (the authority on current state) — do
-   **not** re-run `search_threads`, whose index can be stale. When re-reading email, first
-   check `_config/sources.md` for mailbox visibility. A miss in connected Gmail can be a query miss
-   *or* a stale-index miss for threads expected there; for non-connected sending accounts it is an
-   access gap. In every case confirm with `get_thread` before concluding, and if the send can't be
-   confirmed make it a Tier-B "couldn't confirm; did this go out?" question — never "not sent."
+   happened, read the live thread with `get_thread(threadId)` (the authority on current state).
+   Use the `↳ thread:` id the phase-1 digest recorded for the email item; if it's missing (older
+   digest, or a Slack-sourced item), re-locate the candidate with `search_threads` first — search
+   *locates*, `get_thread` *confirms* — just never conclude from the search result itself, whose
+   index can be stale. When re-reading email, first check `_config/sources.md` for mailbox
+   visibility. A miss in connected Gmail can be a query miss *or* a stale-index miss for threads
+   expected there; for non-connected sending accounts it is an access gap. In every case confirm
+   with `get_thread` before concluding, and if the send still can't be confirmed make it a Tier-B
+   "couldn't confirm; did this go out?" question — never "not sent."
 
 4. **Classify into Tier A or Tier B** per the table. Demote on low confidence / sensitivity / no match.
 
