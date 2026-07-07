@@ -10,7 +10,7 @@ File path: `Atlas/Trackers/<Subject>.md` — run the subject through `safe_title
 ---
 type: tracker
 id: tracker-<slug>
-status: active            # active | paused | archived | broken
+status: active            # active | paused | archived | broken | needs_review (set by run-trackers at miss_count >= 5)
 subject: "<short subject phrase>"
 # What to keep fresh — at least one of:
 watches:

@@ -182,7 +182,7 @@ received. Received comms more often *open* loops (someone asks you for something
 
 7. **Log once.** Append one line to `log.md`:
    ```
-   <datetime> — actor:me — capture — Inbox/comms/<date>/ — capture-comms: <A> action items (email <E>, slack <S>), <R> to route, <F> filtered
+   <datetime> — agent:capture — capture — Inbox/comms/<date>/ — capture-comms: <A> action items (email <E>, slack <S>), <R> to route, <F> filtered
    ```
 
 ## Phase 2 hook

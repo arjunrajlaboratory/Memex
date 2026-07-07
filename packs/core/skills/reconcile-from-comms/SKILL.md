@@ -135,7 +135,7 @@ job, and the mark is the idempotency key. For each reconciled item:
 8. **Log.** One `log.md` line summarizing the run (the per-change Tier-A lines from Step 5 are
    separate and already appended):
    ```
-   <datetime> — actor:me — reconcile — Inbox/comms/<date>/ — reconcile-from-comms: <A> auto-applied, <C> confirmed+applied, <P> still-proposed, <S> skipped
+   <datetime> — agent:librarian — reconcile — Inbox/comms/<date>/ — reconcile-from-comms: <A> auto-applied, <C> confirmed+applied, <P> still-proposed, <S> skipped
    ```
 
 9. **Report back.** What was auto-applied, what's awaiting confirmation, what was routed to which

@@ -11,7 +11,7 @@ You are running as **`agent:auditor`** for this skill. Your job: run the 20 chec
 
 Vault hygiene degrades silently. A wikilink breaks because a note was renamed. A project sits `active` while its actual work has migrated. A Task gets `status: waiting` and nobody chases the waiting-on. A Source piles up unprocessed for two weeks. The system works *most* of the time without these failing visibly, which is exactly what makes them dangerous — by the time the user notices, the corruption is structural.
 
-The lint pass is the cheap, periodic defense. It doesn't fix anything (that's the user's call); it surfaces the 15 known failure modes and lets the user triage. The procedure has lived as a paste prompt at `Agents/Prompts/lint.md` and a workflow at `_workflows/lint.md`. This skill wraps both for natural-language invocation.
+The lint pass is the cheap, periodic defense. It doesn't fix anything (that's the user's call); it surfaces the 20 known failure modes and lets the user triage. The procedure has lived as a paste prompt at `Agents/Prompts/lint.md` and a workflow at `_workflows/lint.md`. This skill wraps both for natural-language invocation.
 
 ## Inputs
 

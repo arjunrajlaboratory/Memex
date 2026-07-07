@@ -164,7 +164,10 @@ def main():
     # because the selective wipe above never touches that dir, so re-deriving
     # preserves the curation. (Earlier they were split between hardened/ and
     # packs/pi/, but packs/ is fully wiped on derive, which deleted the fragment.)
-    for hook in H["hooks"]:
+    # .get() to stay in lockstep with planned_sources(): the pre-flight treats a
+    # missing "hooks" key as empty, so the copy loop must too — a hard KeyError
+    # here would fire AFTER the wipe and leave a half-built template.
+    for hook in H.get("hooks", []):
         copy_file(SRC/".claude/hooks"/hook, ENG/"hardened/hooks"/hook, pairs)
     for lf in H.get("launchd", []):
         src = SRC/"scripts/launchd"/lf if lf.endswith(".plist") else SRC/"scripts"/lf

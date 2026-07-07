@@ -17,7 +17,7 @@ Run these reads in **parallel** (one message, multiple tool calls):
 4. **Today's briefing** — check whether `Ops/Briefings/<today>.md` exists.
 5. **Active Tasks** — grep `Ops/Tasks/` for `status: in_progress` and `status: next`, count and sample top 5 by file mtime.
 6. **Overdue scheduled-start Tasks** — grep `Ops/Tasks/` for `status: scheduled` AND `scheduled_start:` dates ≤ today. These are tasks that were time-blocked for a moment that has now passed without the user explicitly closing or rescheduling them — they're the highest-friction drift signal because the calendar event has fired and the Task is still pretending to be in the future. Count and list up to 5 with their `scheduled_start` dates.
-7. **Overdue Followups** — grep `Ops/Followups/` for `due:` dates ≤ today.
+7. **Overdue Followups** — grep `Ops/Followups/` for `surface_on:` dates ≤ today (the followup schema has no `due:` field).
 8. **Stale Trackers** — grep `Atlas/Trackers/` for `next_check:` dates ≤ today and `status: active`.
 
 If you have access to Haiku via sub-agents and the user is in a hurry, you can fan these out to Haiku sub-agents in parallel (one per check). For most sessions, doing them inline with parallel Bash/Read tool calls is faster — the overhead of dispatching sub-agents only pays off if there's heavy parsing to do.

@@ -1,6 +1,6 @@
 ---
 name: triage-inbox
-description: Triage every unfiled capture in Inbox/ — one-by-one classification (source/task/decision/interaction/commitment/ask/followup/journal/draft-wiki) routed to the right typed note via the matching skill, with archives. Use whenever the user wants to clear unprocessed captures from the vault's drop zone — signaled by phrases like "triage the inbox", "process the inbox", "clear out Inbox/", "what's in the inbox", "let's process those captures", "I dropped some files for you", "ingest everything in Inbox/", or direct invocation "/triage-inbox". Walks every unfiled item in `Inbox/` (the gitignored drop zone) one at a time. For each: classifies (source, task, decision, interaction, commitment, ask, followup, journal, draft-wiki), routes to the right typed note via the appropriate skill (`ingest-source` for articles, `ingest-person` for new people, inline write for tasks/decisions/etc.), moves the original to `Inbox/_filed/<today>/`, and logs the mutation. The signal of completion is an empty top-level `Inbox/` (only `README.md` and `_filed/` remain). Use this skill at the start of a session when captures have accumulated; it is the inverse of "where did we leave off."
+description: Triage every unfiled capture in Inbox/ — one-by-one classification (source/task/decision/interaction/commitment/ask/followup/journal/draft-wiki) routed to the right typed note via the matching skill, with archives. Use whenever the user wants to clear unprocessed captures from the vault's drop zone — signaled by phrases like "triage the inbox", "process the inbox", "clear out Inbox/", "what's in the inbox", "let's process those captures", "I dropped some files for you", "ingest everything in Inbox/", or direct invocation "/triage-inbox". Walks every unfiled item in `Inbox/` (the gitignored drop zone) one at a time. For each: classifies (source, task, decision, interaction, commitment, ask, followup, journal, draft-wiki), routes to the right typed note via the appropriate skill (`ingest-source` for articles, `ingest-person` for new people, inline write for tasks/decisions/etc.), moves the original to `Inbox/_filed/<today>/`, and logs the mutation. The signal of completion is an empty top-level `Inbox/` (only `README.md` and the system slots — `_filed/`, `_journal/`, `comms/` — remain). Use this skill at the start of a session when captures have accumulated; it is the inverse of "where did we leave off."
 ---
 
 # Triage the inbox
@@ -31,7 +31,7 @@ Read these before doing anything:
 
 List the queue:
 
-- `ls Inbox/` (excluding `README.md` and `_filed/`)
+- `ls Inbox/` (excluding `README.md` and the system slots: `_filed/`, `_journal/` — durable journals, not captures — and `comms/` — capture-comms digests)
 
 If empty, report "inbox clean" and exit. Don't invent work.
 
@@ -68,11 +68,11 @@ For each item, follow the routing decision tree below. **Do not batch-process** 
 | Article / paper / URL / PDF | `source` | `/ingest-source` |
 | "Need to do X by Y" | `task` | Invoke `/create-task` — it handles the sequential ID, schema check, parent project pick, optional calendar block (if the capture includes a time), and the log line. Pass the subject + any time-block / due hints from the capture. |
 | "I decided to do X because Y" | `decision` | Invoke `/capture-decision` — it handles the schema, the parent backlink, and supersede chaining if the decision overrides a prior one. |
-| "Met with / talked to / called X about Y" | `interaction` | Write `Atlas/People/Interactions/<Date> - <Person>.md`. Default `sensitivity: private`. |
+| "Met with / talked to / called X about Y" | `interaction` | Write `Atlas/People/Interactions/<Person> - <Date>.md` (person first, per `_schemas/interaction.md`). Default `sensitivity: private`. |
 | "I promised X to do Y" / "X promised to do Y for me" | `commitment` | Write `Atlas/People/Commitments/<Subject>.md`. Default `sensitivity: private`. |
 | "I want to ask X about Y" / "I should approach X for Y" | `ask` | Write `Atlas/People/Asks/<Subject>.md`. Default `sensitivity: private`. |
 | "Remember to do X on date D" | `followup` | Write `Ops/Followups/<Subject> - <due-date>.md`. |
-| Reflective entry, daily-journal-shaped | `journal` | Append to `Ops/Journal/<date>.md` (or `Inbox/_journal/<date>.md` if you're following the legacy schema path — see `_schemas/journal.md`). |
+| Reflective entry, daily-journal-shaped | `journal` | Append to `Inbox/_journal/<date>.md` — the canonical path per `_schemas/journal.md` (a future schema revision may relocate journals to a top-level folder, but until then the inbox-adjacent path is it). |
 | Draft wiki page (Concept / Project / etc.) | `<type>` | Write directly to `Atlas/<Type>/...` after schema reconciliation. |
 | New person mentioned, no existing Person note | `person` | Invoke `/ingest-person` (Gmail backfill is mandatory per standing user pref). |
 

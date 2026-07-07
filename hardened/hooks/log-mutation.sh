@@ -48,7 +48,9 @@ typed = rel.endswith(".md") and (
     or (parts[0] == "Ops" and len(parts) >= 3
         and parts[1] in {"Tasks", "Followups", "Briefings", "Reviews"})
 )
-if not typed or any(seg in rel for seg in ("_archive", "Inbox/", "_schemas", "_templates", "_workflows")):
+# Segment match, not substring: a note legitimately named e.g.
+# "Atlas/Concepts/the_archive_pattern.md" must not be skipped.
+if not typed or {"_archive", "Inbox", "_schemas", "_templates", "_workflows"} & set(parts):
     sys.exit(0)
 
 base = os.path.basename(rel)[:-3]

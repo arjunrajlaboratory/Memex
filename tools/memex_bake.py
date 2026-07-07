@@ -63,7 +63,11 @@ SCAFFOLD_DIRS = [
     "Atlas/Trackers/Digests",
     "Atlas/Efforts",
     "Atlas/Relationships",
-    "Atlas/Interactions",
+    # People-adjacent notes live UNDER Atlas/People/ per the schemas
+    # (interaction.md, commitment.md, ask.md) — not at the Atlas top level.
+    "Atlas/People/Interactions",
+    "Atlas/People/Commitments",
+    "Atlas/People/Asks",
     "Ops/Tasks",
     "Ops/Briefings",
     "Ops/Calendars",
@@ -398,7 +402,15 @@ def ensure_gitignore_entries(vault_dir: pathlib.Path, entries: list[str] | None 
 
 def _write_seed_files(target: pathlib.Path, answers: dict[str, Any], streams: list[str], git_mode: str, today: str, result: BakeResult) -> None:
     seeds: dict[str, str] = {}
-    seeds["log.md"] = "# log\n"
+    # The header + `---` divider are load-bearing: log-mutation quotes the
+    # format "from log.md's own header", and skills anchor their newest-first
+    # Edit insertions on the divider line.
+    seeds["log.md"] = (
+        "# log\n\n"
+        "Canonical mutation log — newest entries first, one line per mutation:\n\n"
+        "`<datetime> — <actor> — <verb> — <target> — <one-line summary>`\n\n"
+        "---\n"
+    )
     seeds["Inbox/README.md"] = "# Inbox drop zone\n"
     seeds["outputs/README.md"] = "# Generated artifacts\n\nGitignored content, tracked structure.\n"
     seeds["Drafts/README.md"] = (

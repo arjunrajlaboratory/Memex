@@ -245,7 +245,7 @@ Don't recapitulate the whole briefing in chat — the file is the artifact.
 
 - **Does not silently overwrite.** If today's briefing exists, stop and ask. If it has `## Shutdown notes` appended, refuse the overwrite outright unless the user explicitly says "I know, regenerate and lose the shutdown notes."
 - **Does not auto-execute outcomes.** It writes the briefing; the user decides what to actually do.
-- **Does not lint.** Lint is a separate weekly task; the briefing surfaces signals but doesn't run check 1–15.
+- **Does not lint.** Lint is a separate weekly task; the briefing surfaces signals but doesn't run check 1–20.
 - **Does not modify any of the source notes it reads from.** Projects, Tasks, People, Trackers — all read-only here.
 
 ## Model recommendation

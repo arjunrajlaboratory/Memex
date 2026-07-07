@@ -17,6 +17,7 @@ related_projects: []
 related_concepts: []
 related_sources: []
 promote_to_project_when: "<concrete trigger>"
+superseded_by:            # set on convergence — wikilink to the Project this effort became
 sensitivity: normal
 created: YYYY-MM-DD
 updated: YYYY-MM-DD

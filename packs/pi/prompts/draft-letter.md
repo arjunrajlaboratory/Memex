@@ -132,11 +132,11 @@ Vault ships `scripts/merge_letterhead.py` (stdlib-only) which replaces the templ
 placeholder with the letter's date + Re: + body paragraphs, preserving letterhead + lab logo +
 signature image + name/titles.
 
-Steps:
-1. Write markdown to /tmp/{{recipient-slug}}-{{program}}-{{cycle_year}}.md.
+Steps (mirror the draft-letter SKILL, Steps 7a–7c):
+1. Write markdown to `outputs/letters/_src/{{recipient}} - {{program}} {{cycle_year}}.md` — NOT /tmp/ (survives reboots, lives next to the artifact; `mkdir -p outputs/letters/_src` once if missing).
 2. Ensure local template copy at outputs/letters/_template/test_letterhead.docx (cp from Drive-Desktop path if missing).
-3. `python3 scripts/merge_letterhead.py --template outputs/letters/_template/test_letterhead.docx --letter /tmp/X.md --output "outputs/letters/{{recipient}} - {{program}} {{cycle_year}}.docx"`
-4. Push the resulting .docx to Drive: `create_file(title: ..., base64Content: <base64 of output>, contentMimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", disableConversionToGoogleType: true, parentId: <recipient folder ID>)`. Capture `id` + `webViewLink`.
+3. `python3 scripts/merge_letterhead.py --template outputs/letters/_template/test_letterhead.docx --letter "outputs/letters/_src/<...>.md" --output "outputs/letters/{{recipient}} - {{program}} {{cycle_year}}.docx"`
+4. Deliver by copying into the synced Drive folder (DEFAULT — no MCP, no hang): `cp "outputs/letters/<...>.docx" "$LETTERS_ROOT/{{recipient}}/"`. The synced path IS the canonical Drive location. Only fall back to MCP `create_file` (base64Content + disableConversionToGoogleType: true) when there is no Drive-Desktop mount — it frequently hangs (see GOTCHA below).
 
 Alternative for iteration only: push as a Google Doc first via textContent (text/plain auto-converts),
 revise in browser, then re-run the merge once final. The letterhead .docx is the actual deliverable.
@@ -166,7 +166,7 @@ Frontmatter from the conversational answers:
 - is_lab_member (Step 2b Q2)
 - skills_tags (Step 2c)
 - status: drafting
-- artifact_drive_id, artifact_url, artifact_kind: doc (Step 7)
+- artifact_path (the delivered `$LETTERS_ROOT/...` path), artifact_kind: docx; artifact_drive_id + artifact_url only if pushed/looked up via MCP (Step 7)
 - prior_letter (most recent prior, if any)
 - sensitivity: private (DEFAULT; never lower)
 
