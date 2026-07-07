@@ -6,7 +6,7 @@
 
 ## Steps
 
-1. List `Inbox/` (the untracked drop zone — skip its README and skip the `Inbox/_filed/` archive). For each item:
+1. List `Inbox/` (the untracked drop zone — skip its README and the system slots: the `Inbox/_filed/` archive, `Inbox/_journal/` durable journals, and `Inbox/comms/` capture-comms digests). For each item:
 2. Read the item. Classify it into one of:
    - `source` — an article, transcript, screenshot, paper, dataset
    - `task` — a concrete commitment

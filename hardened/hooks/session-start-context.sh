@@ -57,11 +57,14 @@ else
   echo "Today's briefing (${today}): MISSING — consider /daily-briefing"
 fi
 
-# Inbox/ top-level (excluding README, _filed/, and dotfiles like .DS_Store).
-# Dropped FOLDERS count too — "drop in a folder of notes" is a supported
-# capture path, so a lone directory must not read as "empty (clean)".
+# Inbox/ top-level, excluding README, dotfiles (.DS_Store), and the
+# system-managed slots that live in Inbox permanently: underscore-prefixed
+# folders (_filed archive, _journal — the underscore marks a system slot per
+# _schemas/journal.md) and comms/ (capture-comms digests). Dropped user
+# FOLDERS still count — "drop in a folder of notes" is a supported capture
+# path, so a lone directory must not read as "empty (clean)".
 if [ -d "Inbox" ]; then
-  inbox_count="$(find Inbox -mindepth 1 -maxdepth 1 ! -name 'README.md' ! -name '.*' ! -name '_filed' 2>/dev/null | wc -l | tr -d ' ')"
+  inbox_count="$(find Inbox -mindepth 1 -maxdepth 1 ! -name 'README.md' ! -name '.*' ! -name '_*' ! -name 'comms' 2>/dev/null | wc -l | tr -d ' ')"
   if [ "${inbox_count:-0}" != "0" ]; then
     echo "Inbox/: ${inbox_count} item(s) waiting — consider /triage-inbox"
   else
