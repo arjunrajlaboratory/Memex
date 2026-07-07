@@ -49,3 +49,33 @@ hand-curated and survive re-derives; nothing to do for those.)
   only genuinely conflicting edits need agent/manual review.
 - **`prepare --plan` was removed** (it bypassed the in-progress-update guard);
   the plan always lives at `.memex/update-work/<run>/plan.json`.
+
+# Backport checklist — 2026-07-06 bug-hunt pass
+
+Same rule as above: these files are derive-managed, so mirror each change into
+the source vault before the next `derive.py` run or it will be clobbered.
+
+| Engine file changed here | Source-vault location | What to mirror |
+| --- | --- | --- |
+| `hardened/hooks/session-start-context.sh` | `.claude/hooks/session-start-context.sh` | Task glob fixed `Ops/Tasks/Task*.md` → `Ops/Tasks/*.md` (schema names tasks `<title slug>.md`, no `Task - ` prefix — the old glob matched nothing, so "Open tasks" never rendered). Inbox count now includes dropped top-level *folders* and excludes dotfiles (`.DS_Store`) and `_filed/` explicitly. |
+| `hardened/hooks/log-mutation.sh` | `.claude/hooks/log-mutation.sh` | Skip-list match is now per path segment, not substring — a note named e.g. `the_archive_pattern.md` was silently never logged. |
+| `hardened/quartz/quartz/components/MemexDashboard.tsx` | `quartz/quartz/components/MemexDashboard.tsx` | Dropped `"Topic - ": "topics"` from `TYPE_PREFIX_TO_DASHBOARD` — no `dashboards/topics` page exists, so a matching value produced a 404 ↗ link. |
+| `packs/core/skills/ingest-project/SKILL.md` | `.claude/skills/ingest-project/SKILL.md` | Subject question: filename is `Atlas/Projects/<Subject>.md` per `_schemas/project.md`, not `Project - <Subject>.md` (the skill contradicted the schema *and* its own Step on the artifact path). |
+| `packs/core/skills/capture-comms/SKILL.md` | `.claude/skills/capture-comms/SKILL.md` | Log line actor `actor:me` → `agent:capture` (`actor:me` is not in the actor vocabulary; the skill declares it runs as `agent:capture`). |
+| `packs/core/skills/reconcile-from-comms/SKILL.md` | `.claude/skills/reconcile-from-comms/SKILL.md` | Log line actor `actor:me` → `agent:librarian` (same vocabulary fix). |
+| `packs/core/skills/observe-manual-patterns/SKILL.md` | `.claude/skills/observe-manual-patterns/SKILL.md` | All `actor:me` references → bare `me` (the canonical user actor — the old grep matched zero real log lines, so the observer always reported nothing); "16 hand-written skills" count dropped (core ships 24). |
+| `packs/core/skills/log-mutation/SKILL.md` | `.claude/skills/log-mutation/SKILL.md` | Verb vocabulary extended with `capture`, `reconcile`, `observe`, `revisit` — four shipped skills already emit them; the closed set predated those skills. |
+| `packs/core/skills/session-start/SKILL.md` | `.claude/skills/session-start/SKILL.md` | Overdue-followups grep `due:` → `surface_on:` (the followup schema has no `due:` field, so overdue followups never surfaced). |
+| `packs/core/skills/lint/SKILL.md`, `packs/core/skills/daily-briefing/SKILL.md` | corresponding `.claude/skills/` | Stale "15 checks" → 20 (lint workflow numbers 1–20). |
+| `packs/core/skills/triage-inbox/SKILL.md` | `.claude/skills/triage-inbox/SKILL.md` | Interaction filename order fixed to `<Person> - <Date>.md` (was reversed vs `_schemas/interaction.md`); journal routing fixed to canonical `Inbox/_journal/` (skill had inverted canon and "legacy"). |
+| `packs/core/workflows/lint.md` | `_workflows/lint.md` | Enum fixes: idea += `archived`, decision += `proposed` (both in the schemas), tracker += `needs_review`. |
+| `packs/core/schemas/tracker.md` | `_schemas/tracker.md` | Status enum += `needs_review` — run-trackers sets it at `miss_count >= 5`, so schema+lint were false-flagging every quiet tracker. |
+| `packs/core/schemas/effort.md` | `_schemas/effort.md` | Frontmatter += `superseded_by:` — the schema's own Rules require setting it on convergence but the field block lacked it. |
+| `packs/pi/prompts/draft-letter.md` | `Agents/Prompts/draft-letter.md` | Steps aligned with the SKILL (7a–7c): markdown source to `outputs/letters/_src/` not `/tmp/`; delivery via `cp` to `$LETTERS_ROOT` as default with MCP `create_file` demoted to no-mount fallback; `artifact_kind: doc` → `docx` + `artifact_path`. |
+| `packs/pi/skills/cv-scan/SKILL.md` | `.claude/skills/cv-scan/SKILL.md` | Description's "writes ONLY …" claim now includes the [[cv-items]] tracker bookkeeping and the followup `surface_on` bump that Step 10 actually performs. |
+
+Hand-curated files also touched (no source-vault mirror needed): `hardened/contract/CLAUDE.base.md`
+("15-check" → 20), `hardened/contract/AGENTS.base.md` (`_templates/` "one per type" claim corrected).
+Engine-owned code: `tools/memex_bake.py` (scaffold `Atlas/People/{Interactions,Commitments,Asks}`
+instead of the schema-contradicting `Atlas/Interactions`; `log.md` seed now carries the format
+header + `---` divider the log skills anchor on).

@@ -23,7 +23,7 @@ You need five fields:
 | --- | --- | --- |
 | `datetime` | ISO 8601 with timezone | `<now>` in `{{TIMEZONE}}` (e.g., `2026-05-18T15:42:00-04:00`). Don't approximate to a date; the time matters for ordering. |
 | `actor` | Who did the thing | `me` for user-driven action; `agent:<role>` if a skill is acting. See list below. |
-| `verb` | The kind of mutation | One of `create`, `update`, `archive`, `link`, `unlink`, `ingest`, `triage`, `brief`, `review`, `lint`. Use the closest verb; don't invent. |
+| `verb` | The kind of mutation | One of `create`, `update`, `archive`, `link`, `unlink`, `ingest`, `triage`, `brief`, `review`, `lint`, `capture`, `reconcile`, `observe`, `revisit`. Use the closest verb; don't invent. |
 | `target` | The note(s) affected | Wikilinks: `[[X]]`, or compound when multiple notes were touched: `[[Y]] + [[Z]]`. |
 | `summary` | One sentence | What changed and why. Past tense. Include the "delta" — `status: next → done`, `created`, `superseded`, etc. — not just "edited." |
 

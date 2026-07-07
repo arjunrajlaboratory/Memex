@@ -1,15 +1,15 @@
 ---
 name: observe-manual-patterns
-description: Scan `log.md` for `actor:me` mutations that were NOT wrapped in a known skill invocation, bucket by (verb, target-type), and flag any pattern occurring 3+ times in the last 30 days as a candidate for codifying into a new skill. Use when the user wants the manual-pattern observation pass run — signaled by phrases like "what should be a skill", "any patterns in my manual work", "what am I doing repeatedly", "find skill candidates", "observe manual patterns", or direct invocation "/observe-manual-patterns". Auto-invoked by the weekly-review skill. Reads `log.md`, identifies lines with `actor:me` and a verb that doesn't correspond to a vault skill, groups by mutation shape, and writes a small ranked report into the open weekly review or a standalone `Ops/Reviews/Observations/Manual patterns - <ISO-week>.md`. Flag-only — proposes skill candidates but never creates a skill.
+description: Scan `log.md` for user-driven (actor `me`) mutations that were NOT wrapped in a known skill invocation, bucket by (verb, target-type), and flag any pattern occurring 3+ times in the last 30 days as a candidate for codifying into a new skill. Use when the user wants the manual-pattern observation pass run — signaled by phrases like "what should be a skill", "any patterns in my manual work", "what am I doing repeatedly", "find skill candidates", "observe manual patterns", or direct invocation "/observe-manual-patterns". Auto-invoked by the weekly-review skill. Reads `log.md`, identifies lines whose actor is `me` and whose verb doesn't correspond to a vault skill, groups by mutation shape, and writes a small ranked report into the open weekly review or a standalone `Ops/Reviews/Observations/Manual patterns - <ISO-week>.md`. Flag-only — proposes skill candidates but never creates a skill.
 ---
 
 # Observe manual patterns
 
-You are running as **`agent:auditor`** for this skill. Your job: detect repeated `actor:me` mutations in `log.md` that don't yet have a skill wrapping them, surface them as skill-creation candidates.
+You are running as **`agent:auditor`** for this skill. Your job: detect repeated user-driven (actor `me`) mutations in `log.md` that don't yet have a skill wrapping them, surface them as skill-creation candidates.
 
 ## Why this skill exists
 
-The vault's 16 hand-written skills were created when the user noticed a pattern: "I keep doing X manually, this should be a skill." This observer makes that detection systematic — instead of relying on the user noticing, it scans the canonical mutation log and flags repeated shapes.
+The vault's hand-written skills were created when the user noticed a pattern: "I keep doing X manually, this should be a skill." This observer makes that detection systematic — instead of relying on the user noticing, it scans the canonical mutation log and flags repeated shapes.
 
 The cost of NOT having this observer: useful skills get created late, after the user has done the same manual work 8–10 times. The value is short-circuiting the "I noticed too late" pattern.
 
@@ -30,15 +30,15 @@ Note: the canonical log line shape from `AGENTS.md` is:
 <datetime> — <actor> — <verb> — <[[target]]> — <one-line summary>
 ```
 
-Where `actor` is one of `actor:me`, `agent:planner`, `agent:auditor`, `agent:librarian`, `agent:capture`, etc.
+Where `actor` is one of `me`, `agent:planner`, `agent:auditor`, `agent:librarian`, `agent:capture`, etc. (the vocabulary in `AGENTS.md` / `log-mutation`; user-driven lines use the bare token `me`).
 
 ## Step 1 — Filter the log
 
-Read the last `<window>` days of `log.md`. Filter to lines matching `actor:me`. Drop lines whose verb matches a known skill-equivalent operation (since `actor:me` here means the user themselves did it, NOT through a skill). The relevant verbs to KEEP (i.e., what the user did manually) include but are not limited to:
+Read the last `<window>` days of `log.md`. Filter to lines whose actor field is `me` (grep for ` — me — `; the em-dash delimiters keep it from matching prose). Drop lines whose verb matches a known skill-equivalent operation (since actor `me` here means the user themselves did it, NOT through a skill). The relevant verbs to KEEP (i.e., what the user did manually) include but are not limited to:
 
 - `update`, `schedule`, `commit`, `publish`, `send`, `move`, `rename`, `link`, `tag`, `delete`, `restore`, `convert`, `merge`, `archive`
 
-The verbs to DROP (these correspond to existing skills, even when `actor:me` invoked them — the action shape itself is already a skill):
+The verbs to DROP (these correspond to existing skills, even when the user invoked them — the action shape itself is already a skill):
 
 - `create` of a typed note (covered by `create-task`, `capture-decision`, `ingest-source`, `ingest-person`, `ingest-project`)
 - `triage`, `brief`, `review`, `lint`, `promote`, `flesh-out`, `close`, `revisit`, `observe`, `digest` (each is a named skill)
@@ -62,8 +62,8 @@ Group by shape. Count occurrences. Drop shapes with fewer than `<threshold>` occ
 
 | Shape | Count | Example log lines |
 | --- | --- | --- |
-| `update person.last_contact` | 5 | 2026-05-12 — actor:me — update — [[X]] — last_contact bump; 2026-05-17 — ... |
-| `schedule calendar-event` | 4 | 2026-05-09 — actor:me — schedule — Google Calendar event for ...; ... |
+| `update person.last_contact` | 5 | 2026-05-12 — me — update — [[X]] — last_contact bump; 2026-05-17 — ... |
+| `schedule calendar-event` | 4 | 2026-05-09 — me — schedule — Google Calendar event for ...; ... |
 | ... | ... | ... |
 
 ### Proposed skill candidates

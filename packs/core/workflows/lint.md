@@ -28,9 +28,9 @@ For each, produce a list of offending notes (wiki-linked).
     - `type: task` notes with `status:` not in `[inbox, backlog, next, scheduled, in_progress, waiting, needs_review, done, canceled]`.
     - `type: project` notes with `status:` not in `[active, paused, waiting, archived, done, dropped]`, or `phase:` not in `[idea, design, building, shipping, maintaining]`.
     - `type: person` notes with `status:` not in `[active, dormant, estranged, deceased, archived]`.
-    - `type: idea` notes with `status:` not in `[raw, exploring, researching, promoted, dropped]`.
-    - `type: decision` notes with `status:` not in `[accepted, superseded, rejected]`.
-    - `type: tracker` notes with `status:` not in `[active, paused, archived, broken]`.
+    - `type: idea` notes with `status:` not in `[raw, exploring, researching, promoted, dropped, archived]`.
+    - `type: decision` notes with `status:` not in `[proposed, accepted, superseded, rejected]`.
+    - `type: tracker` notes with `status:` not in `[active, paused, archived, broken, needs_review]`.
     For each, the schema in `_schemas/<type>.md` is canonical. Flag both the offending value AND the correct enum so the user can fix it.
 17. **Required-evidence gaps.** Sources with `raw_path:` empty or pointing at a non-existent file. Decisions with `# Evidence` empty when `status: accepted` is set. Person notes claiming `# Important personal context` items without an Interaction reference (per the schema's "never invent personal facts" rule).
 18. **Missing-entity queue gaps.** Per the `# Missing-entity queue convention` in AGENTS.md: when an ingest-* skill creates a wikilink to a missing entity, it should have spawned either the entity or a `Followup - Create <Type> - <Name> - <date>` tickler. Find broken wikilinks (check 1) that don't have a corresponding Followup in `Ops/Followups/` — those are the missed queue entries.

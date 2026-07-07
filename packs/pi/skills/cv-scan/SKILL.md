@@ -1,6 +1,6 @@
 ---
 name: cv-scan
-description: Scan Gmail + Google Calendar (and recent vault signals) for CV-worthy events — invited talks, accepted/published papers, awards, editorial/review/departmental service — dedupe against the existing CV/*.tex, and append paste-ready LaTeX snippets to the CV candidates staging queue. Use whenever the user wants to refresh CV additions — signaled by "scan for CV items", "any new CV items", "update my CV", "what's missing from my CV", "run the CV scan", "/cv-scan", or when the weekly run-trackers pass hits the [[cv-items]] tracker. Read-only against Gmail/Calendar and the .tex files; writes ONLY Ops/Followups/CV candidates.md and log.md. Never sends email, never edits the .tex.
+description: Scan Gmail + Google Calendar (and recent vault signals) for CV-worthy events — invited talks, accepted/published papers, awards, editorial/review/departmental service — dedupe against the existing CV/*.tex, and append paste-ready LaTeX snippets to the CV candidates staging queue. Use whenever the user wants to refresh CV additions — signaled by "scan for CV items", "any new CV items", "update my CV", "what's missing from my CV", "run the CV scan", "/cv-scan", or when the weekly run-trackers pass hits the [[cv-items]] tracker. Read-only against Gmail/Calendar and the .tex files; writes ONLY Ops/Followups/CV candidates.md, log.md, and run bookkeeping on the [[cv-items]] tracker (last_checked/next_check/miss_count) + the followup's surface_on. Never sends email, never edits the .tex.
 ---
 
 # cv-scan

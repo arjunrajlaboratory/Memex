@@ -55,7 +55,7 @@ Prefer putting standing local behavior in `_config/overrides.md` over editing fr
 | `outputs/` | executors | generated **binary** artifacts (report PDFs, letterhead `.docx`, CV PDFs). Folder + `README.md` tracked; contents (`outputs/**`) gitignored — don't commit binaries. |
 | `_config/` | user (curated), setup wizard | instance config the skills read. `_config/sources.md` records which streams (`email`/`slack`/`calendar`) the default daily loop-closing flow checks + the git mode. `_config/overrides.md` records local behavior that takes precedence over framework defaults. |
 | `_schemas/` | engine-owned; user forks are surfaced by `/update` | governance rules; prefer local exceptions in `_config/overrides.md` |
-| `_templates/` | engine-owned; user forks are surfaced by `/update` | one per type |
+| `_templates/` | engine-owned; user forks are surfaced by `/update` | one per most types (a few — e.g. idea, letter, grant — are schema-only) |
 | `_workflows/` | engine-owned; user forks are surfaced by `/update` | step-by-step workflow prompts |
 | `.claude/skills/` | engine-owned; user forks are surfaced by `/update` | Claude Code skills auto-triggered by natural-language phrasings - see "Skills" below |
 | `scripts/` | engine-owned; user forks are surfaced by `/update` | framework utilities installed by the engine: `serve_quartz.sh` (Quartz dev server), `launchd/` (the launch-agent plist), `memex-doctor.sh` (health check). The pi pack adds `merge_letterhead.py` and `build_cv.sh`. |
