@@ -25,7 +25,10 @@ fi
 
 # Open Task counts by status — one awk pass over all Task files (the old
 # version ran grep -l six times over the same glob).
-task_glob="Ops/Tasks/Task*.md"
+# Task files are named `Ops/Tasks/<title slug>.md` (schema: no "Task - "
+# prefix), so match every .md; the awk pass only counts files that actually
+# carry a `status:` frontmatter line.
+task_glob="Ops/Tasks/*.md"
 task_scan=""
 if ls $task_glob >/dev/null 2>&1; then
   task_scan="$(awk '
@@ -54,9 +57,11 @@ else
   echo "Today's briefing (${today}): MISSING — consider /daily-briefing"
 fi
 
-# Inbox/ top-level (excluding README + _filed/)
+# Inbox/ top-level (excluding README, _filed/, and dotfiles like .DS_Store).
+# Dropped FOLDERS count too — "drop in a folder of notes" is a supported
+# capture path, so a lone directory must not read as "empty (clean)".
 if [ -d "Inbox" ]; then
-  inbox_count="$(find Inbox -maxdepth 1 -type f ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
+  inbox_count="$(find Inbox -mindepth 1 -maxdepth 1 ! -name 'README.md' ! -name '.*' ! -name '_filed' 2>/dev/null | wc -l | tr -d ' ')"
   if [ "${inbox_count:-0}" != "0" ]; then
     echo "Inbox/: ${inbox_count} item(s) waiting — consider /triage-inbox"
   else

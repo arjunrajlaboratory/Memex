@@ -442,7 +442,17 @@ def fill_new_answers(
         added.append(token)
         if interactive:
             default = placeholder.get("example", "")
-            value = prompt_input(f"{placeholder['prompt']} [{default}]: ").strip()
+            # Honest hint, mirroring init's interview(): the bracket must show
+            # what Enter actually does. Only ports adopt the example on Enter;
+            # showing `[example]` for other tokens implied a default that blank
+            # input would then refuse (or silently bake "" for optional ones).
+            if token in PORT_TOKENS:
+                hint = default
+            elif placeholder_allows_blank(placeholder) or allow_blank_tokens:
+                hint = "blank"
+            else:
+                hint = f"required, e.g. {default}" if default else "required"
+            value = prompt_input(f"{placeholder['prompt']} [{hint}]: ").strip()
             if value:
                 updated[token] = value
             elif token in PORT_TOKENS:

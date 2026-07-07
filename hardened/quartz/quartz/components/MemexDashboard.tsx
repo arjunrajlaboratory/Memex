@@ -144,7 +144,6 @@ MemexDashboard.afterDOMLoaded = `
     "Person - ": "people",
     "Organization - ": "organizations",
     "Area - ": "areas",
-    "Topic - ": "topics",
     "Source - ": "sources",
     "Tracker - ": "trackers",
     "Decision - ": "decisions",
