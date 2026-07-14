@@ -1,6 +1,13 @@
 ---
 name: create-task
-description: Create a vault Task conforming to _schemas/task.md with a sequential task-YYYYMMDD-NNN id, the right parent project/area, and (when there's a time block) a matching Google Calendar event. Use whenever the user wants to spin up a new Task in the vault — signaled by phrases like "add a task to ...", "create a task for ...", "I need to ...", "make a task to ...", "task: ...", "schedule a block to ...", "put time on for ...", "block 30 min tomorrow for ...", "remind me to ...", "I should do X by Y", or direct invocation "/create-task". Generates a sequential `task-YYYYMMDD-NNN` ID, conforms to `_schemas/task.md` (including the rule that `status: scheduled` requires both `scheduled_start` and `scheduled_end`), picks the parent Project / Area from the existing vault, optionally creates a matching Google Calendar event when there's a time block, and always appends the canonical line to `log.md`. Use this any time a Task note will be born — even from inside other skills (`triage-inbox` routes Task-shaped captures here; `promote-idea` calls it for Idea → Task promotions). The win is enforcing the ID + schema + log + calendar discipline in one move so the Task isn't half-formed.
+description: >-
+  Create a schema-conformant vault Task with a sequential task ID, the correct
+  Project or Area parent, and a mutation-log entry. Use for "add a task",
+  "create a task", "I need to", "remind me", "schedule a block", "put time on
+  for", or `/create-task`, including Task creation delegated by other skills.
+  Enforce the scheduling-field contract and, only when the request includes a
+  time block and approval requirements are satisfied, create a matching Google
+  Calendar event.
 ---
 
 # Create a Task

@@ -1,6 +1,14 @@
 ---
 name: triage-inbox
-description: Triage every unfiled capture in Inbox/ — one-by-one classification (source/task/decision/interaction/commitment/ask/followup/journal/draft-wiki) routed to the right typed note via the matching skill, with archives. Use whenever the user wants to clear unprocessed captures from the vault's drop zone — signaled by phrases like "triage the inbox", "process the inbox", "clear out Inbox/", "what's in the inbox", "let's process those captures", "I dropped some files for you", "ingest everything in Inbox/", or direct invocation "/triage-inbox". Walks every unfiled item in `Inbox/` (the gitignored drop zone) one at a time. For each: classifies (source, task, decision, interaction, commitment, ask, followup, journal, draft-wiki), routes to the right typed note via the appropriate skill (`ingest-source` for articles, `ingest-person` for new people, inline write for tasks/decisions/etc.), moves the original to `Inbox/_filed/<today>/`, and logs the mutation. The signal of completion is an empty top-level `Inbox/` (only `README.md` and the system slots — `_filed/`, `_journal/`, `comms/` — remain). Use this skill at the start of a session when captures have accumulated; it is the inverse of "where did we leave off."
+description: >-
+  Triage every unfiled capture in `Inbox/`, classify it as a Source, Task,
+  Decision, Interaction, Commitment, Ask, Followup, journal entry, or draft
+  wiki page, and route it through the appropriate typed-note workflow. Use for
+  "triage the inbox", "process the inbox", "clear Inbox", "what's in the
+  inbox", "I dropped files for you", "ingest everything", or
+  `/triage-inbox`. Create the tracked output first, move the original to the
+  dated `_filed` archive, and log every mutation. Completion means no unfiled
+  top-level captures remain.
 ---
 
 # Triage the inbox

@@ -1,6 +1,13 @@
 ---
 name: run-trackers
-description: Run all active+due trackers (or one named tracker) per its search_strategy (web/rss/github_releases/arxiv/manual_prompt), score against material-change criteria, write the digest, and apply or propose update_targets per auto_update_wiki. Use whenever the user wants to refresh the vault's living-topic watchers — signaled by phrases like "run the trackers", "run due trackers", "check for tracker updates", "Monday tracker pass", "refresh the ExampleProject releases tracker", "any new digests?", "anything material this week?", or direct invocation "/run-trackers" / "/run-trackers tracker-example-llm-wiki". Without arguments, runs every tracker at `Atlas/Trackers/*.md` where `status: active` and `next_check <= today`; with an explicit tracker id, runs only that one. For each tracker: executes its `search_strategy` (web / rss / github_releases / arxiv / manual_prompt), scores results against the tracker's material-change criteria, drops items below `reliability_floor`, writes `Atlas/Trackers/Digests/Tracker Digest - <slug> - <today>.md` per `_schemas/tracker_digest.md`, applies or proposes wiki updates per `update_targets` + `auto_update_wiki`, updates the tracker frontmatter (`last_checked`, `next_check`, `last_digest`, `miss_count`), and appends to `log.md`. Honors `forbidden_actions` strictly and respects sensitivity (sensitive trackers must use manual_prompt or vetted MCP only, never raw web search). Use Monday mornings for the weekly batch; auto-trigger from `session-start` when stale trackers exist. Skill is the auto-triggering counterpart to the paste prompt at `Agents/Prompts/run-trackers.md`.
+description: >-
+  Run every active due Tracker, or one named Tracker, according to its search
+  strategy and material-change criteria. Use for "run the trackers", "run due
+  trackers", "check tracker updates", "Monday tracker pass", "any new
+  digests", or `/run-trackers`. Supports web, feeds, releases, papers, manual
+  prompts, and vetted tools. Write the governed Tracker Digest, apply or
+  propose update targets according to policy, update
+  bookkeeping, log the run, and honor forbidden actions and sensitivity.
 ---
 
 # Run due trackers
