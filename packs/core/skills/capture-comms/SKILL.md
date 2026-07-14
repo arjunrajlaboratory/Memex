@@ -1,14 +1,14 @@
 ---
 name: capture-comms
 description: >-
-  Capture today's activity from every communications stream enabled in
-  `_config/sources.md` into `Inbox/comms/YYYY-MM-DD` as a structured digest of
-  summaries, action items, routable threads, and filtered noise. Use for
-  "capture today's comms", "daily comms summary", "summarize my email and
-  Slack", "what loops did my comms open or close", or `/capture-comms`.
-  Read-only against Gmail, Slack, Notion, Jira, and other communication tools;
-  never sends, drafts, reacts, transitions, or marks read. This is capture-only
-  phase 1: it proposes targets and actions but applies no vault state changes.
+  Capture today's Gmail and Slack activity (whichever of those streams is
+  enabled in `_config/sources.md`) into `Inbox/comms/YYYY-MM-DD` as a
+  structured digest of summaries, action items, routable threads, and filtered
+  noise. Use for "capture today's comms", "daily comms summary", "summarize my
+  email and Slack", "what loops did my comms open or close", or
+  `/capture-comms`. Read-only against Gmail and Slack; never sends, drafts,
+  reacts, or marks read. This is capture-only phase 1: it proposes targets and
+  actions but applies no vault state changes.
 ---
 
 # capture-comms

@@ -5,8 +5,8 @@ description: >-
   strategy and material-change criteria. Use for "run the trackers", "run due
   trackers", "check tracker updates", "Monday tracker pass", "any new
   digests", or `/run-trackers`. Supports web, feeds, releases, papers, manual
-  prompts, vetted tools, and read-only local repositories. Write the governed
-  Tracker Digest, apply or propose update targets according to policy, update
+  prompts, and vetted tools. Write the governed Tracker Digest, apply or
+  propose update targets according to policy, update
   bookkeeping, log the run, and honor forbidden actions and sensitivity.
 ---
 
