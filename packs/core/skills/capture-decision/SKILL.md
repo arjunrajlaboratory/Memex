@@ -1,6 +1,13 @@
 ---
 name: capture-decision
-description: Capture a deliberate choice as a Decision note (and handle the supersede chain when overriding a prior Decision). Use whenever the user announces a deliberate choice they want to be able to defend, revisit, or supersede later — signaled by phrases like "I've decided to ...", "let's go with X over Y", "the call is ...", "we're not doing Z because ...", "I'm picking X", "record this decision", "capture this as a decision", "log this decision", "decision: ...", or direct invocation "/capture-decision". Writes `Atlas/Decisions/<Title>.md` per `_schemas/decision.md` (frontmatter + the six required body sections: Decision, Rationale, Alternatives considered, Evidence, Consequences, Revisit trigger), links the decision from the parent Project or Area's body, and appends to `log.md`. Critically also handles the *supersede* path: when a new decision overrides a prior one, sets `supersedes:` on the new note and `status: superseded` + `superseded_by:` on the old note (decisions are append-only in spirit — never silently rewrite history). Use this any time the user states a non-trivial choice; without it, the why-this-not-that gets lost in chat and the project page lies about its current direction.
+description: >-
+  Capture a deliberate choice as a schema-conformant Decision note, link it
+  from its parent Project or Area, and record the mutation. Use for "I've
+  decided", "let's go with X", "record this decision", "decision:", or
+  `/capture-decision`. Preserve the rationale, alternatives, evidence,
+  consequences, and revisit trigger. When a new Decision overrides an older
+  one, maintain the explicit `supersedes` and `superseded_by` chain instead of
+  rewriting history.
 ---
 
 # Capture a Decision

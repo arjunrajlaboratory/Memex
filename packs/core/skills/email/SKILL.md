@@ -1,6 +1,12 @@
 ---
 name: email
-description: General-purpose competence for the user's Gmail — search, read, triage, capture-to-vault, and draft replies via the Gmail MCP. Use whenever the user wants to do anything with their email — signaled by phrases like "search my email for ...", "what did X say", "find the thread about ...", "did Y reply yet?", "what's in my inbox", "is there an email from ...", "pull up the thread with ...", "draft a reply to ...", "respond to Z", "what do I owe people over email", or direct invocation "/email". This is the reusable home for *how to use email well* in this vault — the Gmail query cheat-sheet, the search-broadly-first technique (so you don't wrongly conclude "it's not in Gmail"), how to read a full thread, and how to route substantive email into the vault (Source / Person / Task) or draft a reply. It is broader than any single ingest skill: ingest-person uses Gmail only to backfill a CRM note, draft-letter only writes letters — this skill is for arbitrary email work. NEVER sends mail; drafts only (create_draft), per the vault's hard-nos. For pulling ONE substantive thread into the wiki as a Source, this skill hands off to ingest-source; for a new correspondent, to ingest-person.
+description: >-
+  Search, read, triage, summarize, capture, and draft replies for the user's
+  Gmail. Use for "search my email", "what did X say", "find the thread",
+  "did Y reply", "what's in my inbox", "draft a reply", "what do I owe over
+  email", or `/email`. Search broadly before concluding mail is absent, read
+  complete threads, and route durable content through the appropriate Source,
+  Person, or Task workflow. Never send mail; drafts only.
 ---
 
 # Use the user's email well

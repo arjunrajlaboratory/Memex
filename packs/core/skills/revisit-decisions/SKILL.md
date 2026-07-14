@@ -1,6 +1,13 @@
 ---
 name: revisit-decisions
-description: Surface vault Decisions whose `revisit_on` date has fallen due and whose `outcome:` is still `pending`, prompt the user to mark the outcome (worked / partial / failed / superseded) and add a one-line `# Outcome` body entry. Use when the user wants the decision-feedback loop run — signaled by phrases like "revisit decisions", "check decision outcomes", "how did past decisions pan out", "any decisions due to revisit?", "decision retro", or direct invocation "/revisit-decisions". Auto-invoked by the weekly-review skill. Flag-and-prompt only — the user does the marking; the skill never sets `outcome:` itself. Reads `Atlas/Decisions/*.md`, filters by `revisit_on <= today AND outcome: pending`, presents each as a one-line summary + the original Decision + Rationale + Revisit trigger, asks the user for outcome + one-line note, then writes the user's response into the Decision note (sets `outcome:` and `outcome_notes:` in frontmatter, appends a dated `# Outcome` body entry). Append one log.md line per Decision marked.
+description: >-
+  Surface Decisions whose `revisit_on` date is today or earlier and whose
+  outcome remains pending, then ask the user to grade each result as worked,
+  partial, failed, or superseded. Use for "revisit decisions", "check decision
+  outcomes", "decision retro", "how did past decisions pan out", or
+  `/revisit-decisions`; weekly review may also invoke it. The user supplies the
+  outcome and note. Record that response in frontmatter and the append-only
+  Outcome section, then log each mutation; never grade a Decision autonomously.
 ---
 
 # Revisit decisions

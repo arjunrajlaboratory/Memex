@@ -1,6 +1,14 @@
 ---
 name: capture-comms
-description: Pull the day's Gmail (sent + received) and Slack (sent + received) into a dated Inbox subfolder as a structured digest — Summary, ruthlessly-extracted Action items, Threads worth routing, and a Filtered-as-noise count — so triage and a later reconciliation pass can act on it. Use whenever the user wants today's communications captured into the vault — signaled by phrases like "capture today's comms", "daily comms summary", "summarize my email and slack", "what loops did my comms open or close today", "pull my comms into the inbox", or direct invocation "/capture-comms". Read-only against Gmail and Slack (NEVER sends, drafts, reacts, or marks read). Writes ONLY Inbox/comms/<date>/ files and one log.md line. This is PHASE 1 (capture only): it proposes likely vault targets and suggested actions but APPLIES NOTHING — closing tasks, flipping statuses, and bumping last_contact are phase 2 (a separate reconciliation skill).
+description: >-
+  Capture today's activity from every communications stream enabled in
+  `_config/sources.md` into `Inbox/comms/YYYY-MM-DD` as a structured digest of
+  summaries, action items, routable threads, and filtered noise. Use for
+  "capture today's comms", "daily comms summary", "summarize my email and
+  Slack", "what loops did my comms open or close", or `/capture-comms`.
+  Read-only against Gmail, Slack, Notion, Jira, and other communication tools;
+  never sends, drafts, reacts, transitions, or marks read. This is capture-only
+  phase 1: it proposes targets and actions but applies no vault state changes.
 ---
 
 # capture-comms
