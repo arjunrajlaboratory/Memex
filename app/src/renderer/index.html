@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; frame-src 'self' artifact: data: blob:; child-src 'self' artifact: data: blob:;" />
+  <title>Memex</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ambient layers -->
+  <div class="grain" aria-hidden="true"></div>
+  <div class="lamp" aria-hidden="true"></div>
+
+  <!-- ======================= TITLE BAR ======================= -->
+  <header class="titlebar">
+    <div class="tb-left">
+      <div class="wordmark" id="wordmark">
+        <span class="mark">Memex</span>
+        <span class="mark-sub">second brain</span>
+      </div>
+      <button class="vault-switch no-drag" id="vaultSwitch" title="Switch vault">
+        <span class="vs-dot" id="connDot"></span>
+        <span class="vs-name" id="vaultName">No vault</span>
+        <svg viewBox="0 0 24 24" class="chev"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+    </div>
+    <div class="tb-right no-drag">
+      <span class="model-tag" id="modelTag"></span>
+      <button class="icon-btn" id="themeToggle" title="Toggle theme">
+        <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 108.5 12A7 7 0 0112 3z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ======================= MAIN GRID ======================= -->
+  <main class="workspace" id="workspace" style="display:none">
+    <!-- CHAT -->
+    <section class="chat">
+      <div class="chat-scroll" id="chatScroll">
+        <div class="chat-empty" id="chatEmpty">
+          <div class="epigraph">
+            <p>“A memex is a device in which an individual stores all his books, records,
+              and communications, and which is mechanized so that it may be consulted with
+              exceeding speed and flexibility.”</p>
+            <cite>— Vannevar Bush, <em>As We May Think</em>, 1945</cite>
+          </div>
+          <p class="chat-hint">Talk to your second brain. Drop things in the inbox, ask for a
+            briefing, turn an idea into a project — it files, links, and tracks so you don't have to.</p>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="chips" id="chips">
+          <button class="chip" data-prompt="Where did we leave off? Give me a status.">◷ Where did we leave off?</button>
+          <button class="chip" data-prompt="Give me today's briefing.">✦ Today's briefing</button>
+          <button class="chip" data-prompt="What should I work on next?">→ What's next?</button>
+          <button class="chip" data-prompt="Triage the inbox.">⇉ Triage inbox</button>
+          <button class="chip" data-prompt="Do a weekly review.">↻ Weekly review</button>
+        </div>
+        <div class="composer-box">
+          <textarea id="composerInput" rows="1" placeholder="Message your memex…"></textarea>
+          <button class="send-btn" id="sendBtn" title="Send">
+            <svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 8 6 8z"/></svg>
+          </button>
+          <button class="stop-btn" id="stopBtn" title="Stop" style="display:none">
+            <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+          </button>
+        </div>
+        <div class="composer-foot">
+          <span id="statusLine">Ready</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider" id="divider"></div>
+
+    <!-- RIGHT PANEL -->
+    <section class="panel">
+      <div class="panel-head">
+      <div class="panel-nav">
+        <button class="nav-btn" id="navBack" title="Back (⌘[)" disabled>
+          <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <button class="nav-btn" id="navFwd" title="Forward (⌘])" disabled>
+          <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="dashboard">Dashboard</button>
+        <button class="tab" data-tab="tasks">Tasks <span class="tab-count" id="cntTasks"></span></button>
+        <button class="tab" data-tab="projects">Projects <span class="tab-count" id="cntProjects"></span></button>
+        <button class="tab" data-tab="ideas">Ideas <span class="tab-count" id="cntIdeas"></span></button>
+        <button class="tab" data-tab="people">People <span class="tab-count" id="cntPeople"></span></button>
+        <button class="tab" data-tab="inbox">Inbox <span class="tab-count badge" id="cntInbox"></span></button>
+        <button class="tab" data-tab="outbox">Outbox <span class="tab-count" id="cntOutputs"></span></button>
+        <button class="tab tab-artifact" data-tab="artifact" id="artifactTab" style="display:none">Artifact</button>
+      </nav>
+      </div>
+      <div class="panel-body" id="panelBody"></div>
+    </section>
+  </main>
+
+  <!-- global drop overlay -->
+  <div class="drop-overlay" id="dropOverlay">
+    <div class="drop-card">
+      <svg viewBox="0 0 24 24" class="drop-ic"><path d="M12 16V4m0 0L7 9m5-5l5 5M4 20h16"/></svg>
+      <div class="drop-title">Drop into the Inbox</div>
+      <div class="drop-sub">Files land in your vault's inbox for triage</div>
+    </div>
+  </div>
+
+  <!-- ======================= ONBOARDING ======================= -->
+  <div class="onboard" id="onboard">
+    <div class="onboard-inner">
+      <div class="onboard-head">
+        <div class="wordmark big"><span class="mark">Memex</span></div>
+        <p class="onboard-tag">A second brain that an AI agent keeps for you.</p>
+      </div>
+
+      <div class="onboard-cards">
+        <!-- OPEN EXISTING -->
+        <div class="ocard">
+          <h3>Open a vault</h3>
+          <p class="ocard-sub">Point Memex at an existing vault folder.</p>
+          <div class="recent-list" id="recentList"></div>
+          <button class="btn ghost" id="browseVault">Browse…</button>
+        </div>
+
+        <!-- CREATE NEW -->
+        <div class="ocard">
+          <h3>Create a new vault</h3>
+          <p class="ocard-sub">Stand up a fresh second brain in a new folder.</p>
+          <form class="setup-form" id="setupForm">
+            <label>Your name<input id="f_name" placeholder="Jane Roe" required /></label>
+            <label>Primary email<input id="f_email" type="email" placeholder="you@example.edu" required /></label>
+            <label>Timezone<input id="f_tz" placeholder="America/New_York" value="America/New_York" /></label>
+            <label>Location
+              <div class="path-row">
+                <input id="f_path" placeholder="~/code/my-vault" required />
+                <button type="button" class="btn tiny" id="pickPath">…</button>
+              </div>
+            </label>
+            <label class="pack-row">Packs
+              <span class="pack-opts">
+                <label class="pack-chip"><input type="radio" name="pack" value="core" checked /> core</label>
+                <label class="pack-chip"><input type="radio" name="pack" value="core,pi" /> core + academic PI</label>
+              </span>
+            </label>
+            <button class="btn primary" type="submit" id="createBtn">Create vault</button>
+          </form>
+        </div>
+      </div>
+
+      <pre class="setup-log" id="setupLog" style="display:none"></pre>
+      <div class="onboard-note">Requires the Memex engine and a logged-in Claude Code CLI. This window drives the same agent you'd get from the terminal.</div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
