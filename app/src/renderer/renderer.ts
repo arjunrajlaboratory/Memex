@@ -536,6 +536,20 @@ function renderGettingStarted(body: HTMLElement): void {
   }
   wrap.appendChild(how);
 
+  // Mail/calendar reach the agent through Claude connectors, configured once per account.
+  const connect = el('div', 'gs-connect');
+  connect.innerHTML = `
+    <div class="t">⚲ Connect Gmail &amp; Calendar</div>
+    <div class="d">Your memex reads mail and calendar through Claude connectors — set up once in your Claude account, not in this app.</div>
+    <ol>
+      <li>At <a class="gs-ext" data-url="https://claude.ai/customize/connectors">claude.ai → Settings → Connectors</a>, connect Gmail, Google Calendar, or Drive <span class="dim">(Pro, Max, Team, and Enterprise plans)</span>.</li>
+      <li>Sign in to the <span class="mono">claude</span> CLI with that same account — connectors flow into this agent automatically.</li>
+      <li>Then ask here: <em>“What sources are connected?”</em> — the agent can check its own tools.</li>
+    </ol>`;
+  const ext = connect.querySelector('.gs-ext') as HTMLElement;
+  ext.onclick = (e) => { e.preventDefault(); M.openExternal(ext.dataset.url || ''); };
+  wrap.appendChild(connect);
+
   const skip = el('button', 'gs-skip', 'Skip for now — show the dashboard');
   skip.onclick = () => { localStorage.setItem('memex-gs-skip:' + (state.vault?.path || ''), '1'); renderTab('dashboard'); };
   wrap.appendChild(skip);

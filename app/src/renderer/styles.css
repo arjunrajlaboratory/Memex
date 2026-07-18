@@ -430,3 +430,12 @@ body {
 .gs-how-item .d { font-size: 12.5px; line-height: 1.55; color: var(--ink-faint); }
 .gs-skip { display: block; margin: 0 auto; background: none; border: none; color: var(--ink-faint); font-size: 12.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; font-family: var(--font-ui); }
 .gs-skip:hover { color: var(--ink-dim); }
+
+.gs-connect { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; margin-bottom: 26px; }
+.gs-connect .t { font-size: 13px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 6px; }
+.gs-connect .d { font-size: 12.5px; line-height: 1.55; color: var(--ink-faint); margin-bottom: 10px; }
+.gs-connect ol { margin: 0; padding-left: 20px; }
+.gs-connect li { font-size: 12.5px; line-height: 1.7; color: var(--ink-dim); margin: 4px 0; }
+.gs-connect .dim { color: var(--ink-faint); }
+.gs-connect .mono { font-family: var(--font-mono); font-size: 11.5px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+.gs-connect a.gs-ext { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
