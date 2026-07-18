@@ -44,6 +44,7 @@ const api: MemexApi = {
   onAgentEvent: (cb) => on('agent:event', cb),
   onFsChanged: (cb) => on('fs:changed', cb),
   onSetupProgress: (cb) => on('setup:progress', cb),
+  onIconDrop: (cb) => on('inbox:iconDrop', cb),
 };
 
 contextBridge.exposeInMainWorld('memex', api);

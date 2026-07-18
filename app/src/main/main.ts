@@ -27,6 +27,9 @@ let currentVault: string | null = null;
 let session: AgentSession | null = null;
 let watchers: fs.FSWatcher[] = [];
 let mdRenderer: ((md: string) => string) | null = null;
+// Files dropped on the Dock icon (mac) or taskbar/exe (Windows) before any vault is open;
+// flushed into the Inbox once vault:open succeeds.
+let pendingDrops: string[] = [];
 
 // Artifacts are served from their own secure origin so their inline scripts run
 // (a file:// page's CSP is inherited by srcdoc/blob children; a distinct scheme is not).
@@ -233,6 +236,50 @@ function startWatchers(vault: string): void {
   }
 }
 
+// ---------- inbox drop (drag & drop zone + files dropped on the app icon) ----------
+// Shared by ipcMain 'inbox:drop' and handleIconDrop below — behavior must stay identical
+// for both entry points: dedup suffix on name collision, cpSync for dirs, silent per-file catch.
+function copyIntoInbox(paths: string[]): DropResult {
+  if (!currentVault) return { ok: false };
+  const inbox = path.join(currentVault, 'Inbox');
+  const copied: string[] = [];
+  for (const src of paths || []) {
+    try {
+      const base = path.basename(src);
+      let dest = path.join(inbox, base);
+      let i = 1;
+      while (fs.existsSync(dest)) {
+        const ext = path.extname(base); const stem = base.slice(0, base.length - ext.length);
+        dest = path.join(inbox, `${stem}-${i}${ext}`); i++;
+      }
+      const stat = fs.statSync(src);
+      if (stat.isDirectory()) fs.cpSync(src, dest, { recursive: true });
+      else fs.copyFileSync(src, dest);
+      copied.push(path.basename(dest));
+    } catch (_) {}
+  }
+  return { ok: true, copied };
+}
+
+// Files dropped on the Dock icon / taskbar-exe / passed on argv. No vault yet -> queue for
+// vault:open to flush; otherwise copy now and tell the renderer.
+function handleIconDrop(paths: string[]): void {
+  if (!paths || !paths.length) return;
+  if (!currentVault) { pendingDrops.push(...paths); return; }
+  const res = copyIntoInbox(paths);
+  emit('inbox:iconDrop', { copied: res.copied || [] });
+}
+
+// Recovers files dropped on the taskbar/exe (Windows 'second-instance' argv) or passed at
+// launch, without mistaking the dev '.' app-path argument (or the app dir itself) for a drop.
+function argvFiles(argv: string[]): string[] {
+  const appPath = app.getAppPath();
+  return (argv || []).slice(1).filter((a) => {
+    if (!a || a.startsWith('-') || a === '.' || a === appPath) return false;
+    return path.isAbsolute(a) && fs.existsSync(a);
+  });
+}
+
 // ---------- agent session ----------
 async function startSession(vault: string): Promise<void> {
   if (session) { try { await session.stop(); } catch (_) {} session = null; }
@@ -282,10 +329,16 @@ async function resolveArtifact(vault: string, evt: Extract<AgentEvent, { kind: '
 // ---------- vault creation (wraps python memex-init) ----------
 function createVault({ target, answers, packs }: { target: string; answers: Record<string, string>; packs: string }): Promise<CreateVaultResult> {
   return new Promise((resolve) => {
+    const initScript = path.join(ENGINE_ROOT, 'tools', 'memex_init.py');
+    // Packaged apps ship dist/ inside an asar — the engine's tools/ dir isn't there.
+    if (!fs.existsSync(initScript)) {
+      resolve({ ok: false, code: -1, output: 'Vault creation requires the Memex engine repo (tools/memex_init.py not found). Clone github.com/arjunrajlaboratory/Memex and run the app from app/ inside it, or open an existing vault.' });
+      return;
+    }
     const tmp = path.join(os.tmpdir(), `memex-answers-${Date.now()}.json`);
     fs.writeFileSync(tmp, JSON.stringify(answers, null, 2));
     const args = [
-      path.join(ENGINE_ROOT, 'tools', 'memex_init.py'),
+      initScript,
       '--eng', ENGINE_ROOT,
       '--target', target,
       '--packs', packs || 'core',
@@ -344,6 +397,11 @@ function registerIpc(): void {
     rememberVault(full);
     startWatchers(full);
     try { await startSession(full); } catch (e) { emit('agent:event', { kind: 'error', message: String((e as Error)?.message || e) }); }
+    if (pendingDrops.length) {
+      const drops = pendingDrops; pendingDrops = [];
+      const res = copyIntoInbox(drops);
+      emit('inbox:iconDrop', { copied: res.copied || [] });
+    }
     return { ok: true, summary: vaultLib.summary(full) };
   });
 
@@ -470,27 +528,7 @@ function registerIpc(): void {
     return { ok: true, rel: path.relative(currentVault, file) };
   });
 
-  ipcMain.handle('inbox:drop', async (_e, paths: string[]) => {
-    if (!currentVault) return { ok: false };
-    const inbox = path.join(currentVault, 'Inbox');
-    const copied: string[] = [];
-    for (const src of paths || []) {
-      try {
-        const base = path.basename(src);
-        let dest = path.join(inbox, base);
-        let i = 1;
-        while (fs.existsSync(dest)) {
-          const ext = path.extname(base); const stem = base.slice(0, base.length - ext.length);
-          dest = path.join(inbox, `${stem}-${i}${ext}`); i++;
-        }
-        const stat = fs.statSync(src);
-        if (stat.isDirectory()) fs.cpSync(src, dest, { recursive: true });
-        else fs.copyFileSync(src, dest);
-        copied.push(path.basename(dest));
-      } catch (_) {}
-    }
-    return { ok: true, copied };
-  });
+  ipcMain.handle('inbox:drop', async (_e, paths: string[]) => copyIntoInbox(paths));
 
   ipcMain.handle('shell:open', async (_e, target: string) => {
     if (/^https?:/.test(target)) return shell.openExternal(target);
@@ -504,25 +542,42 @@ function registerIpc(): void {
   });
 }
 
-app.whenReady().then(() => {
-  protocol.handle('artifact', (req) => {
-    const id = new URL(req.url).pathname.replace(/^\//, '');
-    const html = artifactStore.get(id);
-    if (html == null) {
-      // Evicted from the cache (panel history can outlive the 200-entry store) —
-      // show a themed explanation instead of a bare "Not found".
-      const gone = '<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font-family:ui-sans-serif,system-ui,sans-serif;background:#1b1810;color:#bcb096"><div style="text-align:center;max-width:420px;padding:24px"><div style="font-size:36px;color:#e0a54a">✦</div><h2 style="color:#efe7d4;font-weight:600;margin:12px 0 8px">This artifact has expired</h2><p style="line-height:1.6;font-size:14px">Older artifacts are dropped from the cache as new ones arrive. Ask the agent to show it again, or open the source file from the Outbox.</p></div></body>';
-      return new Response(gone, { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } });
-    }
-    // LRU refresh on view so revisited artifacts aren't the first evicted
-    artifactStore.delete(id);
-    artifactStore.set(id, html);
-    return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
-  });
-  registerIpc();
-  createWindow();
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-});
+// macOS: dropping a file on the Dock icon fires 'open-file', even when it launches the app —
+// must be registered before whenReady to catch launch-time drops.
+app.on('open-file', (e, p) => { e.preventDefault(); handleIconDrop([p]); });
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', async () => { stopWatchers(); if (session) { try { await session.stop(); } catch (_) {} } });
+// Windows/Linux: a file dropped on the taskbar icon/exe launches a *second* process; forward
+// its argv to the running instance instead of opening a second window.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_e, argv) => {
+    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+    handleIconDrop(argvFiles(argv));
+  });
+
+  app.whenReady().then(() => {
+    protocol.handle('artifact', (req) => {
+      const id = new URL(req.url).pathname.replace(/^\//, '');
+      const html = artifactStore.get(id);
+      if (html == null) {
+        // Evicted from the cache (panel history can outlive the 200-entry store) —
+        // show a themed explanation instead of a bare "Not found".
+        const gone = '<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font-family:ui-sans-serif,system-ui,sans-serif;background:#1b1810;color:#bcb096"><div style="text-align:center;max-width:420px;padding:24px"><div style="font-size:36px;color:#e0a54a">✦</div><h2 style="color:#efe7d4;font-weight:600;margin:12px 0 8px">This artifact has expired</h2><p style="line-height:1.6;font-size:14px">Older artifacts are dropped from the cache as new ones arrive. Ask the agent to show it again, or open the source file from the Outbox.</p></div></body>';
+        return new Response(gone, { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } });
+      }
+      // LRU refresh on view so revisited artifacts aren't the first evicted
+      artifactStore.delete(id);
+      artifactStore.set(id, html);
+      return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    });
+    registerIpc();
+    createWindow();
+    handleIconDrop(argvFiles(process.argv));
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  });
+
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+  app.on('before-quit', async () => { stopWatchers(); if (session) { try { await session.stop(); } catch (_) {} } });
+}

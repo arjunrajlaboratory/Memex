@@ -150,6 +150,7 @@ interface MemexApi {
   onAgentEvent(cb: (evt: AgentEvent) => void): () => void;
   onFsChanged(cb: (evt: { area: string }) => void): () => void;
   onSetupProgress(cb: (evt: { line: string }) => void): () => void;
+  onIconDrop(cb: (evt: { copied: string[] }) => void): () => void;
 }
 
 // Electron's <webview> from the renderer's point of view (just what we use).

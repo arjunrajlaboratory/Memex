@@ -861,6 +861,13 @@ async function handleDrop(e: DragEvent): Promise<void> {
   }
 }
 
+// files dropped on the app's Dock/taskbar icon land here instead of the drop zone
+M.onIconDrop(({ copied }) => {
+  flashChat(`Dropped ${copied.length} file(s) into the inbox from the app icon. Say “triage the inbox” when ready.`);
+  if (state.tab === 'inbox') renderTab('inbox');
+  refreshSummary();
+});
+
 // ============================================================ FS WATCH
 let fsTimer: ReturnType<typeof setTimeout> | null = null;
 M.onFsChanged(({ area }) => {
