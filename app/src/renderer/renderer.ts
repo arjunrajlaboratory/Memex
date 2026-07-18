@@ -875,11 +875,12 @@ M.onFsChanged(({ area }) => {
       renderTab(state.tab);   // the active tab's own definition may have changed
       return;
     }
-    const map: Record<string, string> = { inbox: 'inbox', outputs: 'outbox', tasks: 'tasks', atlas: state.tab, briefings: 'dashboard' };
     const cdef = state.customTabs.find((t) => t.id === state.tab);
     // web tabs don't show vault data — re-rendering would reload the embedded page
-    const isDataCustom = !!cdef && cdef.kind !== 'web';
-    if (isDataCustom || state.tab === map[area] || state.tab === 'dashboard') renderTab(state.tab);
+    // (the map's atlas entry matches ANY active tab, so bail out before it)
+    if (cdef && cdef.kind === 'web') return;
+    const map: Record<string, string> = { inbox: 'inbox', outputs: 'outbox', tasks: 'tasks', atlas: state.tab, briefings: 'dashboard' };
+    if (cdef || state.tab === map[area] || state.tab === 'dashboard') renderTab(state.tab);
   }, 200);
 });
 
