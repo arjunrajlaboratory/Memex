@@ -396,3 +396,8 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 
 .spinner-lg { width: 22px; height: 22px; border: 2.5px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+
+/* inline quick-note input in the inbox dropzone (window.prompt is unavailable in Electron) */
+.qn-form { display: flex; gap: 8px; margin-top: 12px; justify-content: center; align-items: center; }
+.qn-input { flex: 0 1 420px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; color: var(--ink); font-family: var(--font-ui); font-size: 13px; }
+.qn-input:focus { outline: none; border-color: var(--accent); }

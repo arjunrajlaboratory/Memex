@@ -588,9 +588,35 @@ async function renderInbox(body: HTMLElement): Promise<void> {
   body.appendChild(rows);
 }
 
-async function quickNote(): Promise<void> {
-  const text = window.prompt('Quick note to drop in the inbox:');
-  if (text && text.trim()) { await M.addInboxNote(text.trim()); if (state.tab === 'inbox') renderTab('inbox'); refreshSummary(); }
+function quickNote(): void {
+  // window.prompt() is not implemented in Electron — use an inline input in the dropzone.
+  const dz = document.querySelector('.dropzone');
+  if (!dz || dz.querySelector('.qn-form')) return;
+  const form = el('div', 'qn-form');
+  const input = document.createElement('input');
+  input.type = 'text'; input.placeholder = 'Quick note… Enter to add, Esc to cancel';
+  input.className = 'qn-input';
+  const save = el('button', 'btn primary mini', 'Add');
+  const cancel = el('button', 'btn mini', 'Cancel');
+  form.append(input, save, cancel);
+  form.onclick = (e) => e.stopPropagation();   // the dropzone itself opens the file picker on click
+  const done = () => form.remove();
+  const submit = async () => {
+    const text = input.value.trim();
+    done();
+    if (!text) return;
+    await M.addInboxNote(text);
+    if (state.tab === 'inbox') renderTab('inbox');
+    refreshSummary();
+  };
+  save.onclick = submit;
+  cancel.onclick = done;
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    else if (e.key === 'Escape') { e.stopPropagation(); done(); }
+  };
+  dz.appendChild(form);
+  input.focus();
 }
 
 async function pickFilesToInbox(): Promise<void> {
