@@ -352,8 +352,15 @@ function registerIpc() {
       const raw = fs.readFileSync(path.join(currentVault, '_config', 'desktop-tabs.json'), 'utf8');
       const cfg = JSON.parse(raw);
       if (Array.isArray(cfg.tabs)) {
+        const seen = new Set();
         out.tabs = cfg.tabs
-          .filter((t) => t && t.id && t.label && !builtins.has(String(t.id).toLowerCase()))
+          .map((t) => {
+            if (!t || !t.label) return null;
+            // no id: derive one from the label rather than silently dropping the tab
+            const id = String(t.id || String(t.label).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, ''));
+            return id ? { ...t, id } : null;
+          })
+          .filter((t) => t && !builtins.has(t.id.toLowerCase()) && !seen.has(t.id) && seen.add(t.id))
           .map((t) => ({
             id: String(t.id),
             label: String(t.label),

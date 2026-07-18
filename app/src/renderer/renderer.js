@@ -108,7 +108,11 @@ async function loadAppConfig() {
   }
 }
 
-$('vaultSwitch').onclick = () => { $('onboard').style.display = 'grid'; initOnboarding(); };
+$('vaultSwitch').onclick = () => { $('onboard').classList.toggle('dismissible', !!state.vault); $('onboard').style.display = 'grid'; initOnboarding(); };
+// The switcher overlays a working vault — always let the user back out without re-opening.
+function closeOnboard() { if (state.vault) $('onboard').style.display = 'none'; }
+$('onboardClose').onclick = closeOnboard;
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOnboard(); });
 
 function applySummary(s) {
   const c = s.counts;
@@ -618,9 +622,17 @@ function renderWebTab(body, def) {
   const wv = document.createElement('webview');
   wv.setAttribute('src', def.url);
   wv.setAttribute('allowpopups', '');
-  wv.style.cssText = 'width:100%;height:100%;flex:1;border:none;background:#fff;';
-  reload.onclick = () => { try { wv.reload(); } catch (_) { wv.src = def.url; } };
+  wv.style.cssText = 'width:100%;height:100%;flex:1;border:none;background:transparent;';
+  const err = el('div', 'empty-note');
+  err.style.display = 'none';
+  wv.addEventListener('did-fail-load', (e) => {
+    if (e.errorCode === -3 || !e.isMainFrame) return;   // -3 = aborted (e.g. our own reload)
+    err.innerHTML = `<span class="big">Can’t reach this page</span>${esc(def.url)} — ${esc(e.errorDescription || 'failed to load')}. Check that the server is running, then hit Reload.`;
+    wv.style.display = 'none'; err.style.display = '';
+  });
+  reload.onclick = () => { err.style.display = 'none'; wv.style.display = ''; try { wv.reload(); } catch (_) { wv.src = def.url; } };
   abody.appendChild(wv);
+  abody.appendChild(err);
   wrap.appendChild(abody);
   body.appendChild(wrap);
 }
@@ -704,6 +716,7 @@ function renderArtifact() {
 async function openNote(rel, title) {
   const f = await M.readNote(rel);
   if (!f) { flash('Could not read ' + rel); return; }
+  if (!title) title = rel.split('/').pop().replace(/\.[^.]+$/, '');
   let art;
   if (f.kind === 'html') art = { title: title || rel, kind: 'html', url: f.url, rel };
   else if (f.kind === 'image') art = { title: title || rel, kind: 'image', dataUri: f.dataUri, rel };
@@ -740,7 +753,12 @@ M.onFsChanged(({ area }) => {
   clearTimeout(fsTimer);
   fsTimer = setTimeout(async () => {
     refreshSummary();
-    if (area === 'config') await loadAppConfig();
+    if (area === 'config') {
+      await loadAppConfig();
+      // rebuilding the tab bar wipes the active class — and the active tab itself may be gone
+      if (!document.querySelector(`.tab[data-tab="${CSS.escape(state.tab)}"]`)) return switchTab('dashboard');
+      setActiveTab(state.tab);
+    }
     const map = { inbox: 'inbox', outputs: 'outbox', tasks: 'tasks', atlas: state.tab, briefings: 'dashboard' };
     const isCustom = state.customTabs.some((t) => t.id === state.tab);
     if (isCustom || state.tab === map[area] || state.tab === 'dashboard') renderTab(state.tab);

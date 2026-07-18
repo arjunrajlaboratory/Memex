@@ -239,7 +239,7 @@ body {
 .composer-foot { margin-top: 8px; font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono); min-height: 14px; }
 
 /* ======================= PANEL ======================= */
-.panel { display: flex; flex-direction: column; min-height: 0; background: var(--bg-2); }
+.panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg-2); }
 .panel-head { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 .panel-nav { display: flex; align-items: center; gap: 2px; padding: 4px 6px 0 14px; }
 .nav-btn { width: 28px; height: 28px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--ink-dim); display: grid; place-items: center; cursor: pointer; transition: background .12s, color .12s, border-color .12s; }
@@ -384,6 +384,10 @@ body {
   background: #000; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; max-height: 220px; overflow: auto; white-space: pre-wrap;
 }
 .onboard-note { text-align: center; font-size: 12px; color: var(--ink-faint); margin-top: 28px; }
+/* shown only when a vault is already open (the overlay is then a switcher, not first-run setup) */
+.onboard-close { position: absolute; top: 18px; right: 22px; width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--ink-dim); font-size: 20px; line-height: 1; cursor: pointer; display: none; place-items: center; transition: color .12s, border-color .12s; }
+.onboard.dismissible .onboard-close { display: grid; }
+.onboard-close:hover { color: var(--ink); border-color: var(--line-strong); }
 
 /* scrollbars */
 ::-webkit-scrollbar { width: 11px; height: 11px; }
