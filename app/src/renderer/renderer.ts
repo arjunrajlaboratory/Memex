@@ -108,6 +108,7 @@ async function openVault(p: string): Promise<void> {
   applySummary(res.summary);
   await loadAppConfig();
   state.history = []; state.histPos = -1;
+  liveQuickNote = null;   // a half-typed note belongs to the previous vault
   switchTab('dashboard');
 }
 
@@ -304,7 +305,7 @@ M.onAgentEvent((evt) => {
         $('statusLine').textContent = `Done · ${tok.toLocaleString()} tok${evt.costUsd ? ' · $' + evt.costUsd.toFixed(3) : ''}`;
       }
       break;
-    case 'error': setBusy(false); flashChat('⚠ ' + evt.message); break;
+    case 'error': setBusy(false); clearThinking(); flashChat('⚠ ' + evt.message); break;
   }
 });
 
