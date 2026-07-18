@@ -1,14 +1,43 @@
-'use strict';
-const M = window.memex;
-const $ = (id) => document.getElementById(id);
-const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// Renderer for Memex Desktop. Compiled as a plain (non-module) script — no
+// import/export statements — so index.html can load it with a bare <script> tag.
+// Shared types live in src/shared/types.d.ts as ambient globals.
 
-const state = {
+const M = window.memex;
+const $ = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
+const el = (tag: string, cls?: string, html?: string): HTMLElement => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html != null) e.innerHTML = html;
+  return e;
+};
+const esc = (s: unknown): string => String(s == null ? '' : s)
+  .replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
+
+interface ActiveAssistant { bubble: HTMLElement; streamed: boolean; raw: string; }
+
+type HistoryEntry =
+  | { k: 'tab'; tab: string }
+  | { k: 'note'; rel: string; title?: string; art: ArtifactView }
+  | { k: 'art'; art: ArtifactView };
+
+interface UIState {
+  vault: VaultSummary | null;
+  tab: string;
+  activeAssistant: ActiveAssistant | null;   // streaming bubble in progress
+  toolCards: Map<string, HTMLElement>;       // tool_use id -> card
+  busy: boolean;
+  hasArtifact: boolean;
+  history: HistoryEntry[];
+  histPos: number;
+  customTabs: TabDef[];
+  customChips: ChipDef[];
+}
+
+const state: UIState = {
   vault: null,
   tab: 'dashboard',
-  activeAssistant: null,   // { bubble, streamed:bool }
-  toolCards: new Map(),    // id -> el
+  activeAssistant: null,
+  toolCards: new Map(),
   busy: false,
   hasArtifact: false,
   history: [],
@@ -18,14 +47,14 @@ const state = {
 };
 
 // ============================================================ ONBOARDING
-async function initOnboarding() {
-  const { recent, last } = await M.recentVaults();
+async function initOnboarding(): Promise<void> {
+  const { recent } = await M.recentVaults();
   const list = $('recentList');
   list.innerHTML = '';
   if (!recent.length) list.appendChild(el('div', 'ocard-sub', 'No recent vaults yet.'));
   for (const p of recent) {
     const r = el('div', 'recent');
-    const name = p.split('/').pop();
+    const name = p.split('/').pop() || p;
     r.appendChild(el('div', 'file-ic', '◈'));
     const main = el('div', 'r-main');
     main.appendChild(el('div', 'rn', esc(name)));
@@ -34,7 +63,6 @@ async function initOnboarding() {
     r.onclick = () => openVault(p);
     list.appendChild(r);
   }
-  if (last) { /* could auto-open; keep manual for clarity */ }
 }
 
 $('browseVault').onclick = async () => {
@@ -42,20 +70,20 @@ $('browseVault').onclick = async () => {
   if (!p) return;
   const det = await M.detectVault(p);
   if (det.isVault) openVault(p);
-  else { $('f_path').value = p; flash('That folder isn\'t a vault yet — create one here, or pick a vault folder.'); }
+  else { ($('f_path') as HTMLInputElement).value = p; flash('That folder isn\'t a vault yet — create one here, or pick a vault folder.'); }
 };
 
-$('pickPath').onclick = async () => { const p = await M.pickDirectory(); if (p) $('f_path').value = p; };
+$('pickPath').onclick = async () => { const p = await M.pickDirectory(); if (p) ($('f_path') as HTMLInputElement).value = p; };
 
-$('setupForm').onsubmit = async (e) => {
+($('setupForm') as HTMLFormElement).onsubmit = async (e: SubmitEvent) => {
   e.preventDefault();
-  const name = $('f_name').value.trim();
-  const email = $('f_email').value.trim();
-  const tz = $('f_tz').value.trim() || 'America/New_York';
-  const target = $('f_path').value.trim();   // ~ is expanded in the main process
-  const packs = document.querySelector('input[name=pack]:checked').value;
+  const name = ($('f_name') as HTMLInputElement).value.trim();
+  const email = ($('f_email') as HTMLInputElement).value.trim();
+  const tz = ($('f_tz') as HTMLInputElement).value.trim() || 'America/New_York';
+  const target = ($('f_path') as HTMLInputElement).value.trim();   // ~ is expanded in the main process
+  const packs = (document.querySelector('input[name=pack]:checked') as HTMLInputElement).value;
   if (!name || !email || !target) return;
-  const btn = $('createBtn'); btn.disabled = true; btn.textContent = 'Creating…';
+  const btn = $('createBtn') as HTMLButtonElement; btn.disabled = true; btn.textContent = 'Creating…';
   const log = $('setupLog'); log.style.display = 'block'; log.textContent = '';
   const answers = {
     OWNER_NAME: name, OWNER_PRIMARY_EMAIL: email, OWNER_FORWARDING_EMAIL: '',
@@ -69,9 +97,9 @@ $('setupForm').onsubmit = async (e) => {
 M.onSetupProgress(({ line }) => { const log = $('setupLog'); log.textContent += line; log.scrollTop = log.scrollHeight; });
 
 // ============================================================ OPEN VAULT
-async function openVault(p) {
+async function openVault(p: string): Promise<void> {
   const res = await M.openVault(p);
-  if (!res.ok) { flash(res.error || 'Could not open vault'); return; }
+  if (!res.ok || !res.summary) { flash(res.error || 'Could not open vault'); return; }
   state.vault = res.summary;
   $('onboard').style.display = 'none';
   $('workspace').style.display = 'grid';
@@ -83,7 +111,7 @@ async function openVault(p) {
   switchTab('dashboard');
 }
 
-async function loadAppConfig() {
+async function loadAppConfig(): Promise<void> {
   const cfg = (await M.appConfig()) || { tabs: [], chips: [] };
   state.customTabs = cfg.tabs || [];
   state.customChips = cfg.chips || [];
@@ -110,33 +138,33 @@ async function loadAppConfig() {
 
 $('vaultSwitch').onclick = () => { $('onboard').classList.toggle('dismissible', !!state.vault); $('onboard').style.display = 'grid'; initOnboarding(); };
 // The switcher overlays a working vault — always let the user back out without re-opening.
-function closeOnboard() { if (state.vault) $('onboard').style.display = 'none'; }
+function closeOnboard(): void { if (state.vault) $('onboard').style.display = 'none'; }
 $('onboardClose').onclick = closeOnboard;
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOnboard(); });
 
-function applySummary(s) {
+function applySummary(s: VaultSummary): void {
   const c = s.counts;
-  $('cntTasks').textContent = c.openTasks || '';
-  $('cntProjects').textContent = c.projects || '';
-  $('cntIdeas').textContent = c.ideas || '';
-  $('cntPeople').textContent = c.people || '';
-  $('cntInbox').textContent = c.inbox || '';
-  $('cntOutputs').textContent = c.outputs || '';
+  $('cntTasks').textContent = c.openTasks ? String(c.openTasks) : '';
+  $('cntProjects').textContent = c.projects ? String(c.projects) : '';
+  $('cntIdeas').textContent = c.ideas ? String(c.ideas) : '';
+  $('cntPeople').textContent = c.people ? String(c.people) : '';
+  $('cntInbox').textContent = c.inbox ? String(c.inbox) : '';
+  $('cntOutputs').textContent = c.outputs ? String(c.outputs) : '';
 }
 
-async function refreshSummary() {
+async function refreshSummary(): Promise<void> {
   const s = await M.data('summary');
   if (s) { state.vault = s; applySummary(s); }
 }
 
 // ============================================================ CHAT
 const chatScroll = $('chatScroll');
-const composer = $('composerInput');
+const composer = $('composerInput') as HTMLTextAreaElement;
 
-function scrollChat() { chatScroll.scrollTop = chatScroll.scrollHeight; }
+function scrollChat(): void { chatScroll.scrollTop = chatScroll.scrollHeight; }
 
-function addUserMsg(text) {
-  $('chatEmpty')?.remove();
+function addUserMsg(text: string): void {
+  document.getElementById('chatEmpty')?.remove();
   const m = el('div', 'msg user');
   m.appendChild(el('div', 'msg-role', 'You'));
   const b = el('div', 'bubble'); b.textContent = text;
@@ -145,7 +173,7 @@ function addUserMsg(text) {
   scrollChat();
 }
 
-function ensureAssistantBubble() {
+function ensureAssistantBubble(): ActiveAssistant {
   if (state.activeAssistant) return state.activeAssistant;
   const m = el('div', 'msg assistant');
   m.appendChild(el('div', 'msg-role', 'Memex'));
@@ -157,7 +185,7 @@ function ensureAssistantBubble() {
   return state.activeAssistant;
 }
 
-function closeAssistantBubble() {
+function closeAssistantBubble(): void {
   if (state.activeAssistant) {
     const cur = state.activeAssistant.bubble.querySelector('.cursor');
     if (cur) cur.remove();
@@ -165,7 +193,7 @@ function closeAssistantBubble() {
   state.activeAssistant = null;
 }
 
-function onAssistantDelta(text) {
+function onAssistantDelta(text: string): void {
   const a = ensureAssistantBubble();
   a.streamed = true; a.raw += text;
   let live = a.bubble.querySelector('.live-text');
@@ -174,7 +202,7 @@ function onAssistantDelta(text) {
   scrollChat();
 }
 
-function onAssistantText(text, html) {
+function onAssistantText(text: string, html: string): void {
   const a = ensureAssistantBubble();
   a.bubble.innerHTML = html;          // authoritative, rendered markdown
   a.streamed = true;
@@ -182,30 +210,31 @@ function onAssistantText(text, html) {
   scrollChat();
 }
 
-const TOOL_LABELS = {
+const TOOL_LABELS: Record<string, string> = {
   Read: 'Reading', Write: 'Writing', Edit: 'Editing', Bash: 'Running',
   Glob: 'Finding files', Grep: 'Searching', WebFetch: 'Fetching', WebSearch: 'Searching web',
   TodoWrite: 'Planning', Task: 'Delegating', NotebookEdit: 'Editing notebook',
 };
-function toolLabel(name) {
+function toolLabel(name: string): string {
   if (name.startsWith('mcp__ui__show_artifact')) return 'Showing artifact';
   if (name.startsWith('mcp__')) return name.replace('mcp__', '').replace(/__/g, ' · ');
   return TOOL_LABELS[name] || name;
 }
-function toolDetail(name, input) {
+function toolDetail(name: string, input?: Record<string, unknown>): string {
   if (!input) return '';
-  if (input.file_path) return input.file_path.split('/').slice(-2).join('/');
-  if (input.path) return input.path;
-  if (input.command) return input.command;
-  if (input.pattern) return input.pattern;
-  if (input.query) return input.query;
-  if (input.description) return input.description;
-  if (input.title) return input.title;
-  if (input.prompt) return String(input.prompt).slice(0, 80);
+  const s = (k: string) => (input[k] != null ? String(input[k]) : '');
+  if (input.file_path) return s('file_path').split('/').slice(-2).join('/');
+  if (input.path) return s('path');
+  if (input.command) return s('command');
+  if (input.pattern) return s('pattern');
+  if (input.query) return s('query');
+  if (input.description) return s('description');
+  if (input.title) return s('title');
+  if (input.prompt) return s('prompt').slice(0, 80);
   return '';
 }
 
-function addToolCard(id, name, input) {
+function addToolCard(id: string | undefined, name: string, input?: Record<string, unknown>): HTMLElement {
   closeAssistantBubble();
   const card = el('div', 'tool');
   card.innerHTML = `
@@ -217,24 +246,24 @@ function addToolCard(id, name, input) {
       <span class="tool-check">✓</span>
     </div>
     <div class="tool-body"><pre></pre></div>`;
-  card.querySelector('.tool-head').onclick = () => card.classList.toggle('open');
+  (card.querySelector('.tool-head') as HTMLElement).onclick = () => card.classList.toggle('open');
   chatScroll.appendChild(card);
   if (id) state.toolCards.set(id, card);
   scrollChat();
   return card;
 }
 
-function completeToolCard(id, text, isError) {
-  const card = id && state.toolCards.get(id);
+function completeToolCard(id: string | undefined, text?: string, isError?: boolean): void {
+  const card = id ? state.toolCards.get(id) : undefined;
   if (!card) return;
   card.classList.add('done');
   if (isError) card.classList.add('err');
   const pre = card.querySelector('.tool-body pre');
   if (pre && text) pre.textContent = text.slice(0, 4000);
-  else card.querySelector('.tool-body').style.display = 'none';
+  else (card.querySelector('.tool-body') as HTMLElement).style.display = 'none';
 }
 
-function setBusy(b) {
+function setBusy(b: boolean): void {
   state.busy = b;
   $('sendBtn').style.display = b ? 'none' : 'grid';
   $('stopBtn').style.display = b ? 'grid' : 'none';
@@ -248,11 +277,11 @@ M.onAgentEvent((evt) => {
   switch (evt.kind) {
     case 'session': $('modelTag').textContent = evt.model ? evt.model.replace('claude-', '') : ''; break;
     case 'turn_start': setBusy(true); break;
-    case 'assistant_delta': onAssistantDelta(evt.text); break;
-    case 'assistant_text': onAssistantText(evt.text, evt.html); break;
-    case 'tool_use': addToolCard(evt.id, evt.name, evt.input); break;
+    case 'assistant_delta': onAssistantDelta(evt.text || ''); break;
+    case 'assistant_text': onAssistantText(evt.text || '', evt.html || ''); break;
+    case 'tool_use': addToolCard(evt.id, evt.name || '', evt.input); break;
     case 'tool_result': completeToolCard(evt.id, evt.text, evt.isError); break;
-    case 'artifact': showArtifact(evt.artifact); break;
+    case 'artifact': if (evt.artifact) showArtifact(evt.artifact); break;
     case 'result':
       setBusy(false); closeAssistantBubble();
       if (evt.subtype && evt.subtype !== 'success') $('statusLine').textContent = `Ended: ${evt.subtype}`;
@@ -261,19 +290,19 @@ M.onAgentEvent((evt) => {
         $('statusLine').textContent = `Done · ${tok.toLocaleString()} tok${evt.costUsd ? ' · $' + evt.costUsd.toFixed(3) : ''}`;
       }
       break;
-    case 'error': setBusy(false); flashChat('⚠ ' + evt.message); break;
+    case 'error': setBusy(false); flashChat('⚠ ' + (evt.message || 'Unknown error')); break;
   }
 });
 
-function flashChat(text) {
-  $('chatEmpty')?.remove();
+function flashChat(text: string): void {
+  document.getElementById('chatEmpty')?.remove();
   const m = el('div', 'msg assistant');
   m.appendChild(el('div', 'msg-role', 'System'));
   const b = el('div', 'bubble'); b.style.color = 'var(--rose)'; b.textContent = text;
   m.appendChild(b); chatScroll.appendChild(m); scrollChat();
 }
 
-async function sendMessage(text) {
+async function sendMessage(text?: string): Promise<void> {
   text = (text || composer.value).trim();
   if (!text || !state.vault) return;
   addUserMsg(text);
@@ -287,30 +316,34 @@ $('stopBtn').onclick = () => M.interrupt();
 composer.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
-function autosize() { composer.style.height = 'auto'; composer.style.height = Math.min(composer.scrollHeight, 180) + 'px'; }
+function autosize(): void { composer.style.height = 'auto'; composer.style.height = Math.min(composer.scrollHeight, 180) + 'px'; }
 composer.addEventListener('input', autosize);
 
 $('chips').addEventListener('click', (e) => {
-  const chip = e.target.closest('.chip'); if (!chip) return;
+  const chip = (e.target as Element).closest('.chip') as HTMLElement | null; if (!chip) return;
   sendMessage(chip.dataset.prompt);
 });
 
 // ============================================================ TABS + DATA + HISTORY
-$('tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t) switchTab(t.dataset.tab); });
+$('tabs').addEventListener('click', (e) => {
+  const t = (e.target as Element).closest('.tab') as HTMLElement | null;
+  if (t && t.dataset.tab) switchTab(t.dataset.tab);
+});
 $('navBack').onclick = goBack;
 $('navFwd').onclick = goForward;
 
-function setActiveTab(tab) {
+function setActiveTab(tab: string): void {
   state.tab = tab;
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll<HTMLElement>('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
 }
 
 // The right panel keeps a back/forward history over what it has shown:
 // data tabs, opened notes, and agent-pushed artifacts.
-function navigate(entry) {
+function navigate(entry: HistoryEntry): void {
   const cur = state.history[state.histPos];
-  const dup = cur && cur.k === entry.k &&
-    ((entry.k === 'tab' && cur.tab === entry.tab) || (entry.k === 'note' && cur.rel === entry.rel));
+  const dup = !!cur && cur.k === entry.k &&
+    ((entry.k === 'tab' && (cur as { tab?: string }).tab === entry.tab) ||
+     (entry.k === 'note' && (cur as { rel?: string }).rel === entry.rel));
   if (!dup) {
     if (state.histPos < state.history.length - 1) state.history = state.history.slice(0, state.histPos + 1);
     state.history.push(entry);
@@ -319,20 +352,20 @@ function navigate(entry) {
   renderEntry(entry);
   updateNav();
 }
-function renderEntry(entry) {
+function renderEntry(entry: HistoryEntry): void {
   if (entry.k === 'tab') { setActiveTab(entry.tab); renderTab(entry.tab); }
   else { displayArtifact(entry.art); }
 }
-function goBack() { if (state.histPos > 0) { state.histPos--; renderEntry(state.history[state.histPos]); updateNav(); } }
-function goForward() { if (state.histPos < state.history.length - 1) { state.histPos++; renderEntry(state.history[state.histPos]); updateNav(); } }
-function updateNav() {
-  $('navBack').disabled = state.histPos <= 0;
-  $('navFwd').disabled = state.histPos >= state.history.length - 1;
+function goBack(): void { if (state.histPos > 0) { state.histPos--; renderEntry(state.history[state.histPos]); updateNav(); } }
+function goForward(): void { if (state.histPos < state.history.length - 1) { state.histPos++; renderEntry(state.history[state.histPos]); updateNav(); } }
+function updateNav(): void {
+  ($('navBack') as HTMLButtonElement).disabled = state.histPos <= 0;
+  ($('navFwd') as HTMLButtonElement).disabled = state.histPos >= state.history.length - 1;
 }
 
-function switchTab(tab) { navigate({ k: 'tab', tab }); }
+function switchTab(tab: string): void { navigate({ k: 'tab', tab }); }
 
-async function renderTab(tab) {
+async function renderTab(tab: string): Promise<void> {
   const body = $('panelBody');
   if (tab === 'artifact') { renderArtifact(); return; }
   body.style.position = ''; body.innerHTML = '<div style="display:grid;place-items:center;padding:60px"><div class="spinner-lg"></div></div>';
@@ -346,31 +379,32 @@ async function renderTab(tab) {
     return renderCustomTab(body, cdef);
   }
   if (['tasks', 'projects', 'ideas', 'people'].includes(tab)) {
-    const data = await M.data(tab);
-    if (tab === 'tasks') return renderTasks(body, data);
-    if (tab === 'projects') return renderProjects(body, data);
-    if (tab === 'ideas') return renderIdeas(body, data);
-    if (tab === 'people') return renderPeople(body, data);
+    const data = await M.data(tab as DataKind);
+    if (tab === 'tasks') return renderTasks(body, data as TaskRow[]);
+    if (tab === 'projects') return renderProjects(body, data as ProjectRow[]);
+    if (tab === 'ideas') return renderIdeas(body, data as IdeaRow[]);
+    if (tab === 'people') return renderPeople(body, data as PersonRow[]);
   }
   // Unrecognized id (e.g. a custom tab removed from config but still in history).
   body.innerHTML = '<div class="empty-note"><span class="big">This view is no longer available</span>It may have been a custom tab that was removed. Pick another tab above.</div>';
 }
 
-const STATUS_COLORS = {
+const STATUS_COLORS: Record<string, string> = {
   in_progress: 'var(--accent)', next: 'var(--accent-2)', waiting: 'var(--rose)',
   needs_review: 'var(--rose)', backlog: 'var(--ink-faint)', scheduled: 'var(--ink-dim)',
   done: 'var(--ink-faint)', canceled: 'var(--ink-faint)', inbox: 'var(--ink-faint)',
 };
 
-async function renderDashboard(body) {
-  const [s, tasks, brief, outputs] = await Promise.all([
+async function renderDashboard(body: HTMLElement): Promise<void> {
+  const [s, , brief, outputs] = await Promise.all([
     M.data('summary'), M.data('tasks'), M.data('briefing'), M.data('outputs'),
   ]);
+  if (!s) return;
   state.vault = s; applySummary(s);
   body.innerHTML = '';
   const c = s.counts;
   const grid = el('div', 'dash-grid');
-  const stats = [
+  const stats: Array<[string, number, string, string, boolean]> = [
     ['openTasks', c.openTasks, 'Open tasks', 'tasks', true],
     ['projects', c.projects, 'Active projects', 'projects', false],
     ['ideas', c.ideas, 'Ideas', 'ideas', false],
@@ -403,7 +437,7 @@ async function renderDashboard(body) {
     body.appendChild(el('div', 'section-title', 'Latest briefing'));
     const card = el('div', 'brief-card');
     const note = await M.readNote(brief.rel);
-    card.innerHTML = `<div class="bubble">${note ? note.html : esc(brief.body)}</div>`;
+    card.innerHTML = `<div class="bubble">${note && note.html ? note.html : esc(brief.body)}</div>`;
     body.appendChild(card);
   } else {
     body.appendChild(el('div', 'section-title', 'Briefing'));
@@ -423,10 +457,15 @@ async function renderDashboard(body) {
   }
 }
 
-function metaRow(children) { const s = el('div', 'r-sub'); children.filter(Boolean).forEach((c) => s.appendChild(c)); return s; }
-function span(cls, txt) { return el('span', cls, esc(txt)); }
+type MaybeEl = HTMLElement | '' | 0 | false | null | undefined;
+function metaRow(children: MaybeEl[]): HTMLElement {
+  const s = el('div', 'r-sub');
+  children.filter((c): c is HTMLElement => !!c).forEach((c) => s.appendChild(c));
+  return s;
+}
+function span(cls: string, txt: string): HTMLElement { return el('span', cls, esc(txt)); }
 
-function renderList(body, items, emptyMsg, rowFn) {
+function renderList<T>(body: HTMLElement, items: T[] | null | undefined, emptyMsg: string, rowFn: (it: T) => HTMLElement): void {
   body.innerHTML = '';
   if (!items || !items.length) { body.innerHTML = `<div class="empty-note"><span class="big">Nothing here yet</span>${emptyMsg}</div>`; return; }
   const rows = el('div', 'rows');
@@ -434,15 +473,15 @@ function renderList(body, items, emptyMsg, rowFn) {
   body.appendChild(rows);
 }
 
-function taskRow(t) {
+function taskRow(t: TaskRow): HTMLElement {
   const r = el('div', 'row');
   r.appendChild(el('span', `prio ${t.priority}`, t.priority));
   const main = el('div', 'r-main');
   main.appendChild(el('div', 'r-title', esc(t.title)));
   main.appendChild(metaRow([
-    t.project && span('', '◆ ' + t.project),
-    t.due && span('mono', 'due ' + t.due),
-    t.effort && span('mono', t.effort),
+    t.project ? span('', '◆ ' + t.project) : '',
+    t.due ? span('mono', 'due ' + t.due) : '',
+    t.effort ? span('mono', t.effort) : '',
   ]));
   r.appendChild(main);
   r.appendChild(el('span', `pill s-${t.status}`, t.status.replace('_', ' ')));
@@ -450,14 +489,14 @@ function taskRow(t) {
   return r;
 }
 
-function projectRow(p) {
+function projectRow(p: ProjectRow): HTMLElement {
   const r = el('div', 'row');
   const main = el('div', 'r-main');
   main.appendChild(el('div', 'r-title', esc(p.title)));
   main.appendChild(metaRow([
-    p.area && span('', '▲ ' + p.area),
-    p.phase && span('mono', p.phase),
-    p.target_date && span('mono', '→ ' + p.target_date),
+    p.area ? span('', '▲ ' + p.area) : '',
+    p.phase ? span('mono', p.phase) : '',
+    p.target_date ? span('mono', '→ ' + p.target_date) : '',
   ]));
   r.appendChild(main);
   r.appendChild(el('span', `pill s-${p.status}`, p.status));
@@ -465,13 +504,13 @@ function projectRow(p) {
   return r;
 }
 
-function ideaRow(i) {
+function ideaRow(i: IdeaRow): HTMLElement {
   const r = el('div', 'row');
   const main = el('div', 'r-main');
   main.appendChild(el('div', 'r-title', esc(i.title)));
   main.appendChild(metaRow([
-    (i.tags && i.tags.length) && span('', i.tags.map((t) => '#' + t).join(' ')),
-    i.effort && span('mono', i.effort + ' effort'),
+    (i.tags && i.tags.length) ? span('', i.tags.map((t) => '#' + t).join(' ')) : '',
+    i.effort ? span('mono', i.effort + ' effort') : '',
   ]));
   r.appendChild(main);
   r.appendChild(el('span', `pill s-${i.status}`, i.status));
@@ -479,39 +518,42 @@ function ideaRow(i) {
   return r;
 }
 
-function peopleRow(p) {
+function peopleRow(p: PersonRow): HTMLElement {
   const r = el('div', 'row');
   const av = el('div', 'file-ic'); av.textContent = (p.title || '?').slice(0, 1); av.style.textTransform = 'none';
   r.appendChild(av);
   const main = el('div', 'r-main');
   main.appendChild(el('div', 'r-title', esc(p.title)));
-  main.appendChild(metaRow([p.role && span('', p.role), p.org && span('', p.org)]));
+  main.appendChild(metaRow([p.role ? span('', p.role) : '', p.org ? span('', p.org) : '']));
   r.appendChild(main);
   if (p.strength) r.appendChild(el('span', 'prio', p.strength));
   r.onclick = () => openNote(p.rel, p.title);
   return r;
 }
 
-function sourceRow(s) {
+function sourceRow(s: SourceRow): HTMLElement {
   const r = el('div', 'row');
   r.appendChild(el('div', 'file-ic', (s.kind || 'src').slice(0, 3)));
   const main = el('div', 'r-main');
   main.appendChild(el('div', 'r-title', esc(s.title)));
-  main.appendChild(metaRow([s.author && span('', s.author), s.status && span('mono', s.status)]));
+  main.appendChild(metaRow([s.author ? span('', s.author) : '', s.status ? span('mono', s.status) : '']));
   r.appendChild(main);
   r.onclick = () => openNote(s.rel, s.title);
   return r;
 }
 
-const ROW_FNS = { tasks: taskRow, projects: projectRow, ideas: ideaRow, people: peopleRow, sources: sourceRow };
+// Rows arrive over IPC as plain data; each fn narrows to its own row shape.
+const ROW_FNS: Record<string, (x: never) => HTMLElement> = {
+  tasks: taskRow, projects: projectRow, ideas: ideaRow, people: peopleRow, sources: sourceRow,
+};
 
-function renderTasks(body, tasks) { renderList(body, tasks, 'Ask the agent to create a task.', taskRow); }
-function renderProjects(body, items) { renderList(body, items, 'Ask the agent to set up a project.', projectRow); }
-function renderIdeas(body, items) { renderList(body, items, 'Brain-dump an idea into the inbox or chat.', ideaRow); }
-function renderPeople(body, items) { renderList(body, items, 'People show up as you capture work.', peopleRow); }
+function renderTasks(body: HTMLElement, tasks: TaskRow[] | null): void { renderList(body, tasks, 'Ask the agent to create a task.', taskRow); }
+function renderProjects(body: HTMLElement, items: ProjectRow[] | null): void { renderList(body, items, 'Ask the agent to set up a project.', projectRow); }
+function renderIdeas(body: HTMLElement, items: IdeaRow[] | null): void { renderList(body, items, 'Brain-dump an idea into the inbox or chat.', ideaRow); }
+function renderPeople(body: HTMLElement, items: PersonRow[] | null): void { renderList(body, items, 'People show up as you capture work.', peopleRow); }
 
 // ============================================================ INBOX
-async function renderInbox(body) {
+async function renderInbox(body: HTMLElement): Promise<void> {
   const items = await M.data('inbox');
   body.innerHTML = '';
   const dz = el('div', 'dropzone');
@@ -522,7 +564,7 @@ async function renderInbox(body) {
   const triage = el('button', 'btn primary mini', '⇉ Triage inbox');
   addNote.onclick = quickNote;
   triage.onclick = () => sendMessage('Triage the inbox.');
-  dz.querySelector('.dz-actions').append(addNote, triage);
+  (dz.querySelector('.dz-actions') as HTMLElement).append(addNote, triage);
   dz.onclick = (e) => { if (e.target === addNote || e.target === triage) return; pickFilesToInbox(); };
   wireDrop(dz);
   body.appendChild(dz);
@@ -546,24 +588,24 @@ async function renderInbox(body) {
   body.appendChild(rows);
 }
 
-async function quickNote() {
-  const text = prompt('Quick note to drop in the inbox:');
+async function quickNote(): Promise<void> {
+  const text = window.prompt('Quick note to drop in the inbox:');
   if (text && text.trim()) { await M.addInboxNote(text.trim()); if (state.tab === 'inbox') renderTab('inbox'); refreshSummary(); }
 }
 
-async function pickFilesToInbox() {
+async function pickFilesToInbox(): Promise<void> {
   const paths = await M.pickFiles();
   if (!paths || !paths.length) return;
   const res = await M.dropIntoInbox(paths);
   if (res && res.ok) {
-    $('statusLine').textContent = `Added ${res.copied.length} to inbox`;
+    $('statusLine').textContent = `Added ${(res.copied || []).length} to inbox`;
     refreshSummary();
     if (state.tab === 'inbox') renderTab('inbox');
   }
 }
 
 // ============================================================ OUTBOX
-function outputRow(o) {
+function outputRow(o: FileEntry): HTMLElement {
   const r = el('div', 'row');
   r.appendChild(el('div', 'file-ic', o.ext || 'txt'));
   const main = el('div', 'r-main');
@@ -572,15 +614,19 @@ function outputRow(o) {
   r.appendChild(main);
   const acts = el('div', 'r-actions');
   if (/^(md|markdown|html?|txt|png|jpe?g|gif|svg|webp)$/.test(o.ext || '')) {
-    const view = el('button', 'btn mini', 'View'); view.onclick = (e) => { e.stopPropagation(); openNote(o.rel, o.name); }; acts.appendChild(view);
+    const view = el('button', 'btn mini', 'View');
+    view.onclick = (e) => { e.stopPropagation(); openNote(o.rel, o.name); };
+    acts.appendChild(view);
   }
-  const open = el('button', 'btn mini', 'Open'); open.onclick = (e) => { e.stopPropagation(); M.openExternal(o.rel); }; acts.appendChild(open);
+  const open = el('button', 'btn mini', 'Open');
+  open.onclick = (e) => { e.stopPropagation(); M.openExternal(o.rel); };
+  acts.appendChild(open);
   r.appendChild(acts);
   r.onclick = () => openNote(o.rel, o.name);
   return r;
 }
 
-async function renderOutbox(body) {
+async function renderOutbox(body: HTMLElement): Promise<void> {
   const items = await M.data('outputs');
   body.innerHTML = '';
   body.appendChild(el('div', 'section-title', 'Outbox — generated artifacts'));
@@ -591,14 +637,14 @@ async function renderOutbox(body) {
 }
 
 // ============================================================ CUSTOM TABS
-async function renderQueryTab(body, def) {
+async function renderQueryTab(body: HTMLElement, def: TabDef): Promise<void> {
   const res = await M.tabQuery(def);
   body.style.position = '';
   body.innerHTML = '';
-  const rowFn = ROW_FNS[res.source] || taskRow;
+  const rowFn = (ROW_FNS[res.source] || taskRow) as (x: DataRow) => HTMLElement;
   const head = el('div', 'section-title');
   head.appendChild(document.createTextNode(def.label));
-  const count = el('span', 'tab-count'); count.textContent = res.rows.length; head.appendChild(count);
+  const count = el('span', 'tab-count'); count.textContent = String(res.rows.length); head.appendChild(count);
   body.appendChild(head);
   if (!res.rows.length) { body.appendChild(el('div', 'empty-note', esc(def.empty || 'Nothing matches this query right now.'))); return; }
   const rows = el('div', 'rows');
@@ -606,7 +652,7 @@ async function renderQueryTab(body, def) {
   body.appendChild(rows);
 }
 
-function renderWebTab(body, def) {
+function renderWebTab(body: HTMLElement, def: TabDef): void {
   if (!def.url) { body.innerHTML = '<div class="empty-note">This tab has no URL configured.</div>'; return; }
   body.style.position = 'relative';
   body.innerHTML = '';
@@ -619,7 +665,7 @@ function renderWebTab(body, def) {
   const abody = el('div', 'artifact-body');
   // <webview> renders the page in its own process (handles SPAs / localhost sites that
   // don't paint inside a sandboxed iframe, e.g. Quartz), and stays isolated from the app.
-  const wv = document.createElement('webview');
+  const wv = document.createElement('webview') as WebviewTag;
   wv.setAttribute('src', def.url);
   wv.setAttribute('allowpopups', '');
   wv.style.cssText = 'width:100%;height:100%;flex:1;border:none;background:transparent;';
@@ -637,7 +683,7 @@ function renderWebTab(body, def) {
   body.appendChild(wrap);
 }
 
-async function renderCustomTab(body, def) {
+async function renderCustomTab(body: HTMLElement, def: TabDef): Promise<void> {
   const res = await M.tabContent(def.path);
   body.style.position = '';
   body.innerHTML = '';
@@ -647,13 +693,15 @@ async function renderCustomTab(body, def) {
   }
   if (res.type === 'dir') {
     body.appendChild(el('div', 'section-title', esc(def.label)));
-    if (!res.items.length) { body.appendChild(el('div', 'empty-note', esc(def.empty || 'This folder is empty.'))); return; }
+    const items = res.items || [];
+    if (!items.length) { body.appendChild(el('div', 'empty-note', esc(def.empty || 'This folder is empty.'))); return; }
     const rows = el('div', 'rows');
-    res.items.forEach((o) => rows.appendChild(outputRow(o)));
+    items.forEach((o) => rows.appendChild(outputRow(o)));
     body.appendChild(rows);
     return;
   }
   const f = res.file;   // single-file tab
+  if (!f) return;
   const bar = el('div', 'section-title', esc(def.label));
   if (f.kind === 'html') {
     body.style.position = 'relative';
@@ -661,11 +709,11 @@ async function renderCustomTab(body, def) {
     const abody = el('div', 'artifact-body');
     const iframe = document.createElement('iframe');
     iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms allow-modals');
-    iframe.src = f.url;
+    iframe.src = f.url || '';
     abody.appendChild(iframe); wrap.appendChild(abody); body.appendChild(wrap);
   } else if (f.kind === 'image') {
     body.appendChild(bar);
-    const img = el('img', 'artifact-img'); img.src = f.dataUri; body.appendChild(img);
+    const img = el('img', 'artifact-img') as HTMLImageElement; img.src = f.dataUri || ''; body.appendChild(img);
   } else {
     body.appendChild(bar);
     const d = el('div', 'artifact-md bubble'); d.innerHTML = f.html || ('<pre>' + esc(f.content || '') + '</pre>'); body.appendChild(d);
@@ -673,9 +721,9 @@ async function renderCustomTab(body, def) {
 }
 
 // ============================================================ ARTIFACT VIEWER
-let currentArtifact = null;
+let currentArtifact: ArtifactView | null = null;
 
-function displayArtifact(art) {   // no history push
+function displayArtifact(art: ArtifactView): void {   // no history push
   currentArtifact = art;
   state.hasArtifact = true;
   $('artifactTab').style.display = '';
@@ -683,9 +731,9 @@ function displayArtifact(art) {   // no history push
   setActiveTab('artifact');
   renderArtifact();
 }
-function showArtifact(art) { navigate({ k: 'art', art }); }
+function showArtifact(art: ArtifactView): void { navigate({ k: 'art', art }); }
 
-function renderArtifact() {
+function renderArtifact(): void {
   const body = $('panelBody');
   body.style.position = 'relative';
   body.innerHTML = '';
@@ -694,7 +742,10 @@ function renderArtifact() {
   const wrap = el('div', 'artifact-wrap');
   const bar = el('div', 'artifact-bar');
   bar.appendChild(el('div', 'a-title', esc(a.title || 'Artifact')));
-  if (a.rel) { const ob = el('button', 'btn mini', 'Open file'); ob.onclick = () => M.openExternal(a.rel); bar.appendChild(ob); }
+  if (a.rel) {
+    const rel = a.rel;
+    const ob = el('button', 'btn mini', 'Open file'); ob.onclick = () => M.openExternal(rel); bar.appendChild(ob);
+  }
   wrap.appendChild(bar);
   const abody = el('div', 'artifact-body');
   if (a.kind === 'html') {
@@ -702,10 +753,10 @@ function renderArtifact() {
     // artifact's inline scripts run; cross-origin from the app, so it stays isolated.
     const iframe = document.createElement('iframe');
     iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms allow-modals');
-    iframe.src = a.url;
+    iframe.src = a.url || '';
     abody.appendChild(iframe);
   } else if (a.kind === 'image') {
-    const img = el('img', 'artifact-img'); img.src = a.dataUri; abody.appendChild(img);
+    const img = el('img', 'artifact-img') as HTMLImageElement; img.src = a.dataUri || ''; abody.appendChild(img);
   } else {
     const md = el('div', 'artifact-md bubble'); md.innerHTML = a.html || esc(a.text || ''); abody.appendChild(md);
   }
@@ -713,11 +764,11 @@ function renderArtifact() {
   body.appendChild(wrap);
 }
 
-async function openNote(rel, title) {
+async function openNote(rel: string, title?: string): Promise<void> {
   const f = await M.readNote(rel);
   if (!f) { flash('Could not read ' + rel); return; }
-  if (!title) title = rel.split('/').pop().replace(/\.[^.]+$/, '');
-  let art;
+  if (!title) title = (rel.split('/').pop() || rel).replace(/\.[^.]+$/, '');
+  let art: ArtifactView;
   if (f.kind === 'html') art = { title: title || rel, kind: 'html', url: f.url, rel };
   else if (f.kind === 'image') art = { title: title || rel, kind: 'image', dataUri: f.dataUri, rel };
   else if (f.kind === 'markdown') art = { title: title || rel, kind: 'markdown', html: f.html, rel };
@@ -726,9 +777,9 @@ async function openNote(rel, title) {
 }
 
 // ============================================================ DRAG & DROP
-function wireDrop(zone) {
-  ['dragenter', 'dragover'].forEach((ev) => zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.add('over'); }));
-  ['dragleave', 'drop'].forEach((ev) => zone.addEventListener(ev, () => zone.classList.remove('over')));
+function wireDrop(zone: HTMLElement): void {
+  (['dragenter', 'dragover'] as const).forEach((ev) => zone.addEventListener(ev, (e) => { e.preventDefault(); zone.classList.add('over'); }));
+  (['dragleave', 'drop'] as const).forEach((ev) => zone.addEventListener(ev, () => zone.classList.remove('over')));
   zone.addEventListener('drop', (e) => { e.preventDefault(); handleDrop(e); });
 }
 
@@ -738,19 +789,24 @@ window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (dragDepth === 0) $('dropOverlay').classList.remove('show'); });
 window.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; $('dropOverlay').classList.remove('show'); handleDrop(e); });
 
-async function handleDrop(e) {
+async function handleDrop(e: DragEvent): Promise<void> {
   if (!state.vault) return;
-  const files = Array.from(e.dataTransfer.files || []);
+  const files = Array.from(e.dataTransfer?.files || []);
   if (!files.length) return;
   const paths = files.map((f) => M.getPathForFile(f)).filter(Boolean);
   const res = await M.dropIntoInbox(paths);
-  if (res && res.ok) { $('statusLine').textContent = `Added ${res.copied.length} to inbox`; refreshSummary(); if (state.tab === 'inbox') renderTab('inbox'); flashChat(`Dropped ${res.copied.length} file(s) into the inbox. Say “triage the inbox” when ready.`); }
+  if (res && res.ok) {
+    $('statusLine').textContent = `Added ${(res.copied || []).length} to inbox`;
+    refreshSummary();
+    if (state.tab === 'inbox') renderTab('inbox');
+    flashChat(`Dropped ${(res.copied || []).length} file(s) into the inbox. Say “triage the inbox” when ready.`);
+  }
 }
 
 // ============================================================ FS WATCH
-let fsTimer = null;
+let fsTimer: ReturnType<typeof setTimeout> | null = null;
 M.onFsChanged(({ area }) => {
-  clearTimeout(fsTimer);
+  if (fsTimer) clearTimeout(fsTimer);
   fsTimer = setTimeout(async () => {
     refreshSummary();
     if (area === 'config') {
@@ -759,7 +815,7 @@ M.onFsChanged(({ area }) => {
       if (!document.querySelector(`.tab[data-tab="${CSS.escape(state.tab)}"]`)) return switchTab('dashboard');
       setActiveTab(state.tab);
     }
-    const map = { inbox: 'inbox', outputs: 'outbox', tasks: 'tasks', atlas: state.tab, briefings: 'dashboard' };
+    const map: Record<string, string> = { inbox: 'inbox', outputs: 'outbox', tasks: 'tasks', atlas: state.tab, briefings: 'dashboard' };
     const isCustom = state.customTabs.some((t) => t.id === state.tab);
     if (isCustom || state.tab === map[area] || state.tab === 'dashboard') renderTab(state.tab);
   }, 200);
@@ -775,20 +831,20 @@ window.addEventListener('keydown', (e) => {
 
 // wikilinks inside rendered markdown (chat bubbles + artifact md) open the target note
 document.addEventListener('click', (e) => {
-  const a = e.target.closest && e.target.closest('a.wikilink[data-rel]');
+  const a = (e.target as Element | null)?.closest?.('a.wikilink[data-rel]');
   if (!a) return;
   e.preventDefault();
   const rel = a.getAttribute('data-rel');
-  openNote(rel, a.textContent);
+  if (rel) openNote(rel, a.textContent || undefined);
 });
 
 $('themeToggle').onclick = () => {
   const cur = document.documentElement.getAttribute('data-theme');
   document.documentElement.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
 };
-function flash(msg) { $('statusLine') && ($('statusLine').textContent = msg); }
-function fmtSize(b) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(0) + ' KB'; return (b / 1048576).toFixed(1) + ' MB'; }
-function fmtTime(ms) { const d = new Date(ms); const diff = (Date.now() - ms) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return d.toLocaleDateString(); }
+function flash(msg: string): void { const s = document.getElementById('statusLine'); if (s) s.textContent = msg; }
+function fmtSize(b: number): string { if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(0) + ' KB'; return (b / 1048576).toFixed(1) + ' MB'; }
+function fmtTime(ms: number): string { const d = new Date(ms); const diff = (Date.now() - ms) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return d.toLocaleDateString(); }
 
 // divider resize
 (() => {

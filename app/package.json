@@ -4,10 +4,13 @@
   "description": "Desktop app for Memex — install, set up, and drive your second brain with a chat + dashboards UI on top of the Claude agent.",
   "author": "Memex",
   "license": "MIT",
-  "main": "src/main/main.js",
+  "main": "dist/main/main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "MEMEX_DEV=1 electron ."
+    "build": "tsc && cp src/renderer/index.html src/renderer/styles.css dist/renderer/",
+    "typecheck": "tsc --noEmit",
+    "watch": "tsc -w",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && MEMEX_DEV=1 electron ."
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.211",
@@ -16,6 +19,8 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "electron": "^43.1.1"
+    "@types/node": "^26.1.1",
+    "electron": "^43.1.1",
+    "typescript": "^7.0.2"
   }
 }

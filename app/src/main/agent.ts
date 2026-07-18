@@ -1,28 +1,66 @@
-'use strict';
 // Wraps the Claude Agent SDK as a long-lived, multi-turn session bound to a vault
 // directory. The vault's own CLAUDE.md, .claude/skills, settings and hooks are
 // loaded via settingSources, so this behaves like Claude Code running in the vault.
 
-const path = require('path');
+// The SDK is ESM-only, so it is loaded with a dynamic import() (preserved by
+// module:node16) and typed structurally here rather than via its own exports.
+interface QueryHandle extends AsyncIterable<SdkMessage> {
+  interrupt?: () => Promise<void>;
+}
+
+interface SdkMessage {
+  type: string;
+  subtype?: string;
+  session_id?: string;
+  tools?: string[];
+  model?: string;
+  event?: StreamEvent;
+  message?: { content?: ContentBlock[] };
+  result?: string;
+  usage?: { input_tokens?: number; output_tokens?: number };
+  total_cost_usd?: number;
+  duration_ms?: number;
+  num_turns?: number;
+}
+
+interface StreamEvent {
+  type: string;
+  delta?: { type: string; text?: string; thinking?: string };
+  content_block?: { type: string; name?: string; id?: string };
+}
+
+interface ContentBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
+}
+
+type QueueItem = { type: 'user'; message: { role: 'user'; content: string }; parent_tool_use_id: null; session_id?: string };
+type QueueResult = IteratorResult<QueueItem, undefined>;
 
 /** Minimal push-driven async queue used as the SDK's streaming-input prompt. */
-class MessageQueue {
-  constructor() {
-    this.items = [];
-    this.waiters = [];
-    this.closed = false;
-  }
-  push(item) {
-    if (this.waiters.length) this.waiters.shift()({ value: item, done: false });
+class MessageQueue implements AsyncIterableIterator<QueueItem> {
+  private items: QueueItem[] = [];
+  private waiters: Array<(r: QueueResult) => void> = [];
+  private closed = false;
+
+  push(item: QueueItem): void {
+    const w = this.waiters.shift();
+    if (w) w({ value: item, done: false });
     else this.items.push(item);
   }
-  close() {
+  close(): void {
     this.closed = true;
-    while (this.waiters.length) this.waiters.shift()({ value: undefined, done: true });
+    for (const w of this.waiters.splice(0)) w({ value: undefined, done: true });
   }
-  [Symbol.asyncIterator]() { return this; }
-  next() {
-    if (this.items.length) return Promise.resolve({ value: this.items.shift(), done: false });
+  [Symbol.asyncIterator](): AsyncIterableIterator<QueueItem> { return this; }
+  next(): Promise<QueueResult> {
+    if (this.items.length) return Promise.resolve({ value: this.items.shift() as QueueItem, done: false });
     if (this.closed) return Promise.resolve({ value: undefined, done: true });
     return new Promise((resolve) => this.waiters.push(resolve));
   }
@@ -47,22 +85,20 @@ Each tab has a short lowercase unique \`id\` (never dashboard/tasks/projects/ide
 
 Each chip has \`"label"\` and \`"prompt"\` (the message sent to you when clicked). e.g. {"label":"Blockers","prompt":"What's blocked right now and why?"}. Custom chips appear after the built-in ones.`;
 
-class AgentSession {
-  /**
-   * @param {object} o
-   * @param {string} o.cwd  vault directory
-   * @param {(evt:object)=>void} o.onEvent  called with UI events
-   */
-  constructor({ cwd, onEvent }) {
+export class AgentSession {
+  private cwd: string;
+  private onEvent: (evt: AgentEvent) => void;
+  private queue = new MessageQueue();
+  private query: QueryHandle | null = null;
+  running = false;
+  busy = false;
+
+  constructor({ cwd, onEvent }: { cwd: string; onEvent: (evt: AgentEvent) => void }) {
     this.cwd = cwd;
     this.onEvent = onEvent || (() => {});
-    this.queue = new MessageQueue();
-    this.query = null;
-    this.running = false;
-    this.busy = false;
   }
 
-  async start() {
+  async start(): Promise<void> {
     const sdk = await import('@anthropic-ai/claude-agent-sdk');
     const { query, tool, createSdkMcpServer } = sdk;
     const { z } = await import('zod');
@@ -79,7 +115,7 @@ class AgentSession {
       },
       async (args) => {
         this.onEvent({ kind: 'artifact', ...args });
-        return { content: [{ type: 'text', text: `Displayed "${args.title}" in the artifact panel.` }] };
+        return { content: [{ type: 'text' as const, text: `Displayed "${args.title}" in the artifact panel.` }] };
       },
       { annotations: { readOnlyHint: true } }
     );
@@ -96,28 +132,29 @@ class AgentSession {
         includePartialMessages: true,
         maxTurns: 100,
         mcpServers: { ui: uiServer },
-        canUseTool: async (name, input) => {
+        canUseTool: async (name: string, input: Record<string, unknown>) => {
           this.onEvent({ kind: 'permission', name });
-          return { behavior: 'allow', updatedInput: input };
+          return { behavior: 'allow' as const, updatedInput: input };
         },
       },
-    });
+    }) as unknown as QueryHandle;
 
     this.running = true;
-    this._consume().catch((err) => {
-      this.onEvent({ kind: 'error', message: String(err && err.message || err) });
+    this._consume().catch((err: unknown) => {
+      this.onEvent({ kind: 'error', message: String((err as Error)?.message || err) });
       this.running = false;
     });
   }
 
-  async _consume() {
+  private async _consume(): Promise<void> {
+    if (!this.query) return;
     for await (const msg of this.query) {
       try { this._handle(msg); } catch (e) { /* keep the loop alive */ }
     }
     this.running = false;
   }
 
-  _handle(msg) {
+  private _handle(msg: SdkMessage): void {
     switch (msg.type) {
       case 'system':
         if (msg.subtype === 'init') {
@@ -188,34 +225,32 @@ class AgentSession {
     }
   }
 
-  send(text) {
+  send(text: string): boolean {
     if (!this.running) return false;
     this.busy = true;
     this.onEvent({ kind: 'turn_start' });
-    this.queue.push({ type: 'user', message: { role: 'user', content: text } });
+    this.queue.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
     return true;
   }
 
-  async interrupt() {
+  async interrupt(): Promise<void> {
     if (this.query && this.running) {
-      try { await this.query.interrupt(); } catch (_) {}
+      try { await this.query.interrupt?.(); } catch (_) {}
     }
     this.busy = false;
   }
 
-  async stop() {
+  async stop(): Promise<void> {
     this.queue.close();
     try { if (this.query && this.query.interrupt) await this.query.interrupt(); } catch (_) {}
     this.running = false;
   }
 }
 
-function normalizeResult(content) {
+function normalizeResult(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.map((c) => (typeof c === 'string' ? c : (c.text || ''))).join('\n');
+    return content.map((c) => (typeof c === 'string' ? c : ((c as { text?: string }).text || ''))).join('\n');
   }
   return '';
 }
-
-module.exports = { AgentSession };
