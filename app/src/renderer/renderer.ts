@@ -416,6 +416,8 @@ async function renderDashboard(body: HTMLElement): Promise<void> {
   ]);
   if (!s) return;
   state.vault = s; applySummary(s);
+  const fresh = (s.counts.tasks + s.counts.projects + s.counts.ideas + s.counts.people + s.counts.sources) === 0;
+  if (fresh && !localStorage.getItem('memex-gs-skip:' + s.path)) return renderGettingStarted(body);
   body.innerHTML = '';
   const c = s.counts;
   const grid = el('div', 'dash-grid');
@@ -470,6 +472,75 @@ async function renderDashboard(body: HTMLElement): Promise<void> {
     outputs.slice(0, 4).forEach((o) => rows.appendChild(outputRow(o)));
     body.appendChild(rows);
   }
+}
+
+const GS_HERO_SVG = `<svg class="gs-hero" viewBox="0 0 720 250" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="360" cy="125" rx="330" ry="110" class="gs-glow"/>
+  <path class="gs-link" d="M116 128 C 170 150, 260 160, 330 150"/>
+  <path class="gs-link" d="M256 70 C 300 90, 320 110, 342 128"/>
+  <path class="gs-link" d="M256 62 C 330 30, 420 32, 480 64"/>
+  <path class="gs-link" d="M386 148 C 450 160, 540 150, 596 132"/>
+  <g class="gs-doc"><rect x="60" y="86" width="56" height="72" rx="8"/><line x1="72" y1="104" x2="104" y2="104"/><line x1="72" y1="118" x2="104" y2="118"/><line x1="72" y1="132" x2="94" y2="132"/></g>
+  <g class="gs-doc"><rect x="200" y="26" width="56" height="72" rx="8"/><line x1="212" y1="44" x2="244" y2="44"/><line x1="212" y1="58" x2="244" y2="58"/><line x1="212" y1="72" x2="234" y2="72"/></g>
+  <g class="gs-doc"><rect x="330" y="112" width="56" height="72" rx="8"/><line x1="342" y1="130" x2="374" y2="130"/><line x1="342" y1="144" x2="374" y2="144"/><line x1="342" y1="158" x2="364" y2="158"/></g>
+  <g class="gs-doc"><rect x="480" y="34" width="56" height="72" rx="8"/><line x1="492" y1="52" x2="524" y2="52"/><line x1="492" y1="66" x2="524" y2="66"/><line x1="492" y1="80" x2="514" y2="80"/></g>
+  <g class="gs-doc"><rect x="596" y="96" width="56" height="72" rx="8"/><line x1="608" y1="114" x2="640" y2="114"/><line x1="608" y1="128" x2="640" y2="128"/><line x1="608" y1="142" x2="630" y2="142"/></g>
+  <path class="gs-trail" d="M88 122 C 120 60, 180 52, 228 62 C 290 76, 310 120, 358 148 C 420 182, 460 120, 508 70 C 540 38, 600 60, 624 100"/>
+  <g class="gs-node">
+    <rect x="80" y="114" width="15" height="15" transform="rotate(45 88 122)"/>
+    <rect x="220" y="54" width="15" height="15" transform="rotate(45 228 62)"/>
+    <rect x="350" y="140" width="15" height="15" transform="rotate(45 358 148)"/>
+    <rect x="500" y="62" width="15" height="15" transform="rotate(45 508 70)"/>
+    <rect x="616" y="92" width="15" height="15" transform="rotate(45 624 100)"/>
+  </g>
+</svg>`;
+
+function renderGettingStarted(body: HTMLElement): void {
+  body.innerHTML = '';
+  const wrap = el('div', 'gs-wrap');
+  wrap.innerHTML = GS_HERO_SVG;
+
+  wrap.appendChild(el('h1', 'gs-title', 'Welcome to your memex'));
+  wrap.appendChild(el('p', 'gs-sub', 'It learns by conversation. Everything you tell it becomes notes, tasks, and trails it keeps for you — drop something in, or just start talking.'));
+
+  const cta = el('button', 'btn primary gs-cta', '✦ Start the guided setup');
+  cta.onclick = () => sendMessage("I'm new here — run my first-time setup. Introduce yourself in two sentences, then interview me: one question at a time, covering my current projects, what's on my plate this week, and the people I work with. When the interview is done, create the corresponding project, task, and people notes in the vault, then show me a summary artifact of everything you created.");
+  wrap.appendChild(cta);
+
+  wrap.appendChild(el('div', 'gs-cta-note', 'One short interview — it creates your first projects, tasks, and people.'));
+
+  const cards = el('div', 'gs-cards');
+  const cardDefs: Array<[string, string, () => void]> = [
+    ['Tour this vault', 'What lives where, and how it stays tidy.',
+      () => sendMessage('Give me a quick tour of how this vault is organized — what lives where, and how you keep it tidy.')],
+    ['Brain-dump my week', 'Tell it everything on your plate; it files the pieces.',
+      () => { composer.value = "Here's what's on my plate this week: "; autosize(); composer.focus(); }],
+    ["Today's briefing", 'A first look at how mornings will feel.',
+      () => sendMessage("Give me today's briefing.")],
+  ];
+  for (const [t, d, onclick] of cardDefs) {
+    const card = el('div', 'gs-card', `<div class="t">${esc(t)}</div><div class="d">${esc(d)}</div>`);
+    card.onclick = onclick;
+    cards.appendChild(card);
+  }
+  wrap.appendChild(cards);
+
+  const how = el('div', 'gs-how');
+  const howDefs: Array<[string, string, string]> = [
+    ['⇣', 'Capture', 'Drop files on the inbox — or on the app icon in the Dock. Everything lands in the Inbox for triage.'],
+    ['✎', 'Converse', 'Ask in plain language. The agent files notes, links them into trails, and tracks the work.'],
+    ['◈', 'Consult', 'Tabs stay live as the vault changes. Click any wikilink to follow a trail.'],
+  ];
+  for (const [ic, t, d] of howDefs) {
+    how.appendChild(el('div', 'gs-how-item', `<div class="ic">${ic}</div><div class="t">${esc(t)}</div><div class="d">${esc(d)}</div>`));
+  }
+  wrap.appendChild(how);
+
+  const skip = el('button', 'gs-skip', 'Skip for now — show the dashboard');
+  skip.onclick = () => { localStorage.setItem('memex-gs-skip:' + (state.vault?.path || ''), '1'); renderTab('dashboard'); };
+  wrap.appendChild(skip);
+
+  body.appendChild(wrap);
 }
 
 function metaRow(children: Array<HTMLElement | ''>): HTMLElement {
