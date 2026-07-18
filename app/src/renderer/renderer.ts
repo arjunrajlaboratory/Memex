@@ -272,25 +272,39 @@ function setBusy(b: boolean): void {
   $('statusLine').textContent = b ? 'Thinking…' : 'Ready';
 }
 
+// A dim, single-line trace of the model's extended thinking so long thinking
+// stretches aren't a silent "Thinking…" with no sign of life.
+let thinkingBuf = '';
+function onThinkingDelta(text: string): void {
+  thinkingBuf += text;
+  let line = document.getElementById('thinkingLine');
+  if (!line) { line = el('div', 'thinking-line'); line.id = 'thinkingLine'; chatScroll.appendChild(line); }
+  line.textContent = '✳ ' + thinkingBuf.slice(-120).replace(/\s+/g, ' ').trimStart();
+  scrollChat();
+}
+function clearThinking(): void { thinkingBuf = ''; document.getElementById('thinkingLine')?.remove(); }
+
 // agent events
 M.onAgentEvent((evt) => {
   switch (evt.kind) {
     case 'session': $('modelTag').textContent = evt.model ? evt.model.replace('claude-', '') : ''; break;
     case 'turn_start': setBusy(true); break;
-    case 'assistant_delta': onAssistantDelta(evt.text || ''); break;
-    case 'assistant_text': onAssistantText(evt.text || '', evt.html || ''); break;
-    case 'tool_use': addToolCard(evt.id, evt.name || '', evt.input); break;
+    case 'thinking_delta': onThinkingDelta(evt.text); break;
+    case 'assistant_delta': clearThinking(); onAssistantDelta(evt.text); break;
+    case 'assistant_text': clearThinking(); onAssistantText(evt.text, evt.html || ''); break;
+    case 'tool_use': clearThinking(); addToolCard(evt.id, evt.name, evt.input); break;
     case 'tool_result': completeToolCard(evt.id, evt.text, evt.isError); break;
     case 'artifact': if (evt.artifact) showArtifact(evt.artifact); break;
+    case 'tool_start': case 'permission': break;   // cards render from tool_use; permissions are auto-allowed
     case 'result':
-      setBusy(false); closeAssistantBubble();
+      setBusy(false); closeAssistantBubble(); clearThinking();
       if (evt.subtype && evt.subtype !== 'success') $('statusLine').textContent = `Ended: ${evt.subtype}`;
       else if (evt.usage) {
         const u = evt.usage; const tok = (u.output_tokens || 0) + (u.input_tokens || 0);
         $('statusLine').textContent = `Done · ${tok.toLocaleString()} tok${evt.costUsd ? ' · $' + evt.costUsd.toFixed(3) : ''}`;
       }
       break;
-    case 'error': setBusy(false); flashChat('⚠ ' + (evt.message || 'Unknown error')); break;
+    case 'error': setBusy(false); flashChat('⚠ ' + evt.message); break;
   }
 });
 
@@ -396,8 +410,8 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 async function renderDashboard(body: HTMLElement): Promise<void> {
-  const [s, , brief, outputs] = await Promise.all([
-    M.data('summary'), M.data('tasks'), M.data('briefing'), M.data('outputs'),
+  const [s, brief, outputs] = await Promise.all([
+    M.data('summary'), M.data('briefing'), M.data('outputs'),
   ]);
   if (!s) return;
   state.vault = s; applySummary(s);
@@ -457,10 +471,9 @@ async function renderDashboard(body: HTMLElement): Promise<void> {
   }
 }
 
-type MaybeEl = HTMLElement | '' | 0 | false | null | undefined;
-function metaRow(children: MaybeEl[]): HTMLElement {
+function metaRow(children: Array<HTMLElement | ''>): HTMLElement {
   const s = el('div', 'r-sub');
-  children.filter((c): c is HTMLElement => !!c).forEach((c) => s.appendChild(c));
+  children.filter((c): c is HTMLElement => c !== '').forEach((c) => s.appendChild(c));
   return s;
 }
 function span(cls: string, txt: string): HTMLElement { return el('span', cls, esc(txt)); }
@@ -568,6 +581,12 @@ async function renderInbox(body: HTMLElement): Promise<void> {
   dz.onclick = (e) => { if (e.target === addNote || e.target === triage) return; pickFilesToInbox(); };
   wireDrop(dz);
   body.appendChild(dz);
+  if (liveQuickNote) {
+    // a live refresh already wiped the panel (renderTab's spinner) — re-attach the
+    // detached form so a half-typed quick note survives; it keeps value + listeners
+    dz.appendChild(liveQuickNote.form);
+    if (document.activeElement === document.body || !document.activeElement) liveQuickNote.input.focus();
+  }
 
   if (!items || !items.length) {
     body.appendChild(el('div', 'empty-note', 'Inbox is clear. Everything has been filed.'));
@@ -588,10 +607,14 @@ async function renderInbox(body: HTMLElement): Promise<void> {
   body.appendChild(rows);
 }
 
+// The open quick-note form (if any); module-level so a live inbox re-render can
+// re-attach it instead of losing the user's half-typed text.
+let liveQuickNote: { form: HTMLElement; input: HTMLInputElement } | null = null;
+
 function quickNote(): void {
   // window.prompt() is not implemented in Electron — use an inline input in the dropzone.
   const dz = document.querySelector('.dropzone');
-  if (!dz || dz.querySelector('.qn-form')) return;
+  if (!dz || liveQuickNote) return;
   const form = el('div', 'qn-form');
   const input = document.createElement('input');
   input.type = 'text'; input.placeholder = 'Quick note… Enter to add, Esc to cancel';
@@ -600,7 +623,8 @@ function quickNote(): void {
   const cancel = el('button', 'btn mini', 'Cancel');
   form.append(input, save, cancel);
   form.onclick = (e) => e.stopPropagation();   // the dropzone itself opens the file picker on click
-  const done = () => form.remove();
+  liveQuickNote = { form, input };
+  const done = () => { liveQuickNote = null; form.remove(); };
   const submit = async () => {
     const text = input.value.trim();
     done();
@@ -694,7 +718,11 @@ function renderWebTab(body: HTMLElement, def: TabDef): void {
   const wv = document.createElement('webview') as WebviewTag;
   wv.setAttribute('src', def.url);
   wv.setAttribute('allowpopups', '');
+  // transparent while loading/failed (no white flash over the dark theme), then a
+  // white backing once loaded — unstyled guest pages are transparent and would
+  // otherwise show black default text on the dark panel
   wv.style.cssText = 'width:100%;height:100%;flex:1;border:none;background:transparent;';
+  wv.addEventListener('did-finish-load', () => { wv.style.background = '#fff'; });
   const err = el('div', 'empty-note');
   err.style.display = 'none';
   wv.addEventListener('did-fail-load', (e) => {
@@ -702,7 +730,10 @@ function renderWebTab(body: HTMLElement, def: TabDef): void {
     err.innerHTML = `<span class="big">Can’t reach this page</span>${esc(def.url)} — ${esc(e.errorDescription || 'failed to load')}. Check that the server is running, then hit Reload.`;
     wv.style.display = 'none'; err.style.display = '';
   });
-  reload.onclick = () => { err.style.display = 'none'; wv.style.display = ''; try { wv.reload(); } catch (_) { wv.src = def.url; } };
+  reload.onclick = () => {
+    err.style.display = 'none'; wv.style.display = ''; wv.style.background = 'transparent';
+    try { wv.reload(); } catch (_) { wv.src = def.url; }
+  };
   abody.appendChild(wv);
   abody.appendChild(err);
   wrap.appendChild(abody);
@@ -840,10 +871,14 @@ M.onFsChanged(({ area }) => {
       // rebuilding the tab bar wipes the active class — and the active tab itself may be gone
       if (!document.querySelector(`.tab[data-tab="${CSS.escape(state.tab)}"]`)) return switchTab('dashboard');
       setActiveTab(state.tab);
+      renderTab(state.tab);   // the active tab's own definition may have changed
+      return;
     }
     const map: Record<string, string> = { inbox: 'inbox', outputs: 'outbox', tasks: 'tasks', atlas: state.tab, briefings: 'dashboard' };
-    const isCustom = state.customTabs.some((t) => t.id === state.tab);
-    if (isCustom || state.tab === map[area] || state.tab === 'dashboard') renderTab(state.tab);
+    const cdef = state.customTabs.find((t) => t.id === state.tab);
+    // web tabs don't show vault data — re-rendering would reload the embedded page
+    const isDataCustom = !!cdef && cdef.kind !== 'web';
+    if (isDataCustom || state.tab === map[area] || state.tab === 'dashboard') renderTab(state.tab);
   }, 200);
 });
 

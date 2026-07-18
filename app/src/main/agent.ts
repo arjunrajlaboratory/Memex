@@ -2,54 +2,20 @@
 // directory. The vault's own CLAUDE.md, .claude/skills, settings and hooks are
 // loaded via settingSources, so this behaves like Claude Code running in the vault.
 
-// The SDK is ESM-only, so it is loaded with a dynamic import() (preserved by
-// module:node16) and typed structurally here rather than via its own exports.
-interface QueryHandle extends AsyncIterable<SdkMessage> {
-  interrupt?: () => Promise<void>;
-}
+// The SDK is ESM-only, so its VALUES are loaded with a dynamic import() (preserved
+// by module:node16); its TYPES are erased at compile time, so importing them
+// statically is safe and keeps this file honest against SDK upgrades.
+import type { Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk' with { 'resolution-mode': 'import' };
 
-interface SdkMessage {
-  type: string;
-  subtype?: string;
-  session_id?: string;
-  tools?: string[];
-  model?: string;
-  event?: StreamEvent;
-  message?: { content?: ContentBlock[] };
-  result?: string;
-  usage?: { input_tokens?: number; output_tokens?: number };
-  total_cost_usd?: number;
-  duration_ms?: number;
-  num_turns?: number;
-}
-
-interface StreamEvent {
-  type: string;
-  delta?: { type: string; text?: string; thinking?: string };
-  content_block?: { type: string; name?: string; id?: string };
-}
-
-interface ContentBlock {
-  type: string;
-  text?: string;
-  id?: string;
-  name?: string;
-  input?: Record<string, unknown>;
-  tool_use_id?: string;
-  content?: unknown;
-  is_error?: boolean;
-}
-
-type QueueItem = { type: 'user'; message: { role: 'user'; content: string }; parent_tool_use_id: null; session_id?: string };
-type QueueResult = IteratorResult<QueueItem, undefined>;
+type QueueResult = IteratorResult<SDKUserMessage, undefined>;
 
 /** Minimal push-driven async queue used as the SDK's streaming-input prompt. */
-class MessageQueue implements AsyncIterableIterator<QueueItem> {
-  private items: QueueItem[] = [];
+class MessageQueue implements AsyncIterableIterator<SDKUserMessage> {
+  private items: SDKUserMessage[] = [];
   private waiters: Array<(r: QueueResult) => void> = [];
   private closed = false;
 
-  push(item: QueueItem): void {
+  push(item: SDKUserMessage): void {
     const w = this.waiters.shift();
     if (w) w({ value: item, done: false });
     else this.items.push(item);
@@ -58,9 +24,9 @@ class MessageQueue implements AsyncIterableIterator<QueueItem> {
     this.closed = true;
     for (const w of this.waiters.splice(0)) w({ value: undefined, done: true });
   }
-  [Symbol.asyncIterator](): AsyncIterableIterator<QueueItem> { return this; }
+  [Symbol.asyncIterator](): AsyncIterableIterator<SDKUserMessage> { return this; }
   next(): Promise<QueueResult> {
-    if (this.items.length) return Promise.resolve({ value: this.items.shift() as QueueItem, done: false });
+    if (this.items.length) return Promise.resolve({ value: this.items.shift() as SDKUserMessage, done: false });
     if (this.closed) return Promise.resolve({ value: undefined, done: true });
     return new Promise((resolve) => this.waiters.push(resolve));
   }
@@ -89,7 +55,7 @@ export class AgentSession {
   private cwd: string;
   private onEvent: (evt: AgentEvent) => void;
   private queue = new MessageQueue();
-  private query: QueryHandle | null = null;
+  private query: Query | null = null;
   running = false;
   busy = false;
 
@@ -137,7 +103,7 @@ export class AgentSession {
           return { behavior: 'allow' as const, updatedInput: input };
         },
       },
-    }) as unknown as QueryHandle;
+    });
 
     this.running = true;
     this._consume().catch((err: unknown) => {
@@ -154,7 +120,7 @@ export class AgentSession {
     this.running = false;
   }
 
-  private _handle(msg: SdkMessage): void {
+  private _handle(msg: SDKMessage): void {
     switch (msg.type) {
       case 'system':
         if (msg.subtype === 'init') {
@@ -164,26 +130,24 @@ export class AgentSession {
 
       case 'stream_event': {
         const ev = msg.event;
-        if (!ev) break;
-        if (ev.type === 'content_block_delta' && ev.delta) {
+        if (ev.type === 'content_block_delta') {
           if (ev.delta.type === 'text_delta' && ev.delta.text) {
             this.onEvent({ kind: 'assistant_delta', text: ev.delta.text });
           } else if (ev.delta.type === 'thinking_delta' && ev.delta.thinking) {
             this.onEvent({ kind: 'thinking_delta', text: ev.delta.thinking });
           }
-        } else if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'tool_use') {
+        } else if (ev.type === 'content_block_start' && ev.content_block.type === 'tool_use') {
           this.onEvent({ kind: 'tool_start', name: ev.content_block.name, id: ev.content_block.id });
         }
         break;
       }
 
       case 'assistant': {
-        const blocks = (msg.message && msg.message.content) || [];
-        for (const b of blocks) {
+        for (const b of msg.message.content) {
           if (b.type === 'text' && b.text != null) {
             this.onEvent({ kind: 'assistant_text', text: b.text });
           } else if (b.type === 'tool_use') {
-            this.onEvent({ kind: 'tool_use', id: b.id, name: b.name, input: b.input });
+            this.onEvent({ kind: 'tool_use', id: b.id, name: b.name, input: b.input as Record<string, unknown> });
           }
         }
         break;
@@ -191,10 +155,10 @@ export class AgentSession {
 
       case 'user': {
         // Tool results are delivered back as user messages carrying tool_result blocks.
-        const content = msg.message && msg.message.content;
+        const content = msg.message.content;
         if (Array.isArray(content)) {
           for (const b of content) {
-            if (b.type === 'tool_result') {
+            if (typeof b !== 'string' && b.type === 'tool_result') {
               this.onEvent({
                 kind: 'tool_result',
                 id: b.tool_use_id,
@@ -212,7 +176,7 @@ export class AgentSession {
         this.onEvent({
           kind: 'result',
           subtype: msg.subtype,
-          result: msg.result,
+          result: msg.subtype === 'success' ? msg.result : undefined,
           usage: msg.usage,
           costUsd: msg.total_cost_usd,
           durationMs: msg.duration_ms,
@@ -250,7 +214,9 @@ export class AgentSession {
 function normalizeResult(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.map((c) => (typeof c === 'string' ? c : ((c as { text?: string }).text || ''))).join('\n');
+    // optional chaining: a malformed null/primitive element must not throw here —
+    // a throw would be swallowed upstream and leave the tool card spinning forever
+    return content.map((c) => (typeof c === 'string' ? c : String((c as { text?: unknown })?.text ?? ''))).join('\n');
   }
   return '';
 }

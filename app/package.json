@@ -6,9 +6,10 @@
   "license": "MIT",
   "main": "dist/main/main.js",
   "scripts": {
-    "build": "tsc && cp src/renderer/index.html src/renderer/styles.css dist/renderer/",
+    "assets": "mkdir -p dist/renderer && cp src/renderer/index.html src/renderer/styles.css dist/renderer/",
+    "build": "tsc && npm run assets",
     "typecheck": "tsc --noEmit",
-    "watch": "tsc -w",
+    "watch": "npm run assets && tsc -w",
     "start": "npm run build && electron .",
     "dev": "npm run build && MEMEX_DEV=1 electron ."
   },

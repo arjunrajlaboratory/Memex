@@ -39,7 +39,12 @@ let artifactSeq = 0;
 function registerArtifact(html: string): string {
   html = html || '';
   const existing = artifactByContent.get(html);
-  if (existing && artifactStore.has(existing)) return `artifact://memex/${existing}`;
+  if (existing && artifactStore.has(existing)) {
+    // LRU refresh: re-registering moves the artifact to the back of the eviction queue
+    artifactStore.delete(existing);
+    artifactStore.set(existing, html);
+    return `artifact://memex/${existing}`;
+  }
   const id = String(++artifactSeq);
   artifactStore.set(id, html);
   artifactByContent.set(html, id);
@@ -231,24 +236,29 @@ function startWatchers(vault: string): void {
 // ---------- agent session ----------
 async function startSession(vault: string): Promise<void> {
   if (session) { try { await session.stop(); } catch (_) {} session = null; }
+  const handleEvent = async (evt: AgentEvent): Promise<void> => {
+    if (evt.kind === 'assistant_text') {
+      emit('agent:event', { ...evt, html: await renderMarkdown(evt.text) });
+    } else if (evt.kind === 'artifact') {
+      // Resolve inline vs path; render markdown to html here.
+      const art = await resolveArtifact(vault, evt);
+      emit('agent:event', { kind: 'artifact', artifact: art });
+    } else {
+      emit('agent:event', evt);
+    }
+  };
+  // Some handlers await (markdown render), others don't — a promise chain keeps
+  // events reaching the renderer in emission order, else a tool_use/result can
+  // overtake its preceding assistant_text and duplicate the chat bubble.
+  let chain: Promise<void> = Promise.resolve();
   session = new AgentSession({
     cwd: vault,
-    onEvent: async (evt: AgentEvent) => {
-      if (evt.kind === 'assistant_text') {
-        emit('agent:event', { ...evt, html: await renderMarkdown(evt.text || '') });
-      } else if (evt.kind === 'artifact') {
-        // Resolve inline vs path; render markdown to html here.
-        const art = await resolveArtifact(vault, evt);
-        emit('agent:event', { kind: 'artifact', artifact: art });
-      } else {
-        emit('agent:event', evt);
-      }
-    },
+    onEvent: (evt: AgentEvent) => { chain = chain.then(() => handleEvent(evt)).catch(() => {}); },
   });
   await session.start();
 }
 
-async function resolveArtifact(vault: string, evt: AgentEvent): Promise<ArtifactView> {
+async function resolveArtifact(vault: string, evt: Extract<AgentEvent, { kind: 'artifact' }>): Promise<ArtifactView> {
   const { title, format, content, path: rel } = evt;
   let kind = format;
   if (rel && !content) {
@@ -353,6 +363,17 @@ function registerIpc(): void {
     }
   });
 
+  // desktop-tabs.json is hand-editable: accept a scalar where the schema wants an
+  // array (e.g. "status": "next"), else the filter silently matches nothing.
+  function normalizeWhere(w: unknown): QueryWhere | null {
+    if (!w || typeof w !== 'object') return null;
+    const out = { ...(w as QueryWhere) } as Record<string, unknown>;
+    for (const k of ['status', 'priority']) {
+      if (out[k] != null && !Array.isArray(out[k])) out[k] = [String(out[k])];
+    }
+    return out as QueryWhere;
+  }
+
   ipcMain.handle('data:appConfig', async (): Promise<AppConfig> => {
     const out: AppConfig = { tabs: [], chips: [] };
     if (!currentVault) return out;
@@ -379,7 +400,7 @@ function registerIpc(): void {
             path: t.path ? String(t.path) : '',
             url: t.url ? String(t.url) : '',
             source: t.source ? String(t.source) : '',
-            where: (t.where && typeof t.where === 'object') ? t.where : null,
+            where: normalizeWhere(t.where),
             empty: t.empty ? String(t.empty) : '',
           }))
           .slice(0, 12);
@@ -442,7 +463,9 @@ function registerIpc(): void {
   ipcMain.handle('inbox:addNote', async (_e, text: string) => {
     if (!currentVault) return { ok: false };
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const file = path.join(currentVault, 'Inbox', `note-${stamp}.md`);
+    // the stamp has second precision — suffix on collision so rapid notes never overwrite
+    let file = path.join(currentVault, 'Inbox', `note-${stamp}.md`);
+    for (let i = 1; fs.existsSync(file); i++) file = path.join(currentVault, 'Inbox', `note-${stamp}-${i}.md`);
     fs.writeFileSync(file, text.endsWith('\n') ? text : text + '\n');
     return { ok: true, rel: path.relative(currentVault, file) };
   });
@@ -485,7 +508,15 @@ app.whenReady().then(() => {
   protocol.handle('artifact', (req) => {
     const id = new URL(req.url).pathname.replace(/^\//, '');
     const html = artifactStore.get(id);
-    if (html == null) return new Response('Not found', { status: 404 });
+    if (html == null) {
+      // Evicted from the cache (panel history can outlive the 200-entry store) —
+      // show a themed explanation instead of a bare "Not found".
+      const gone = '<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font-family:ui-sans-serif,system-ui,sans-serif;background:#1b1810;color:#bcb096"><div style="text-align:center;max-width:420px;padding:24px"><div style="font-size:36px;color:#e0a54a">✦</div><h2 style="color:#efe7d4;font-weight:600;margin:12px 0 8px">This artifact has expired</h2><p style="line-height:1.6;font-size:14px">Older artifacts are dropped from the cache as new ones arrive. Ask the agent to show it again, or open the source file from the Outbox.</p></div></body>';
+      return new Response(gone, { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
+    // LRU refresh on view so revisited artifacts aren't the first evicted
+    artifactStore.delete(id);
+    artifactStore.set(id, html);
     return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
   });
   registerIpc();

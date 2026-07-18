@@ -84,25 +84,24 @@ interface ArtifactView {
 }
 
 // ---------- agent events (main -> renderer) ----------
-interface AgentEvent {
-  kind: 'session' | 'turn_start' | 'assistant_delta' | 'thinking_delta' | 'assistant_text'
-    | 'tool_start' | 'tool_use' | 'tool_result' | 'artifact' | 'permission' | 'result' | 'error';
-  // session
-  sessionId?: string; tools?: string[]; model?: string;
-  // streaming / text
-  text?: string; html?: string;
-  // tools
-  id?: string; name?: string; input?: Record<string, unknown>; isError?: boolean;
-  // artifact (resolved for the renderer)
-  artifact?: ArtifactView;
-  // artifact (raw, from the show_artifact tool in the agent process)
-  title?: string; format?: 'html' | 'markdown' | 'auto'; content?: string; path?: string;
-  // result
-  subtype?: string; result?: string; usage?: { input_tokens?: number; output_tokens?: number };
-  costUsd?: number; durationMs?: number; numTurns?: number;
-  // error
-  message?: string;
-}
+interface AgentUsage { input_tokens?: number; output_tokens?: number; }
+
+// Discriminated on `kind` so switch statements narrow. The 'artifact' variant carries
+// both the raw show_artifact args (agent process -> main) and the resolved view
+// (main -> renderer); each leg fills only its own fields.
+type AgentEvent =
+  | { kind: 'session'; sessionId?: string; tools?: string[]; model?: string }
+  | { kind: 'turn_start' }
+  | { kind: 'assistant_delta'; text: string }
+  | { kind: 'thinking_delta'; text: string }
+  | { kind: 'assistant_text'; text: string; html?: string }
+  | { kind: 'tool_start'; id?: string; name?: string }
+  | { kind: 'tool_use'; id?: string; name: string; input?: Record<string, unknown> }
+  | { kind: 'tool_result'; id?: string; text?: string; isError?: boolean }
+  | { kind: 'artifact'; title?: string; format?: 'html' | 'markdown' | 'auto'; content?: string; path?: string; artifact?: ArtifactView }
+  | { kind: 'permission'; name?: string }
+  | { kind: 'result'; subtype?: string; result?: string; usage?: AgentUsage; costUsd?: number; durationMs?: number; numTurns?: number }
+  | { kind: 'error'; message: string };
 
 // ---------- IPC payloads ----------
 interface TabContentResult {
@@ -141,7 +140,6 @@ interface MemexApi {
 
   sendMessage(text: string): Promise<SendResult>;
   interrupt(): Promise<{ ok: boolean }>;
-  runPrompt(text: string): Promise<SendResult>;
 
   addInboxNote(text: string): Promise<{ ok: boolean; rel?: string }>;
   dropIntoInbox(paths: string[]): Promise<DropResult>;
@@ -159,6 +157,7 @@ interface WebviewTag extends HTMLElement {
   src: string;
   reload(): void;
   addEventListener(type: 'did-fail-load', listener: (e: { errorCode: number; errorDescription: string; isMainFrame: boolean }) => void): void;
+  addEventListener(type: 'did-finish-load', listener: () => void): void;
   addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;
 }
 

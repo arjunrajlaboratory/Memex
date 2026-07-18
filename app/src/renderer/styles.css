@@ -401,3 +401,6 @@ body {
 .qn-form { display: flex; gap: 8px; margin-top: 12px; justify-content: center; align-items: center; }
 .qn-input { flex: 0 1 420px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; color: var(--ink); font-family: var(--font-ui); font-size: 13px; }
 .qn-input:focus { outline: none; border-color: var(--accent); }
+
+/* live trace of the model's extended thinking (single dim line under the chat) */
+.thinking-line { font-size: 12px; font-style: italic; color: var(--ink-faint); margin: 0 0 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: rise .3s both; }

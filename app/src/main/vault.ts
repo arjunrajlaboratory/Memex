@@ -79,7 +79,16 @@ const TASK_STATUS_ORDER: Record<string, number> = {
 };
 
 const str = (v: unknown, dflt = ''): string => (v == null || v === '' ? dflt : String(v));
-const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+// YAML authors often quote numbers ("importance: \"9\"") — coerce numeric strings
+// so sorting doesn't silently drop them.
+const num = (v: unknown): number | undefined => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+};
 
 export function readTasks(vault: string): TaskRow[] {
   const tasks = collection<TaskRow>(vault, 'Ops/Tasks', ({ name, rel, data }) => ({
