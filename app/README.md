@@ -96,9 +96,19 @@ Each `chips` entry is `{ label, prompt }` — a quick-action button (shown after
 sends `prompt` to the chat when clicked. Custom tabs and chips are marked with a small `＋` and behave
 like any built-in (back/forward history, live refresh).
 
+## HTML artifact contract
+
+HTML shown in the artifact panel must be fully self-contained: inline its CSS and JavaScript, use
+`data:` URLs for images, and do not depend on CDNs, remote assets, network requests, or embedded
+network frames. The app deliberately serves each document from its own `artifact://` origin under a
+strict no-network content security policy. Ordinary HTTP(S) links are delegated to the system
+browser. A live page that needs network access belongs in a custom `kind: "web"` tab instead.
+
 ## Notes
 
 - The app is strict TypeScript compiled with `tsc`; renderer HTML/CSS assets are copied into `dist/`.
 - Permission mode is `acceptEdits`, so normal vault edits remain fluid. Operations the SDK flags as
   requiring permission (for example shell commands or access outside the vault) show a native
-  **Allow once / Deny** dialog and are denied by default.
+  **Deny / Allow once / Always allow in this vault** dialog and are denied by default. Persistent
+  grants match the exact SDK tool name, apply only to the current vault, and can be cleared from the
+  vault switcher with **Reset tool approvals for this vault**.

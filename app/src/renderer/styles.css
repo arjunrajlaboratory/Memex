@@ -384,6 +384,9 @@ body {
   background: #000; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; max-height: 220px; overflow: auto; white-space: pre-wrap;
 }
 .onboard-note { text-align: center; font-size: 12px; color: var(--ink-faint); margin-top: 28px; }
+.approval-reset { display: none; margin: 9px auto 0; padding: 2px 4px; border: 0; background: transparent; color: var(--ink-faint); font: 11px var(--font-ui); text-decoration: underline; cursor: pointer; }
+.approval-reset:hover { color: var(--ink-dim); }
+.approval-reset:disabled { cursor: default; opacity: .7; }
 /* shown only when a vault is already open (the overlay is then a switcher, not first-run setup) */
 .onboard-close { position: absolute; top: 18px; right: 22px; width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--ink-dim); font-size: 20px; line-height: 1; cursor: pointer; display: none; place-items: center; transition: color .12s, border-color .12s; }
 .onboard.dismissible .onboard-close { display: grid; }

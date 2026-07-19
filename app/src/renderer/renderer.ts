@@ -48,6 +48,7 @@ const state: UIState = {
 
 // ============================================================ ONBOARDING
 async function initOnboarding(): Promise<void> {
+  $('resetApprovals').style.display = state.vault ? 'block' : 'none';
   const { recent } = await M.recentVaults();
   const list = $('recentList');
   list.innerHTML = '';
@@ -141,6 +142,16 @@ $('vaultSwitch').onclick = () => { $('onboard').classList.toggle('dismissible', 
 // The switcher overlays a working vault — always let the user back out without re-opening.
 function closeOnboard(): void { if (state.vault) $('onboard').style.display = 'none'; }
 $('onboardClose').onclick = closeOnboard;
+$('resetApprovals').onclick = async () => {
+  const reset = $('resetApprovals') as HTMLButtonElement;
+  reset.disabled = true;
+  const result = await M.resetToolApprovals();
+  reset.textContent = result.ok ? 'Tool approvals reset' : 'No open vault to reset';
+  window.setTimeout(() => {
+    reset.textContent = 'Reset tool approvals for this vault';
+    reset.disabled = false;
+  }, 1800);
+};
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOnboard(); });
 
 function applySummary(s: VaultSummary): void {
@@ -371,9 +382,7 @@ let renderEpoch = 0;
 function renderEntry(entry: HistoryEntry): void {
   if (entry.k === 'tab') {
     setActiveTab(entry.tab);
-    void renderTab(entry.tab).catch((error: unknown) => {
-      if (state.tab === entry.tab) flash('Could not render this view: ' + String((error as Error)?.message || error));
-    });
+    void renderTab(entry.tab);
   }
   else { displayArtifact(entry.art); }
 }
@@ -389,34 +398,45 @@ function switchTab(tab: string): void { navigate({ k: 'tab', tab }); }
 async function renderTab(tab: string): Promise<void> {
   const epoch = ++renderEpoch;
   const body = $('panelBody');
-  if (tab === 'artifact') { renderArtifact(); return; }
-  body.style.position = ''; body.innerHTML = '<div style="display:grid;place-items:center;padding:60px"><div class="spinner-lg"></div></div>';
-  // Render off-DOM so a slower, older IPC response cannot mutate the panel after
-  // the user has already selected a different tab.
-  const stage = document.createElement('div');
-  if (tab === 'dashboard') await renderDashboard(stage);
-  else if (tab === 'inbox') await renderInbox(stage);
-  else if (tab === 'outbox') await renderOutbox(stage);
-  else {
-    const cdef = state.customTabs.find((t) => t.id === tab);
-    if (cdef) {
-      if (cdef.kind === 'query') await renderQueryTab(stage, cdef);
-      else if (cdef.kind === 'web') renderWebTab(stage, cdef);
-      else await renderCustomTab(stage, cdef);
-    } else if (['tasks', 'projects', 'ideas', 'people'].includes(tab)) {
-      const data = await M.data(tab as DataKind);
-      if (tab === 'tasks') renderTasks(stage, data as TaskRow[]);
-      else if (tab === 'projects') renderProjects(stage, data as ProjectRow[]);
-      else if (tab === 'ideas') renderIdeas(stage, data as IdeaRow[]);
-      else if (tab === 'people') renderPeople(stage, data as PersonRow[]);
-    } else {
-      // Unrecognized id (e.g. a custom tab removed from config but still in history).
-      stage.innerHTML = '<div class="empty-note"><span class="big">This view is no longer available</span>It may have been a custom tab that was removed. Pick another tab above.</div>';
+  try {
+    if (tab === 'artifact') { renderArtifact(); return; }
+    body.style.position = ''; body.innerHTML = '<div style="display:grid;place-items:center;padding:60px"><div class="spinner-lg"></div></div>';
+    // Render off-DOM so a slower, older IPC response cannot mutate the panel after
+    // the user has already selected a different tab.
+    const stage = document.createElement('div');
+    if (tab === 'dashboard') await renderDashboard(stage);
+    else if (tab === 'inbox') await renderInbox(stage);
+    else if (tab === 'outbox') await renderOutbox(stage);
+    else {
+      const cdef = state.customTabs.find((t) => t.id === tab);
+      if (cdef) {
+        if (cdef.kind === 'query') await renderQueryTab(stage, cdef);
+        else if (cdef.kind === 'web') renderWebTab(stage, cdef);
+        else await renderCustomTab(stage, cdef);
+      } else if (['tasks', 'projects', 'ideas', 'people'].includes(tab)) {
+        const data = await M.data(tab as DataKind);
+        if (tab === 'tasks') renderTasks(stage, data as TaskRow[]);
+        else if (tab === 'projects') renderProjects(stage, data as ProjectRow[]);
+        else if (tab === 'ideas') renderIdeas(stage, data as IdeaRow[]);
+        else if (tab === 'people') renderPeople(stage, data as PersonRow[]);
+      } else {
+        // Unrecognized id (e.g. a custom tab removed from config but still in history).
+        stage.innerHTML = '<div class="empty-note"><span class="big">This view is no longer available</span>It may have been a custom tab that was removed. Pick another tab above.</div>';
+      }
     }
+    if (epoch !== renderEpoch || state.tab !== tab) return;
+    body.style.position = stage.style.position;
+    body.replaceChildren(...Array.from(stage.childNodes));
+    if (liveQuickNote?.input.isConnected &&
+        (document.activeElement === document.body || !document.activeElement)) {
+      liveQuickNote.input.focus();
+    }
+  } catch (error) {
+    if (epoch !== renderEpoch || state.tab !== tab) return;
+    const message = String((error as Error)?.message || error);
+    body.style.position = '';
+    body.innerHTML = `<div class="empty-note"><span class="big">Couldn’t load this view</span>${esc(message)}<br>Pick another tab above.</div>`;
   }
-  if (epoch !== renderEpoch || state.tab !== tab) return;
-  body.style.position = stage.style.position;
-  body.replaceChildren(...Array.from(stage.childNodes));
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -686,7 +706,6 @@ async function renderInbox(body: HTMLElement): Promise<void> {
     // a live refresh already wiped the panel (renderTab's spinner) — re-attach the
     // detached form so a half-typed quick note survives; it keeps value + listeners
     dz.appendChild(liveQuickNote.form);
-    if (document.activeElement === document.body || !document.activeElement) liveQuickNote.input.focus();
   }
 
   if (!items || !items.length) {
@@ -818,6 +837,7 @@ function renderWebTab(body: HTMLElement, def: TabDef): void {
   // don't paint inside a sandboxed iframe, e.g. Quartz), and stays isolated from the app.
   const wv = document.createElement('webview') as WebviewTag;
   wv.setAttribute('src', def.url);
+  wv.setAttribute('allowpopups', '');
   // transparent while loading/failed (no white flash over the dark theme), then a
   // white backing once loaded — unstyled guest pages are transparent and would
   // otherwise show black default text on the dark panel
@@ -865,7 +885,7 @@ async function renderCustomTab(body: HTMLElement, def: TabDef): Promise<void> {
     const wrap = el('div', 'artifact-wrap');
     const abody = el('div', 'artifact-body');
     const iframe = document.createElement('iframe');
-    iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-modals');
     iframe.referrerPolicy = 'no-referrer';
     iframe.src = f.url || '';
     abody.appendChild(iframe); wrap.appendChild(abody); body.appendChild(wrap);
@@ -908,10 +928,10 @@ function renderArtifact(): void {
   wrap.appendChild(bar);
   const abody = el('div', 'artifact-body');
   if (a.kind === 'html') {
-    // Served from a unique artifact:// origin with a no-network CSP. The opaque
-    // sandbox still permits inline scripts while isolating the document from the app.
+    // Served from a unique artifact:// origin with a no-network CSP. Each document
+    // keeps its isolated origin while same-origin enables localStorage for its scripts.
     const iframe = document.createElement('iframe');
-    iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-modals');
     iframe.referrerPolicy = 'no-referrer';
     iframe.src = a.url || '';
     abody.appendChild(iframe);

@@ -20,6 +20,7 @@ const api: MemexApi = {
   openVault: (p) => invoke('vault:open', p),
   recentVaults: () => invoke('vault:recent'),
   currentVault: () => invoke('vault:current'),
+  resetToolApprovals: () => invoke('permissions:reset'),
 
   // data panels
   data: (kind: DataKind) => invoke('data:get', kind),

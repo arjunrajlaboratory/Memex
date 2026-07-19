@@ -9,7 +9,8 @@ import { randomUUID } from 'crypto';
 import * as vaultLib from './vault';
 import { AgentSession } from './agent';
 import { localDatePlusDays, localDateString } from './date';
-import { isSafeExternalUrl, isTrustedFileUrl, resolveInside } from './security';
+import { clearVaultToolGrants, grantTool, hasToolGrant, type ToolGrantState } from './grants';
+import { isSafeExternalUrl, isTrustedFileUrl, resolveInside, resolvedStaysInside } from './security';
 
 const fsp = fs.promises;
 // Development runs inside the engine checkout; packaged builds carry the exact
@@ -20,7 +21,7 @@ const ENGINE_ROOT = app.isPackaged
 const RENDERER_PATH = path.join(__dirname, '..', 'renderer', 'index.html');
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 
-interface PersistedConfig { recent?: string[]; last?: string; }
+interface PersistedConfig extends ToolGrantState { recent?: string[]; last?: string; }
 
 // Node's fs does not expand a leading ~, but the user's placeholder path is ~/…,
 // so expand it wherever a user-supplied path enters the main process.
@@ -218,6 +219,7 @@ function createWindow(): void {
       if (new URL(event.url).protocol === 'artifact:') return;
     } catch (_) {}
     event.preventDefault();
+    openInSystemBrowser(event.url);
   });
   contents.setWindowOpenHandler(({ url }) => {
     openInSystemBrowser(url);
@@ -355,26 +357,9 @@ function argvFiles(argv: string[]): string[] {
 // ---------- agent session ----------
 let permissionDialogQueue: Promise<void> = Promise.resolve();
 
-function pathStaysInVault(vault: string, candidate: string): boolean {
-  const full = path.resolve(vault, expandHome(candidate));
-  if (!vaultLib.within(vault, full)) return false;
-  // Lexical containment is not enough when an existing parent is a symlink.
-  try {
-    let existing = full;
-    while (!fs.existsSync(existing)) {
-      const parent = path.dirname(existing);
-      if (parent === existing) return false;
-      existing = parent;
-    }
-    return vaultLib.within(fs.realpathSync(vault), fs.realpathSync(existing));
-  } catch (_) {
-    return false;
-  }
-}
-
 function canAutoAllowVaultTool(vault: string, request: AgentPermissionRequest): boolean {
   if (request.name === 'mcp__ui__show_artifact') return true;
-  if (['TodoWrite', 'Task', 'Skill'].includes(request.name)) return true;
+  if (['TodoWrite', 'Agent', 'Task', 'Skill'].includes(request.name)) return true;
   const pathTools = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Glob', 'Grep']);
   if (!pathTools.has(request.name)) return false;
   const candidates = ['file_path', 'path', 'notebook_path']
@@ -383,17 +368,31 @@ function canAutoAllowVaultTool(vault: string, request: AgentPermissionRequest): 
   // Glob/Grep default to the session cwd when no path is supplied. File tools must
   // identify the path we are approving.
   if (!candidates.length) return request.name === 'Glob' || request.name === 'Grep';
-  return candidates.every((candidate) => pathStaysInVault(vault, candidate));
+  return candidates.every((candidate) => {
+    const full = resolveInside(vault, expandHome(candidate));
+    return !!full && resolvedStaysInside(vault, full);
+  });
 }
 
-function requestAgentPermission(vault: string, request: AgentPermissionRequest): Promise<boolean> {
-  if (canAutoAllowVaultTool(vault, request)) return Promise.resolve(true);
+function requestAgentPermission(
+  vault: string,
+  owningSession: AgentSession,
+  request: AgentPermissionRequest,
+): Promise<boolean> {
+  const isCurrent = (): boolean => session === owningSession && currentVault === vault;
+  if (canAutoAllowVaultTool(vault, request)) return Promise.resolve(isCurrent());
+  if (!isCurrent()) return Promise.resolve(false);
+  if (hasToolGrant(loadConfig(), vault, request.name)) return Promise.resolve(true);
   const ask = async (): Promise<boolean> => {
-    if (!win || win.isDestroyed() || currentVault !== vault) return false;
+    if (!win || win.isDestroyed() || !isCurrent()) return false;
+    // A request may have waited behind another dialog that granted the same tool.
+    if (hasToolGrant(loadConfig(), vault, request.name)) return true;
     const inputSummary = request.input.command
       ? String(request.input.command)
       : JSON.stringify(request.input, null, 2);
     const detail = [
+      `Tool: ${request.name}`,
+      `Choosing “Always allow in this vault” grants the exact tool “${request.name}” for “${path.basename(vault)}” only. You can reset this grant from the vault switcher.`,
       request.description,
       request.blockedPath ? `Outside the vault: ${request.blockedPath}` : '',
       request.decisionReason,
@@ -402,14 +401,21 @@ function requestAgentPermission(vault: string, request: AgentPermissionRequest):
     const result = await dialog.showMessageBox(win, {
       type: 'warning',
       title: 'Agent permission',
-      message: request.title || request.displayName || `Allow ${request.name}?`,
+      message: request.title || request.displayName
+        ? `${request.title || request.displayName} (${request.name})`
+        : `Allow ${request.name}?`,
       detail,
-      buttons: ['Deny', 'Allow once'],
+      buttons: ['Deny', 'Allow once', 'Always allow in this vault'],
       defaultId: 0,
       cancelId: 0,
       noLink: true,
     });
-    return currentVault === vault && result.response === 1;
+    if (!isCurrent()) return false;
+    if (result.response === 2) {
+      saveConfig(grantTool(loadConfig(), vault, request.name));
+      return true;
+    }
+    return result.response === 1;
   };
 
   // Tool calls can request permission concurrently; native dialogs should not.
@@ -442,7 +448,7 @@ async function startSession(vault: string): Promise<void> {
   nextSession = new AgentSession({
     cwd: vault,
     onEvent: (evt: AgentEvent) => { chain = chain.then(() => handleEvent(evt)).catch(() => {}); },
-    requestPermission: (request) => requestAgentPermission(vault, request),
+    requestPermission: (request) => requestAgentPermission(vault, nextSession, request),
   });
   session = nextSession;
   await nextSession.start();
@@ -568,6 +574,12 @@ function registerIpc(): void {
 
   handle('vault:current', async () => (currentVault ? vaultLib.summary(currentVault) : null));
 
+  handle('permissions:reset', async () => {
+    if (!currentVault) return { ok: false };
+    saveConfig(clearVaultToolGrants(loadConfig(), currentVault));
+    return { ok: true };
+  });
+
   handle('vault:create', async (_e, opts: { target: string; answers: Record<string, string>; packs: string }) => {
     const res = await createVault({ ...opts, target: expandHome(opts.target) });
     return res;
@@ -635,16 +647,19 @@ function registerIpc(): void {
           })
           .filter((t): t is Partial<TabDef> & { id: string; label: string } =>
             !!t && !builtins.has(t.id.toLowerCase()) && !seen.has(t.id) && !!seen.add(t.id))
-          .map((t) => ({
-            id: String(t.id),
-            label: String(t.label),
-            kind: (t.kind || (t.url ? 'web' : (t.source ? 'query' : 'path'))) as TabDef['kind'],
-            path: t.path ? String(t.path) : '',
-            url: t.url && isSafeExternalUrl(String(t.url)) ? String(t.url) : '',
-            source: t.source ? String(t.source) : '',
-            where: normalizeWhere(t.where),
-            empty: t.empty ? String(t.empty) : '',
-          }))
+          .map((t) => {
+            const url = t.url ? String(t.url) : '';
+            return {
+              id: String(t.id),
+              label: String(t.label),
+              kind: (t.kind || (url ? 'web' : (t.source ? 'query' : 'path'))) as TabDef['kind'],
+              path: t.path ? String(t.path) : '',
+              url: url && isSafeExternalUrl(url) ? url : '',
+              source: t.source ? String(t.source) : '',
+              where: normalizeWhere(t.where),
+              empty: t.empty ? String(t.empty) : '',
+            };
+          })
           .slice(0, 12);
       }
       if (Array.isArray(cfg.chips)) {
@@ -717,16 +732,16 @@ function registerIpc(): void {
   handle('shell:open', async (_e, target: string) => {
     if (isSafeExternalUrl(target)) return shell.openExternal(target);
     if (currentVault) {
-      const full = resolveInside(currentVault, target);
-      if (full && pathStaysInVault(currentVault, target)) return shell.openPath(full);
+      const full = resolveInside(currentVault, expandHome(target));
+      if (full && resolvedStaysInside(currentVault, full)) return shell.openPath(full);
     }
     return null;
   });
 
   handle('shell:reveal', async (_e, rel: string) => {
     if (!currentVault) return null;
-    const full = resolveInside(currentVault, rel);
-    if (full && pathStaysInVault(currentVault, rel)) shell.showItemInFolder(full);
+    const full = resolveInside(currentVault, expandHome(rel));
+    if (full && resolvedStaysInside(currentVault, full)) shell.showItemInFolder(full);
     return null;
   });
 }
