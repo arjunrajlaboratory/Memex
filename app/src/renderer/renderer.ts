@@ -101,6 +101,7 @@ M.onSetupProgress(({ line }) => { const log = $('setupLog'); log.textContent += 
 async function openVault(p: string): Promise<void> {
   const res = await M.openVault(p);
   if (!res.ok || !res.summary) { flash(res.error || 'Could not open vault'); return; }
+  closeSearch();
   state.vault = res.summary;
   $('onboard').style.display = 'none';
   $('workspace').style.display = 'grid';
@@ -1026,13 +1027,22 @@ const VIEWABLE_EXTS = new Set(['md', 'markdown', 'txt', 'html', 'htm', 'png', 'j
 
 function openSearch(): void {
   if (!state.vault) return;
+  window.clearTimeout(searchTimer);
+  searchTimer = undefined;
+  searchSeq++;   // invalidate a response left over from an earlier palette session
   $('searchOverlay').style.display = 'grid';
   const input = $('searchInput') as HTMLInputElement;
   input.value = '';
   renderSearchResults(null);
   input.focus();
 }
-function closeSearch(): void { $('searchOverlay').style.display = 'none'; }
+function closeSearch(): void {
+  window.clearTimeout(searchTimer);
+  searchTimer = undefined;
+  searchSeq++;
+  searchItems = [];
+  $('searchOverlay').style.display = 'none';
+}
 
 function activateSearchItem(i: number): void {
   const item = searchItems[i];
@@ -1102,16 +1112,31 @@ $('searchOverlay').onclick = (e) => { if (e.target === $('searchOverlay')) close
 $('searchInput').addEventListener('input', () => {
   const q = ($('searchInput') as HTMLInputElement).value.trim();
   window.clearTimeout(searchTimer);
+  searchTimer = undefined;
+  const seq = ++searchSeq;   // invalidate old results before the debounce elapses
+  renderSearchResults(null); // remove stale, actionable rows immediately
+  if (q.length < 2) return;
   searchTimer = window.setTimeout(() => {
-    const seq = ++searchSeq;
-    if (q.length < 2) { renderSearchResults(null); return; }
-    void M.search(q).then((res) => { if (seq === searchSeq) renderSearchResults(res); });
+    searchTimer = undefined;
+    void M.search(q).then((res) => {
+      const current = ($('searchInput') as HTMLInputElement).value.trim();
+      if (seq === searchSeq && current === q && res.query === q.toLowerCase()) renderSearchResults(res);
+    }).catch((error: unknown) => {
+      if (seq !== searchSeq) return;
+      const box = $('searchResults');
+      searchItems = [];
+      searchSel = 0;
+      box.innerHTML = '';
+      const message = el('div', 'sr-hint');
+      message.textContent = 'Search failed: ' + String((error as Error)?.message || error);
+      box.appendChild(message);
+    });
   }, 120);
 });
 $('searchInput').addEventListener('keydown', (e) => {
   const ke = e as KeyboardEvent;
-  if (ke.key === 'ArrowDown') { ke.preventDefault(); searchSel = Math.min(searchSel + 1, searchItems.length - 1); updateSearchSel(); }
-  else if (ke.key === 'ArrowUp') { ke.preventDefault(); searchSel = Math.max(searchSel - 1, 0); updateSearchSel(); }
+  if (ke.key === 'ArrowDown') { ke.preventDefault(); if (searchItems.length) searchSel = Math.min(searchSel + 1, searchItems.length - 1); updateSearchSel(); }
+  else if (ke.key === 'ArrowUp') { ke.preventDefault(); if (searchItems.length) searchSel = Math.max(searchSel - 1, 0); updateSearchSel(); }
   else if (ke.key === 'Enter') { ke.preventDefault(); activateSearchItem(searchSel); }
   else if (ke.key === 'Escape') { ke.stopPropagation(); closeSearch(); }
 });

@@ -9,7 +9,7 @@ import { randomUUID } from 'crypto';
 import * as vaultLib from './vault';
 import { AgentSession } from './agent';
 import { localDatePlusDays, localDateString } from './date';
-import { searchVault } from './search';
+import { invalidateSearchIndex, searchPathAffectsIndex, searchVault } from './search';
 import { clearVaultToolGrants, grantTool, hasToolGrant, type ToolGrantState } from './grants';
 import { isSafeExternalUrl, isTrustedFileUrl, resolveInside, resolvedStaysInside } from './security';
 
@@ -288,6 +288,8 @@ function stopWatchers(): void { for (const w of watchers) { try { w.close(); } c
 
 function startWatchers(vault: string): void {
   stopWatchers();
+  // Only the active vault needs a cached search index.
+  invalidateSearchIndex();
   const targets: Array<[string, string]> = [
     ['Inbox', 'inbox'],
     ['outputs', 'outputs'],
@@ -301,14 +303,26 @@ function startWatchers(vault: string): void {
     if (!fs.existsSync(dir)) continue;
     try {
       let timer: ReturnType<typeof setTimeout> | null = null;
-      const w = fs.watch(dir, { recursive: true }, () => {
+      const w = fs.watch(dir, { recursive: true }, (_eventType, filename) => {
         if (timer) clearTimeout(timer);
         wikiIndexPromise = null;   // note added/renamed/removed -> rebuild link index
+        const changed = filename ? path.join(rel, String(filename)) : rel;
+        if (searchPathAffectsIndex(changed)) invalidateSearchIndex(vault);
         timer = setTimeout(() => emit('fs:changed', { area }), 250);
       });
       watchers.push(w);
     } catch (_) {}
   }
+
+  // The renderer refresh watchers above cover specific panels. Search spans the
+  // entire vault, so use a separate filtered root watcher to invalidate its index
+  // for changes in custom knowledge folders too.
+  try {
+    const w = fs.watch(vault, { recursive: true }, (_eventType, filename) => {
+      if (!filename || searchPathAffectsIndex(String(filename))) invalidateSearchIndex(vault);
+    });
+    watchers.push(w);
+  } catch (_) { /* targeted watchers still cover the standard vault folders */ }
 }
 
 // ---------- inbox drop (drag & drop zone + files dropped on the app icon) ----------

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import matter from 'gray-matter';
+import { resolveInside } from './security';
 
 const fsp = fs.promises;
 
@@ -13,29 +14,99 @@ const FILE_LIMIT = 8;
 const CONTENT_LIMIT = 10;
 
 interface Candidate { rel: string; name: string; ext: string; isMd: boolean; }
+interface SearchDocument extends Candidate { title: string; description: string; body: string; }
+
+const indexCache = new Map<string, Promise<SearchDocument[]>>();
+
+function shouldSkipName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return name.startsWith('.') || name.startsWith('_') || SKIP_DIRS.has(lower) ||
+    lower === 'readme.md' || lower.endsWith('.log');
+}
+
+/** Whether a watcher event could change the searchable index. */
+export function searchPathAffectsIndex(relativePath: string): boolean {
+  const parts = String(relativePath || '').split(/[\\/]+/).filter(Boolean);
+  return parts.length === 0 || !parts.some(shouldSkipName);
+}
 
 async function listCandidates(vault: string): Promise<Candidate[]> {
+  const root = path.resolve(vault);
   const acc: Candidate[] = [];
   const walkDir = async (dir: string, depth: number): Promise<void> => {
     if (depth > MAX_DEPTH) return;
     let ents: fs.Dirent[];
     try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch (_) { return; }
     for (const e of ents) {
-      if (e.name.startsWith('.') || e.name.startsWith('_') || SKIP_DIRS.has(e.name)) continue;
-      if (e.name === 'README.md' || e.name.endsWith('.log')) continue;
+      if (shouldSkipName(e.name)) continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) { await walkDir(full, depth + 1); continue; }
+      // Never index symlinks, sockets, or other special entries. In particular,
+      // readFile/stat must not follow a vault symlink into the rest of the machine.
+      if (!e.isFile()) continue;
       const ext = path.extname(e.name).replace('.', '').toLowerCase();
       acc.push({
-        rel: path.relative(vault, full),
-        name: e.name.replace(/\.md$/, ''),
+        rel: path.relative(root, full),
+        name: e.name.replace(/\.(?:md|markdown)$/i, ''),
         ext,
         isMd: ext === 'md' || ext === 'markdown',
       });
     }
   };
-  await walkDir(vault, 0);
+  await walkDir(root, 0);
   return acc;
+}
+
+async function buildSearchIndex(vault: string): Promise<SearchDocument[]> {
+  const root = path.resolve(vault);
+  let realRoot: string;
+  try { realRoot = await fsp.realpath(root); } catch (_) { return []; }
+  const candidates = await listCandidates(root);
+  const documents: SearchDocument[] = [];
+
+  for (const c of candidates) {
+    let title = c.name;
+    let description = '';
+    let body = '';
+    if (c.isMd) {
+      const full = path.resolve(root, c.rel);
+      try {
+        // Re-check at read time so a replaced candidate still fails closed.
+        const stat = await fsp.lstat(full);
+        if (!stat.isFile()) continue;
+        const realFull = await fsp.realpath(full);
+        if (!resolveInside(realRoot, realFull)) continue;
+        if (stat.size <= MAX_CONTENT_BYTES) {
+          const raw = await fsp.readFile(full, 'utf8');
+          const parsed = matter(raw);
+          const data = parsed.data || {};
+          title = data.title ? String(data.title) : c.name;
+          description = [data.description, data.summary, Array.isArray(data.tags) ? data.tags.join(' ') : data.tags]
+            .filter(Boolean).map(String).join(' — ');
+          body = parsed.content || '';
+        }
+      } catch (_) { /* unreadable regular file: retain its filename-only entry */ }
+    }
+    documents.push({ ...c, title, description, body });
+  }
+  return documents;
+}
+
+async function getSearchIndex(vault: string): Promise<SearchDocument[]> {
+  const key = path.resolve(vault);
+  let index = indexCache.get(key);
+  if (!index) {
+    index = buildSearchIndex(key);
+    indexCache.set(key, index);
+    void index.catch(() => { if (indexCache.get(key) === index) indexCache.delete(key); });
+  }
+  return index;
+}
+
+/** Drop one vault's cached index, or every index when switching vaults. */
+export function invalidateSearchIndex(vault?: string): void {
+  if (vault) indexCache.delete(path.resolve(vault));
+  else indexCache.clear();
 }
 
 function scoreName(hay: string, q: string): number {
@@ -65,41 +136,28 @@ export async function searchVault(vault: string, query: string): Promise<SearchR
   const out: SearchResults = { query: q, files: [], content: [] };
   if (q.length < 2) return out;
 
-  const candidates = await listCandidates(vault);
+  const documents = await getSearchIndex(vault);
   const fileHits: Array<SearchHit & { score: number }> = [];
   const contentHits: SearchHit[] = [];
 
-  for (const c of candidates) {
-    let title = c.name;
-    let description = '';
-    let body = '';
-    if (c.isMd) {
-      try {
-        const stat = await fsp.stat(path.join(vault, c.rel));
-        if (stat.size <= MAX_CONTENT_BYTES) {
-          const raw = await fsp.readFile(path.join(vault, c.rel), 'utf8');
-          const parsed = matter(raw);
-          const data = parsed.data || {};
-          title = data.title ? String(data.title) : c.name;
-          description = [data.description, data.summary, Array.isArray(data.tags) ? data.tags.join(' ') : data.tags]
-            .filter(Boolean).map(String).join(' — ');
-          body = parsed.content || '';
-        }
-      } catch (_) { /* unreadable file: fall through to name-only matching */ }
-    }
-
-    const score = Math.max(scoreName(c.name, q), scoreName(title, q));
-    const descIdx = description.toLowerCase().indexOf(q);
+  for (const doc of documents) {
+    const score = Math.max(scoreName(doc.name, q), scoreName(doc.title, q));
+    const descIdx = doc.description.toLowerCase().indexOf(q);
     if (score > 0 || descIdx >= 0) {
       fileHits.push({
-        rel: c.rel, title, ext: c.ext,
-        snippet: descIdx >= 0 ? snippetAround(description, descIdx, q.length) : '',
+        rel: doc.rel, title: doc.title, ext: doc.ext,
+        snippet: descIdx >= 0 ? snippetAround(doc.description, descIdx, q.length) : '',
         score: Math.max(score, descIdx >= 0 ? 30 : 0),
       });
-    } else if (body) {
-      const idx = body.toLowerCase().indexOf(q);
+    } else if (doc.body) {
+      const idx = doc.body.toLowerCase().indexOf(q);
       if (idx >= 0 && contentHits.length < CONTENT_LIMIT * 3) {
-        contentHits.push({ rel: c.rel, title, ext: c.ext, snippet: snippetAround(body, idx, q.length) });
+        contentHits.push({
+          rel: doc.rel,
+          title: doc.title,
+          ext: doc.ext,
+          snippet: snippetAround(doc.body, idx, q.length),
+        });
       }
     }
   }
