@@ -762,6 +762,11 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
+    // Packaged builds get the icon from the bundle; in dev the window runs inside the
+    // stock Electron binary, so brand the macOS Dock at runtime.
+    if (!app.isPackaged && process.platform === 'darwin') {
+      try { app.dock?.setIcon(path.join(__dirname, '..', '..', 'build', 'icon.png')); } catch (_) {}
+    }
     protocol.handle('artifact', (req) => {
       const url = new URL(req.url);
       const id = url.hostname;

@@ -2,8 +2,12 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
+  <!-- frame-src/child-src admit https:/http: only so subframe navigations REACH the main
+       process, whose will-frame-navigate handler cancels them and opens the URL in the
+       system browser instead — with frame-src strict, CSP blocks the click before that
+       delegation can run. No external frame ever actually loads. -->
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; frame-src 'self' artifact: data: blob:; child-src 'self' artifact: data: blob:;" />
+    content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; frame-src 'self' artifact: data: blob: https: http:; child-src 'self' artifact: data: blob: https: http:;" />
   <title>Memex</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
