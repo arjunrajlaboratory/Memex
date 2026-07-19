@@ -72,6 +72,10 @@ interface TabDef {
 interface ChipDef { label: string; prompt: string; }
 interface AppConfig { tabs: TabDef[]; chips: ChipDef[]; }
 
+// ---------- vault search ----------
+interface SearchHit { rel: string; title: string; ext: string; snippet?: string; }
+interface SearchResults { query: string; files: SearchHit[]; content: SearchHit[]; }
+
 // ---------- artifacts ----------
 interface ArtifactView {
   title?: string;
@@ -144,6 +148,7 @@ interface MemexApi {
   data(kind: 'inbox' | 'outputs'): Promise<FileEntry[] | null>;
   data(kind: DataKind): Promise<unknown>;
   appConfig(): Promise<AppConfig | null>;
+  search(q: string): Promise<SearchResults>;
   tabContent(p: string): Promise<TabContentResult>;
   tabQuery(def: TabDef): Promise<TabQueryResult>;
   readNote(rel: string): Promise<VaultFile | null>;

@@ -30,6 +30,11 @@
       </button>
     </div>
     <div class="tb-right no-drag">
+      <button class="search-pill" id="searchOpen" title="Search the vault (⌘K)" style="display:none">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <span>Search</span>
+        <kbd>⌘K</kbd>
+      </button>
       <span class="model-tag" id="modelTag"></span>
       <button class="icon-btn" id="themeToggle" title="Toggle theme">
         <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 108.5 12A7 7 0 0112 3z"/></svg>
@@ -111,6 +116,18 @@
       <svg viewBox="0 0 24 24" class="drop-ic"><path d="M12 16V4m0 0L7 9m5-5l5 5M4 20h16"/></svg>
       <div class="drop-title">Drop into the Inbox</div>
       <div class="drop-sub">Files land in your vault's inbox for triage</div>
+    </div>
+  </div>
+
+  <!-- ======================= SEARCH PALETTE ======================= -->
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-panel">
+      <div class="search-row">
+        <svg viewBox="0 0 24 24" class="search-ic"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="searchInput" placeholder="Search your vault…" spellcheck="false" autocomplete="off" />
+        <kbd>esc</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
     </div>
   </div>
 

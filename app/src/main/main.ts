@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import * as vaultLib from './vault';
 import { AgentSession } from './agent';
 import { localDatePlusDays, localDateString } from './date';
+import { searchVault } from './search';
 import { clearVaultToolGrants, grantTool, hasToolGrant, type ToolGrantState } from './grants';
 import { isSafeExternalUrl, isTrustedFileUrl, resolveInside, resolvedStaysInside } from './security';
 
@@ -573,6 +574,11 @@ function registerIpc(): void {
   });
 
   handle('vault:current', async () => (currentVault ? vaultLib.summary(currentVault) : null));
+
+  handle('vault:search', async (_e, q: string): Promise<SearchResults> => {
+    if (!currentVault) return { query: '', files: [], content: [] };
+    return searchVault(currentVault, String(q ?? ''));
+  });
 
   handle('permissions:reset', async () => {
     if (!currentVault) return { ok: false };

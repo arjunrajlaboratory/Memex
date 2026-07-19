@@ -105,6 +105,7 @@ async function openVault(p: string): Promise<void> {
   $('onboard').style.display = 'none';
   $('workspace').style.display = 'grid';
   $('vaultName').textContent = res.summary.name;
+  $('searchOpen').style.display = '';
   $('connDot').classList.add('live');
   applySummary(res.summary);
   await loadAppConfig();
@@ -1013,10 +1014,117 @@ M.onFsChanged(({ area }) => {
   }, 200);
 });
 
+// ============================================================ VAULT SEARCH (⌘K)
+let searchSel = 0;
+let searchSeq = 0;
+let searchTimer: number | undefined;
+// title doubles as the query text for the trailing ask-the-agent row
+let searchItems: Array<{ rel: string; ext: string; title: string; ask?: boolean }> = [];
+
+// extensions openNote can display in the artifact panel; everything else reveals in Finder
+const VIEWABLE_EXTS = new Set(['md', 'markdown', 'txt', 'html', 'htm', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
+
+function openSearch(): void {
+  if (!state.vault) return;
+  $('searchOverlay').style.display = 'grid';
+  const input = $('searchInput') as HTMLInputElement;
+  input.value = '';
+  renderSearchResults(null);
+  input.focus();
+}
+function closeSearch(): void { $('searchOverlay').style.display = 'none'; }
+
+function activateSearchItem(i: number): void {
+  const item = searchItems[i];
+  if (!item) return;
+  closeSearch();
+  if (item.ask) { void sendMessage(item.title); return; }
+  if (VIEWABLE_EXTS.has(item.ext)) void openNote(item.rel, item.title);
+  else void M.revealPath(item.rel);
+}
+
+function highlightMatch(text: string, q: string): string {
+  const t = esc(text);
+  const needle = esc(q).toLowerCase();
+  const idx = t.toLowerCase().indexOf(needle);
+  if (idx < 0) return t;
+  return t.slice(0, idx) + '<mark>' + t.slice(idx, idx + needle.length) + '</mark>' + t.slice(idx + needle.length);
+}
+
+function updateSearchSel(): void {
+  const rows = document.querySelectorAll('#searchResults .sr-row');
+  rows.forEach((r, i) => r.classList.toggle('sel', i === searchSel));
+  rows[searchSel]?.scrollIntoView({ block: 'nearest' });
+}
+
+function renderSearchResults(res: SearchResults | null): void {
+  const box = $('searchResults');
+  const q = ($('searchInput') as HTMLInputElement).value.trim();
+  searchItems = []; searchSel = 0;
+  box.innerHTML = '';
+  if (q.length < 2) {
+    box.appendChild(el('div', 'sr-hint', 'Type to search filenames, titles, and note text.'));
+    return;
+  }
+  const addSection = (label: string, hits: SearchHit[]) => {
+    if (!hits.length) return;
+    box.appendChild(el('div', 'sr-section', esc(label)));
+    hits.forEach((h) => {
+      const row = el('div', 'sr-row');
+      const main = el('div', 'sr-main');
+      main.innerHTML = `<div class="sr-title">${highlightMatch(h.title, q)}</div><div class="sr-rel">${esc(h.rel)}</div>`;
+      if (h.snippet) { const sn = el('div', 'sr-snip'); sn.innerHTML = highlightMatch(h.snippet, q); main.appendChild(sn); }
+      row.append(el('span', 'sr-ext', esc(h.ext || 'md')), main);
+      const idx = searchItems.length;
+      row.onclick = () => activateSearchItem(idx);
+      row.onmousemove = () => { if (searchSel !== idx) { searchSel = idx; updateSearchSel(); } };
+      searchItems.push({ rel: h.rel, ext: h.ext, title: h.title });
+      box.appendChild(row);
+    });
+  };
+  if (res) {
+    addSection('Files & titles', res.files);
+    addSection('In note text', res.content);
+    if (!res.files.length && !res.content.length) box.appendChild(el('div', 'sr-hint', 'No direct matches in the vault.'));
+  }
+  const ask = el('div', 'sr-row sr-ask');
+  ask.innerHTML = `<span class="sr-ext">⁂</span><div class="sr-main"><div class="sr-title">Ask your memex about “${esc(q)}”</div><div class="sr-rel">sends the query to the agent — it can search meaning, not just text</div></div>`;
+  const askIdx = searchItems.length;
+  ask.onclick = () => activateSearchItem(askIdx);
+  ask.onmousemove = () => { if (searchSel !== askIdx) { searchSel = askIdx; updateSearchSel(); } };
+  searchItems.push({ rel: '', ext: '', title: q, ask: true });
+  box.appendChild(ask);
+  updateSearchSel();
+}
+
+$('searchOpen').onclick = openSearch;
+$('searchOverlay').onclick = (e) => { if (e.target === $('searchOverlay')) closeSearch(); };
+$('searchInput').addEventListener('input', () => {
+  const q = ($('searchInput') as HTMLInputElement).value.trim();
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => {
+    const seq = ++searchSeq;
+    if (q.length < 2) { renderSearchResults(null); return; }
+    void M.search(q).then((res) => { if (seq === searchSeq) renderSearchResults(res); });
+  }, 120);
+});
+$('searchInput').addEventListener('keydown', (e) => {
+  const ke = e as KeyboardEvent;
+  if (ke.key === 'ArrowDown') { ke.preventDefault(); searchSel = Math.min(searchSel + 1, searchItems.length - 1); updateSearchSel(); }
+  else if (ke.key === 'ArrowUp') { ke.preventDefault(); searchSel = Math.max(searchSel - 1, 0); updateSearchSel(); }
+  else if (ke.key === 'Enter') { ke.preventDefault(); activateSearchItem(searchSel); }
+  else if (ke.key === 'Escape') { ke.stopPropagation(); closeSearch(); }
+});
+
 // ============================================================ MISC
 // back/forward keyboard shortcuts for the right panel
 window.addEventListener('keydown', (e) => {
   if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+  if (e.key === 'k' || e.key === 'K') {
+    e.preventDefault();
+    if ($('searchOverlay').style.display === 'grid') closeSearch(); else openSearch();
+    return;
+  }
   if (e.key === '[') { e.preventDefault(); goBack(); }
   else if (e.key === ']') { e.preventDefault(); goForward(); }
 });
