@@ -23,15 +23,15 @@ The app is a thin, opinionated shell around the **Claude Agent SDK**:
   filesystem watchers. No tokens spent just to browse.
 - **Inbox drop zones** copy dropped files (or a typed quick-note) into `Inbox/`; **Outbox** lists
   everything the agent has generated under `outputs/`.
-- **New-vault setup** wraps the engine's `bin/memex-init` (the Python installer) behind a form.
+- **New-vault setup** wraps the bundled engine initializer behind a form.
 
 ```
 src/
-  main/      main.js (window, IPC, watchers, vault init, artifact:// protocol)
-             agent.js (Claude Agent SDK session: streaming, tools, interrupt)
-             vault.js (reads tasks/projects/… from the vault's Markdown)
-  preload/   preload.js (contextBridge API)
-  renderer/  index.html · styles.css · renderer.js (the UI)
+  main/      main.ts (window, IPC, watchers, vault init, artifact:// protocol)
+             agent.ts (Claude Agent SDK session: streaming, tools, interrupt)
+             vault.ts (reads tasks/projects/… from the vault's Markdown)
+  preload/   preload.ts (contextBridge API)
+  renderer/  index.html · styles.css · renderer.ts (the UI)
 ```
 
 ## Prerequisites
@@ -40,7 +40,7 @@ src/
 - A **logged-in Claude Code CLI** (`claude` — run `claude` once and sign in). The Agent SDK
   reuses those credentials.
 - **Python 3** on PATH (only needed to *create* a new vault; opening an existing one doesn't need it).
-- The Memex **engine** — this `app/` folder lives inside the engine repo and finds it automatically.
+- The Memex **engine** when running from source. Packaged builds include the initializer templates.
 
 ## Run
 
@@ -96,9 +96,9 @@ Each `chips` entry is `{ label, prompt }` — a quick-action button (shown after
 sends `prompt` to the chat when clicked. Custom tabs and chips are marked with a small `＋` and behave
 like any built-in (back/forward history, live refresh).
 
-## Notes / next steps
+## Notes
 
-- Written in plain JS with no build step (fast to iterate). A TypeScript migration is
-  straightforward if the app grows — the SDK and Electron are fully typed and the IPC surface is small.
-- Permission mode is `acceptEdits` and tool calls are auto-approved; a future version could surface a
-  per-tool approval prompt in the UI via the SDK's `canUseTool` hook (already wired).
+- The app is strict TypeScript compiled with `tsc`; renderer HTML/CSS assets are copied into `dist/`.
+- Permission mode is `acceptEdits`, so normal vault edits remain fluid. Operations the SDK flags as
+  requiring permission (for example shell commands or access outside the vault) show a native
+  **Allow once / Deny** dialog and are denied by default.

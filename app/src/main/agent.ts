@@ -54,14 +54,25 @@ Each chip has \`"label"\` and \`"prompt"\` (the message sent to you when clicked
 export class AgentSession {
   private cwd: string;
   private onEvent: (evt: AgentEvent) => void;
+  private requestPermission: (request: AgentPermissionRequest) => Promise<boolean>;
   private queue = new MessageQueue();
   private query: Query | null = null;
   running = false;
   busy = false;
 
-  constructor({ cwd, onEvent }: { cwd: string; onEvent: (evt: AgentEvent) => void }) {
+  constructor({
+    cwd,
+    onEvent,
+    requestPermission,
+  }: {
+    cwd: string;
+    onEvent: (evt: AgentEvent) => void;
+    requestPermission?: (request: AgentPermissionRequest) => Promise<boolean>;
+  }) {
     this.cwd = cwd;
     this.onEvent = onEvent || (() => {});
+    // Fail closed if a host ever constructs a session without a permission UI.
+    this.requestPermission = requestPermission || (async () => false);
   }
 
   async start(): Promise<void> {
@@ -98,8 +109,22 @@ export class AgentSession {
         includePartialMessages: true,
         maxTurns: 100,
         mcpServers: { ui: uiServer },
-        canUseTool: async (name: string, input: Record<string, unknown>) => {
+        canUseTool: async (name: string, input: Record<string, unknown>, options) => {
           this.onEvent({ kind: 'permission', name });
+          const allowed = await this.requestPermission({
+            name,
+            input,
+            title: options.title,
+            displayName: options.displayName,
+            description: options.description,
+            decisionReason: options.decisionReason,
+            blockedPath: options.blockedPath,
+          });
+          if (!allowed || options.signal.aborted) {
+            return { behavior: 'deny' as const, message: 'The user denied this operation.' };
+          }
+          // Approval is deliberately one-shot: do not persist the SDK's suggested
+          // permission updates on behalf of the user.
           return { behavior: 'allow' as const, updatedInput: input };
         },
       },

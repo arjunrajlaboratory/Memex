@@ -86,6 +86,16 @@ interface ArtifactView {
 // ---------- agent events (main -> renderer) ----------
 interface AgentUsage { input_tokens?: number; output_tokens?: number; }
 
+interface AgentPermissionRequest {
+  name: string;
+  input: Record<string, unknown>;
+  title?: string;
+  displayName?: string;
+  description?: string;
+  decisionReason?: string;
+  blockedPath?: string;
+}
+
 // Discriminated on `kind` so switch statements narrow. The 'artifact' variant carries
 // both the raw show_artifact args (agent process -> main) and the resolved view
 // (main -> renderer); each leg fills only its own fields.

@@ -367,8 +367,14 @@ function navigate(entry: HistoryEntry): void {
   renderEntry(entry);
   updateNav();
 }
+let renderEpoch = 0;
 function renderEntry(entry: HistoryEntry): void {
-  if (entry.k === 'tab') { setActiveTab(entry.tab); renderTab(entry.tab); }
+  if (entry.k === 'tab') {
+    setActiveTab(entry.tab);
+    void renderTab(entry.tab).catch((error: unknown) => {
+      if (state.tab === entry.tab) flash('Could not render this view: ' + String((error as Error)?.message || error));
+    });
+  }
   else { displayArtifact(entry.art); }
 }
 function goBack(): void { if (state.histPos > 0) { state.histPos--; renderEntry(state.history[state.histPos]); updateNav(); } }
@@ -381,27 +387,36 @@ function updateNav(): void {
 function switchTab(tab: string): void { navigate({ k: 'tab', tab }); }
 
 async function renderTab(tab: string): Promise<void> {
+  const epoch = ++renderEpoch;
   const body = $('panelBody');
   if (tab === 'artifact') { renderArtifact(); return; }
   body.style.position = ''; body.innerHTML = '<div style="display:grid;place-items:center;padding:60px"><div class="spinner-lg"></div></div>';
-  if (tab === 'dashboard') return renderDashboard(body);
-  if (tab === 'inbox') return renderInbox(body);
-  if (tab === 'outbox') return renderOutbox(body);
-  const cdef = state.customTabs.find((t) => t.id === tab);
-  if (cdef) {
-    if (cdef.kind === 'query') return renderQueryTab(body, cdef);
-    if (cdef.kind === 'web') return renderWebTab(body, cdef);
-    return renderCustomTab(body, cdef);
+  // Render off-DOM so a slower, older IPC response cannot mutate the panel after
+  // the user has already selected a different tab.
+  const stage = document.createElement('div');
+  if (tab === 'dashboard') await renderDashboard(stage);
+  else if (tab === 'inbox') await renderInbox(stage);
+  else if (tab === 'outbox') await renderOutbox(stage);
+  else {
+    const cdef = state.customTabs.find((t) => t.id === tab);
+    if (cdef) {
+      if (cdef.kind === 'query') await renderQueryTab(stage, cdef);
+      else if (cdef.kind === 'web') renderWebTab(stage, cdef);
+      else await renderCustomTab(stage, cdef);
+    } else if (['tasks', 'projects', 'ideas', 'people'].includes(tab)) {
+      const data = await M.data(tab as DataKind);
+      if (tab === 'tasks') renderTasks(stage, data as TaskRow[]);
+      else if (tab === 'projects') renderProjects(stage, data as ProjectRow[]);
+      else if (tab === 'ideas') renderIdeas(stage, data as IdeaRow[]);
+      else if (tab === 'people') renderPeople(stage, data as PersonRow[]);
+    } else {
+      // Unrecognized id (e.g. a custom tab removed from config but still in history).
+      stage.innerHTML = '<div class="empty-note"><span class="big">This view is no longer available</span>It may have been a custom tab that was removed. Pick another tab above.</div>';
+    }
   }
-  if (['tasks', 'projects', 'ideas', 'people'].includes(tab)) {
-    const data = await M.data(tab as DataKind);
-    if (tab === 'tasks') return renderTasks(body, data as TaskRow[]);
-    if (tab === 'projects') return renderProjects(body, data as ProjectRow[]);
-    if (tab === 'ideas') return renderIdeas(body, data as IdeaRow[]);
-    if (tab === 'people') return renderPeople(body, data as PersonRow[]);
-  }
-  // Unrecognized id (e.g. a custom tab removed from config but still in history).
-  body.innerHTML = '<div class="empty-note"><span class="big">This view is no longer available</span>It may have been a custom tab that was removed. Pick another tab above.</div>';
+  if (epoch !== renderEpoch || state.tab !== tab) return;
+  body.style.position = stage.style.position;
+  body.replaceChildren(...Array.from(stage.childNodes));
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -803,7 +818,6 @@ function renderWebTab(body: HTMLElement, def: TabDef): void {
   // don't paint inside a sandboxed iframe, e.g. Quartz), and stays isolated from the app.
   const wv = document.createElement('webview') as WebviewTag;
   wv.setAttribute('src', def.url);
-  wv.setAttribute('allowpopups', '');
   // transparent while loading/failed (no white flash over the dark theme), then a
   // white backing once loaded — unstyled guest pages are transparent and would
   // otherwise show black default text on the dark panel
@@ -851,7 +865,8 @@ async function renderCustomTab(body: HTMLElement, def: TabDef): Promise<void> {
     const wrap = el('div', 'artifact-wrap');
     const abody = el('div', 'artifact-body');
     const iframe = document.createElement('iframe');
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms allow-modals');
+    iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+    iframe.referrerPolicy = 'no-referrer';
     iframe.src = f.url || '';
     abody.appendChild(iframe); wrap.appendChild(abody); body.appendChild(wrap);
   } else if (f.kind === 'image') {
@@ -867,6 +882,7 @@ async function renderCustomTab(body: HTMLElement, def: TabDef): Promise<void> {
 let currentArtifact: ArtifactView | null = null;
 
 function displayArtifact(art: ArtifactView): void {   // no history push
+  renderEpoch++;   // cancel any in-flight tab render before it can commit
   currentArtifact = art;
   state.hasArtifact = true;
   $('artifactTab').style.display = '';
@@ -892,10 +908,11 @@ function renderArtifact(): void {
   wrap.appendChild(bar);
   const abody = el('div', 'artifact-body');
   if (a.kind === 'html') {
-    // Served from the artifact:// origin (its own CSP-free secure origin) so the
-    // artifact's inline scripts run; cross-origin from the app, so it stays isolated.
+    // Served from a unique artifact:// origin with a no-network CSP. The opaque
+    // sandbox still permits inline scripts while isolating the document from the app.
     const iframe = document.createElement('iframe');
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms allow-modals');
+    iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+    iframe.referrerPolicy = 'no-referrer';
     iframe.src = a.url || '';
     abody.appendChild(iframe);
   } else if (a.kind === 'image') {
@@ -984,13 +1001,22 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === ']') { e.preventDefault(); goForward(); }
 });
 
-// wikilinks inside rendered markdown (chat bubbles + artifact md) open the target note
+// Links live in the privileged renderer. Internal wikilinks stay in-app; ordinary
+// HTTP(S) links are delegated to the system browser; every other scheme is blocked.
 document.addEventListener('click', (e) => {
-  const a = (e.target as Element | null)?.closest?.('a.wikilink[data-rel]');
-  if (!a) return;
+  const target = e.target as Element | null;
+  const wikilink = target?.closest?.('a.wikilink[data-rel]');
+  if (wikilink) {
+    e.preventDefault();
+    const rel = wikilink.getAttribute('data-rel');
+    if (rel) openNote(rel, wikilink.textContent || undefined);
+    return;
+  }
+  const link = target?.closest?.('a[href]');
+  if (!link) return;
   e.preventDefault();
-  const rel = a.getAttribute('data-rel');
-  if (rel) openNote(rel, a.textContent || undefined);
+  const href = link.getAttribute('href') || '';
+  if (/^https?:\/\//i.test(href)) M.openExternal(href);
 });
 
 $('themeToggle').onclick = () => {

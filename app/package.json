@@ -9,6 +9,7 @@
     "assets": "mkdir -p dist/renderer && cp src/renderer/index.html src/renderer/styles.css dist/renderer/",
     "build": "tsc && npm run assets",
     "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test test/*.test.cjs",
     "watch": "npm run assets && tsc -w",
     "start": "npm run build && electron .",
     "dev": "npm run build && MEMEX_DEV=1 electron .",
@@ -40,6 +41,45 @@
     "files": [
       "dist/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../tools",
+        "to": "engine/tools",
+        "filter": [
+          "memex_init.py",
+          "memex_bake.py"
+        ]
+      },
+      {
+        "from": "../packs",
+        "to": "engine/packs"
+      },
+      {
+        "from": "../hardened",
+        "to": "engine/hardened",
+        "filter": [
+          "**/*",
+          "!**/.gitignore",
+          "!**/tsconfig.tsbuildinfo"
+        ]
+      },
+      {
+        "from": "../placeholders.json",
+        "to": "engine/placeholders.json"
+      },
+      {
+        "from": "../packs.json",
+        "to": "engine/packs.json"
+      },
+      {
+        "from": "../engine_layout.json",
+        "to": "engine/engine_layout.json"
+      },
+      {
+        "from": "../VERSION",
+        "to": "engine/VERSION"
+      }
     ],
     "asar": true,
     "mac": {

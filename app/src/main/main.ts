@@ -1,14 +1,23 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, protocol } from 'electron';
+import type { IpcMainInvokeEvent } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 
 import * as vaultLib from './vault';
 import { AgentSession } from './agent';
+import { localDatePlusDays, localDateString } from './date';
+import { isSafeExternalUrl, isTrustedFileUrl, resolveInside } from './security';
 
 const fsp = fs.promises;
-const ENGINE_ROOT = path.resolve(__dirname, '..', '..', '..'); // .../Memex
+// Development runs inside the engine checkout; packaged builds carry the exact
+// initializer inputs as an extra resource next to app.asar.
+const ENGINE_ROOT = app.isPackaged
+  ? path.join(process.resourcesPath, 'engine')
+  : path.resolve(__dirname, '..', '..', '..');
+const RENDERER_PATH = path.join(__dirname, '..', 'renderer', 'index.html');
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 
 interface PersistedConfig { recent?: string[]; last?: string; }
@@ -38,7 +47,6 @@ protocol.registerSchemesAsPrivileged([
 ]);
 const artifactStore = new Map<string, string>();      // id -> html
 const artifactByContent = new Map<string, string>();  // html -> id (dedup, so re-viewing costs nothing)
-let artifactSeq = 0;
 function registerArtifact(html: string): string {
   html = html || '';
   const existing = artifactByContent.get(html);
@@ -46,9 +54,11 @@ function registerArtifact(html: string): string {
     // LRU refresh: re-registering moves the artifact to the back of the eviction queue
     artifactStore.delete(existing);
     artifactStore.set(existing, html);
-    return `artifact://memex/${existing}`;
+    return `artifact://${existing}/index.html`;
   }
-  const id = String(++artifactSeq);
+  // The host is the origin for a standard custom scheme. A random host gives every
+  // distinct document its own origin even if iframe sandbox flags change later.
+  const id = randomUUID();
   artifactStore.set(id, html);
   artifactByContent.set(html, id);
   if (artifactStore.size > 200) {
@@ -57,8 +67,21 @@ function registerArtifact(html: string): string {
     artifactStore.delete(oldest);
     if (oldHtml != null && artifactByContent.get(oldHtml) === oldest) artifactByContent.delete(oldHtml);
   }
-  return `artifact://memex/${id}`;
+  return `artifact://${id}/index.html`;
 }
+
+const ARTIFACT_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  'img-src data: blob:',
+  'font-src data:',
+  'media-src data: blob:',
+  "connect-src 'none'",
+  "frame-src 'none'",
+  "form-action 'none'",
+  "base-uri 'none'",
+].join('; ');
 
 // ---------- small persistent config (recent vaults) ----------
 function loadConfig(): PersistedConfig {
@@ -120,8 +143,9 @@ async function linkifyWikilinks(md: string): Promise<string> {
 type FilterableRow = Partial<TaskRow> & { status?: string; due?: string; tags?: string[] };
 function filterRows<T extends FilterableRow>(rows: T[], where: QueryWhere | null | undefined, source: string): T[] {
   const w: QueryWhere = where || {};
-  const today = new Date().toISOString().slice(0, 10);
-  const plusDays = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  const now = new Date();
+  const today = localDateString(now);
+  const plusDays = (n: number) => localDatePlusDays(n, now);
   const done = new Set(['done', 'canceled']);
   const has = (v: unknown): boolean => v != null && v !== '';
   const inList = (arr: unknown, v: unknown) => Array.isArray(arr) && arr.map(String).includes(String(v));
@@ -158,6 +182,10 @@ async function renderMarkdown(md: string): Promise<string> {
 }
 
 // ---------- window ----------
+function openInSystemBrowser(url: string): void {
+  if (isSafeExternalUrl(url)) void shell.openExternal(url);
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1440,
@@ -175,7 +203,51 @@ function createWindow(): void {
       webviewTag: true,   // <webview> is used for embedded "web" dashboard tabs
     },
   });
-  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  const contents = win.webContents;
+
+  // The preload bridge is intentionally powerful. Never let another origin replace
+  // the renderer in this WebContents, and never create an inherited child window.
+  contents.on('will-navigate', (event) => {
+    if (isTrustedFileUrl(event.url, RENDERER_PATH)) return;
+    event.preventDefault();
+    openInSystemBrowser(event.url);
+  });
+  contents.on('will-frame-navigate', (event) => {
+    if (event.isMainFrame) return; // the main-frame guard above owns this case
+    try {
+      if (new URL(event.url).protocol === 'artifact:') return;
+    } catch (_) {}
+    event.preventDefault();
+  });
+  contents.setWindowOpenHandler(({ url }) => {
+    openInSystemBrowser(url);
+    return { action: 'deny' };
+  });
+
+  // Web tabs are isolated guests, but their configuration is agent-editable. Enforce
+  // safe preferences in the main process and accept only ordinary web URLs.
+  contents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (!isSafeExternalUrl(params.src || '')) {
+      event.preventDefault();
+      return;
+    }
+    delete webPreferences.preload;
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    webPreferences.webSecurity = true;
+  });
+  contents.on('did-attach-webview', (_event, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      openInSystemBrowser(url);
+      return { action: 'deny' };
+    });
+    guest.on('will-navigate', (event) => {
+      if (!isSafeExternalUrl(event.url)) event.preventDefault();
+    });
+  });
+
+  void win.loadFile(RENDERER_PATH);
   if (process.env.MEMEX_DEV) setupDevHarness();
 }
 
@@ -281,15 +353,84 @@ function argvFiles(argv: string[]): string[] {
 }
 
 // ---------- agent session ----------
+let permissionDialogQueue: Promise<void> = Promise.resolve();
+
+function pathStaysInVault(vault: string, candidate: string): boolean {
+  const full = path.resolve(vault, expandHome(candidate));
+  if (!vaultLib.within(vault, full)) return false;
+  // Lexical containment is not enough when an existing parent is a symlink.
+  try {
+    let existing = full;
+    while (!fs.existsSync(existing)) {
+      const parent = path.dirname(existing);
+      if (parent === existing) return false;
+      existing = parent;
+    }
+    return vaultLib.within(fs.realpathSync(vault), fs.realpathSync(existing));
+  } catch (_) {
+    return false;
+  }
+}
+
+function canAutoAllowVaultTool(vault: string, request: AgentPermissionRequest): boolean {
+  if (request.name === 'mcp__ui__show_artifact') return true;
+  if (['TodoWrite', 'Task', 'Skill'].includes(request.name)) return true;
+  const pathTools = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Glob', 'Grep']);
+  if (!pathTools.has(request.name)) return false;
+  const candidates = ['file_path', 'path', 'notebook_path']
+    .map((key) => request.input[key])
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+  // Glob/Grep default to the session cwd when no path is supplied. File tools must
+  // identify the path we are approving.
+  if (!candidates.length) return request.name === 'Glob' || request.name === 'Grep';
+  return candidates.every((candidate) => pathStaysInVault(vault, candidate));
+}
+
+function requestAgentPermission(vault: string, request: AgentPermissionRequest): Promise<boolean> {
+  if (canAutoAllowVaultTool(vault, request)) return Promise.resolve(true);
+  const ask = async (): Promise<boolean> => {
+    if (!win || win.isDestroyed() || currentVault !== vault) return false;
+    const inputSummary = request.input.command
+      ? String(request.input.command)
+      : JSON.stringify(request.input, null, 2);
+    const detail = [
+      request.description,
+      request.blockedPath ? `Outside the vault: ${request.blockedPath}` : '',
+      request.decisionReason,
+      inputSummary,
+    ].filter(Boolean).join('\n\n').slice(0, 4000);
+    const result = await dialog.showMessageBox(win, {
+      type: 'warning',
+      title: 'Agent permission',
+      message: request.title || request.displayName || `Allow ${request.name}?`,
+      detail,
+      buttons: ['Deny', 'Allow once'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    return currentVault === vault && result.response === 1;
+  };
+
+  // Tool calls can request permission concurrently; native dialogs should not.
+  const result = permissionDialogQueue.then(ask, ask);
+  permissionDialogQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 async function startSession(vault: string): Promise<void> {
   if (session) { try { await session.stop(); } catch (_) {} session = null; }
+  let nextSession: AgentSession;
+  const isCurrent = () => session === nextSession && currentVault === vault;
   const handleEvent = async (evt: AgentEvent): Promise<void> => {
+    if (!isCurrent()) return;
     if (evt.kind === 'assistant_text') {
-      emit('agent:event', { ...evt, html: await renderMarkdown(evt.text) });
+      const html = await renderMarkdown(evt.text);
+      if (isCurrent()) emit('agent:event', { ...evt, html });
     } else if (evt.kind === 'artifact') {
       // Resolve inline vs path; render markdown to html here.
       const art = await resolveArtifact(vault, evt);
-      emit('agent:event', { kind: 'artifact', artifact: art });
+      if (isCurrent()) emit('agent:event', { kind: 'artifact', artifact: art });
     } else {
       emit('agent:event', evt);
     }
@@ -298,11 +439,13 @@ async function startSession(vault: string): Promise<void> {
   // events reaching the renderer in emission order, else a tool_use/result can
   // overtake its preceding assistant_text and duplicate the chat bubble.
   let chain: Promise<void> = Promise.resolve();
-  session = new AgentSession({
+  nextSession = new AgentSession({
     cwd: vault,
     onEvent: (evt: AgentEvent) => { chain = chain.then(() => handleEvent(evt)).catch(() => {}); },
+    requestPermission: (request) => requestAgentPermission(vault, request),
   });
-  await session.start();
+  session = nextSession;
+  await nextSession.start();
 }
 
 async function resolveArtifact(vault: string, evt: Extract<AgentEvent, { kind: 'artifact' }>): Promise<ArtifactView> {
@@ -330,13 +473,13 @@ async function resolveArtifact(vault: string, evt: Extract<AgentEvent, { kind: '
 function createVault({ target, answers, packs }: { target: string; answers: Record<string, string>; packs: string }): Promise<CreateVaultResult> {
   return new Promise((resolve) => {
     const initScript = path.join(ENGINE_ROOT, 'tools', 'memex_init.py');
-    // Packaged apps ship dist/ inside an asar — the engine's tools/ dir isn't there.
     if (!fs.existsSync(initScript)) {
-      resolve({ ok: false, code: -1, output: 'Vault creation requires the Memex engine repo (tools/memex_init.py not found). Clone github.com/arjunrajlaboratory/Memex and run the app from app/ inside it, or open an existing vault.' });
+      resolve({ ok: false, code: -1, output: 'The bundled Memex initializer is missing. Reinstall the app, or open an existing vault.' });
       return;
     }
-    const tmp = path.join(os.tmpdir(), `memex-answers-${Date.now()}.json`);
-    fs.writeFileSync(tmp, JSON.stringify(answers, null, 2));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'memex-init-'));
+    const tmp = path.join(tmpDir, 'answers.json');
+    fs.writeFileSync(tmp, JSON.stringify(answers, null, 2), { mode: 0o600 });
     const args = [
       initScript,
       '--eng', ENGINE_ROOT,
@@ -344,52 +487,93 @@ function createVault({ target, answers, packs }: { target: string; answers: Reco
       '--packs', packs || 'core',
       '--answers', tmp,
     ];
-    emit('setup:progress', { line: `python3 ${args.join(' ')}` });
-    const proc = spawn('python3', args, { cwd: ENGINE_ROOT });
     let out = '';
-    proc.stdout.on('data', (d) => { out += d; emit('setup:progress', { line: d.toString() }); });
-    proc.stderr.on('data', (d) => { out += d; emit('setup:progress', { line: d.toString() }); });
-    proc.on('close', (code) => {
-      try { fs.unlinkSync(tmp); } catch (_) {}
-      resolve({ ok: code === 0, code: code ?? -1, output: out });
-    });
-    proc.on('error', (err) => resolve({ ok: false, code: -1, output: String(err) }));
+    let settled = false;
+    const finish = (result: CreateVaultResult) => {
+      if (settled) return;
+      settled = true;
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+      resolve(result);
+    };
+    const candidates = process.platform === 'win32'
+      ? [{ command: 'py', prefix: ['-3'] }, { command: 'python', prefix: [] }, { command: 'python3', prefix: [] }]
+      : [{ command: 'python3', prefix: [] }, { command: 'python', prefix: [] }];
+    const launch = (index: number): void => {
+      const candidate = candidates[index];
+      if (!candidate) {
+        finish({ ok: false, code: -1, output: out || 'Python 3 was not found on PATH.' });
+        return;
+      }
+      const procArgs = [...candidate.prefix, ...args];
+      emit('setup:progress', { line: `${candidate.command} ${procArgs.join(' ')}\n` });
+      const proc = spawn(candidate.command, procArgs, { cwd: ENGINE_ROOT });
+      let missingExecutable = false;
+      proc.stdout.on('data', (d) => { out += d; emit('setup:progress', { line: d.toString() }); });
+      proc.stderr.on('data', (d) => { out += d; emit('setup:progress', { line: d.toString() }); });
+      proc.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') {
+          missingExecutable = true;
+          launch(index + 1);
+        } else {
+          finish({ ok: false, code: -1, output: out + String(err) });
+        }
+      });
+      proc.on('close', (code) => {
+        if (!missingExecutable) finish({ ok: code === 0, code: code ?? -1, output: out });
+      });
+    };
+    launch(0);
   });
 }
 
 // ---------- IPC ----------
+function isTrustedIpcSender(event: IpcMainInvokeEvent): boolean {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return false;
+  const senderUrl = event.senderFrame?.url || event.sender.getURL();
+  return isTrustedFileUrl(senderUrl, RENDERER_PATH);
+}
+
+type IpcHandler = (event: IpcMainInvokeEvent, ...args: any[]) => any;
+
 function registerIpc(): void {
-  ipcMain.handle('vault:pick', async () => {
+  const handle = (channel: string, listener: IpcHandler): void => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!isTrustedIpcSender(event)) throw new Error('IPC request rejected: untrusted renderer');
+      return listener(event, ...args);
+    });
+  };
+
+  handle('vault:pick', async () => {
     if (!win) return null;
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
     return r.canceled ? null : r.filePaths[0];
   });
 
-  ipcMain.handle('vault:detect', async (_e, p: string) => {
+  handle('vault:detect', async (_e, p: string) => {
     const full = expandHome(p);
     return { path: full, isVault: vaultLib.isVault(full) };
   });
 
-  ipcMain.handle('files:pick', async () => {
+  handle('files:pick', async () => {
     if (!win) return [];
     const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'] });
     return r.canceled ? [] : r.filePaths;
   });
 
-  ipcMain.handle('vault:recent', async () => {
+  handle('vault:recent', async () => {
     const cfg = loadConfig();
     const recent = (cfg.recent || []).filter((p) => vaultLib.isVault(p));
     return { recent, last: cfg.last && vaultLib.isVault(cfg.last) ? cfg.last : null };
   });
 
-  ipcMain.handle('vault:current', async () => (currentVault ? vaultLib.summary(currentVault) : null));
+  handle('vault:current', async () => (currentVault ? vaultLib.summary(currentVault) : null));
 
-  ipcMain.handle('vault:create', async (_e, opts: { target: string; answers: Record<string, string>; packs: string }) => {
+  handle('vault:create', async (_e, opts: { target: string; answers: Record<string, string>; packs: string }) => {
     const res = await createVault({ ...opts, target: expandHome(opts.target) });
     return res;
   });
 
-  ipcMain.handle('vault:open', async (_e, p: string) => {
+  handle('vault:open', async (_e, p: string) => {
     const full = expandHome(p);
     if (!vaultLib.isVault(full)) return { ok: false, error: 'Not a Memex vault' };
     currentVault = full;
@@ -405,7 +589,7 @@ function registerIpc(): void {
     return { ok: true, summary: vaultLib.summary(full) };
   });
 
-  ipcMain.handle('data:get', async (_e, kind: DataKind) => {
+  handle('data:get', async (_e, kind: DataKind) => {
     if (!currentVault) return null;
     switch (kind) {
       case 'summary': return vaultLib.summary(currentVault);
@@ -432,7 +616,7 @@ function registerIpc(): void {
     return out as QueryWhere;
   }
 
-  ipcMain.handle('data:appConfig', async (): Promise<AppConfig> => {
+  handle('data:appConfig', async (): Promise<AppConfig> => {
     const out: AppConfig = { tabs: [], chips: [] };
     if (!currentVault) return out;
     const builtins = new Set(['dashboard', 'tasks', 'projects', 'ideas', 'people', 'inbox', 'outbox', 'artifact']);
@@ -456,7 +640,7 @@ function registerIpc(): void {
             label: String(t.label),
             kind: (t.kind || (t.url ? 'web' : (t.source ? 'query' : 'path'))) as TabDef['kind'],
             path: t.path ? String(t.path) : '',
-            url: t.url ? String(t.url) : '',
+            url: t.url && isSafeExternalUrl(String(t.url)) ? String(t.url) : '',
             source: t.source ? String(t.source) : '',
             where: normalizeWhere(t.where),
             empty: t.empty ? String(t.empty) : '',
@@ -473,7 +657,7 @@ function registerIpc(): void {
     return out;
   });
 
-  ipcMain.handle('tab:query', async (_e, def: TabDef | null): Promise<TabQueryResult> => {
+  handle('tab:query', async (_e, def: TabDef | null): Promise<TabQueryResult> => {
     if (!currentVault || !def) return { source: 'tasks', rows: [] };
     const source = def.source || 'tasks';
     const loaders: Record<string, (v: string) => DataRow[]> = {
@@ -484,7 +668,7 @@ function registerIpc(): void {
     return { source, rows: filterRows(load(currentVault), def.where || {}, source) };
   });
 
-  ipcMain.handle('tab:content', async (_e, rel: string): Promise<TabContentResult> => {
+  handle('tab:content', async (_e, rel: string): Promise<TabContentResult> => {
     if (!currentVault) return { type: 'missing' };
     const full = path.resolve(currentVault, rel);
     if (!vaultLib.within(currentVault, full)) return { type: 'missing' };
@@ -497,7 +681,7 @@ function registerIpc(): void {
     return { type: 'file', file: f };
   });
 
-  ipcMain.handle('note:read', async (_e, rel: string): Promise<VaultFile | null> => {
+  handle('note:read', async (_e, rel: string): Promise<VaultFile | null> => {
     if (!currentVault) return null;
     const f = vaultLib.readFile(currentVault, rel);
     if (!f) return null;
@@ -506,19 +690,19 @@ function registerIpc(): void {
     return f;
   });
 
-  ipcMain.handle('artifact:register', async (_e, html: string) => registerArtifact(html || ''));
+  handle('artifact:register', async (_e, html: string) => registerArtifact(html || ''));
 
-  ipcMain.handle('agent:send', async (_e, text: string) => {
+  handle('agent:send', async (_e, text: string) => {
     if (!session || !session.running) return { ok: false, error: 'No active session' };
     return { ok: session.send(text) };
   });
 
-  ipcMain.handle('agent:interrupt', async () => {
+  handle('agent:interrupt', async () => {
     if (session) await session.interrupt();
     return { ok: true };
   });
 
-  ipcMain.handle('inbox:addNote', async (_e, text: string) => {
+  handle('inbox:addNote', async (_e, text: string) => {
     if (!currentVault) return { ok: false };
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     // the stamp has second precision — suffix on collision so rapid notes never overwrite
@@ -528,17 +712,22 @@ function registerIpc(): void {
     return { ok: true, rel: path.relative(currentVault, file) };
   });
 
-  ipcMain.handle('inbox:drop', async (_e, paths: string[]) => copyIntoInbox(paths));
+  handle('inbox:drop', async (_e, paths: string[]) => copyIntoInbox(paths));
 
-  ipcMain.handle('shell:open', async (_e, target: string) => {
-    if (/^https?:/.test(target)) return shell.openExternal(target);
-    if (currentVault) return shell.openPath(path.resolve(currentVault, target));
+  handle('shell:open', async (_e, target: string) => {
+    if (isSafeExternalUrl(target)) return shell.openExternal(target);
+    if (currentVault) {
+      const full = resolveInside(currentVault, target);
+      if (full && pathStaysInVault(currentVault, target)) return shell.openPath(full);
+    }
     return null;
   });
 
-  ipcMain.handle('shell:reveal', async (_e, rel: string) => {
+  handle('shell:reveal', async (_e, rel: string) => {
     if (!currentVault) return null;
-    shell.showItemInFolder(path.resolve(currentVault, rel));
+    const full = resolveInside(currentVault, rel);
+    if (full && pathStaysInVault(currentVault, rel)) shell.showItemInFolder(full);
+    return null;
   });
 }
 
@@ -559,18 +748,26 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     protocol.handle('artifact', (req) => {
-      const id = new URL(req.url).pathname.replace(/^\//, '');
+      const url = new URL(req.url);
+      const id = url.hostname;
+      if (url.pathname !== '/index.html') return new Response('Not found', { status: 404 });
       const html = artifactStore.get(id);
+      const headers = {
+        'content-type': 'text/html; charset=utf-8',
+        'content-security-policy': ARTIFACT_CSP,
+        'referrer-policy': 'no-referrer',
+        'x-content-type-options': 'nosniff',
+      };
       if (html == null) {
         // Evicted from the cache (panel history can outlive the 200-entry store) —
         // show a themed explanation instead of a bare "Not found".
         const gone = '<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font-family:ui-sans-serif,system-ui,sans-serif;background:#1b1810;color:#bcb096"><div style="text-align:center;max-width:420px;padding:24px"><div style="font-size:36px;color:#e0a54a">✦</div><h2 style="color:#efe7d4;font-weight:600;margin:12px 0 8px">This artifact has expired</h2><p style="line-height:1.6;font-size:14px">Older artifacts are dropped from the cache as new ones arrive. Ask the agent to show it again, or open the source file from the Outbox.</p></div></body>';
-        return new Response(gone, { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } });
+        return new Response(gone, { status: 404, headers });
       }
       // LRU refresh on view so revisited artifacts aren't the first evicted
       artifactStore.delete(id);
       artifactStore.set(id, html);
-      return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      return new Response(html, { headers });
     });
     registerIpc();
     createWindow();
