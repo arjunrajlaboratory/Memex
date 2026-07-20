@@ -74,3 +74,12 @@ test('a disappearing collection entry is skipped instead of rejecting the collec
 
   assert.deepEqual(patchedVaultLib.readTasks(vault), []);
 });
+
+test('display reads reject files larger than their content limit', (t) => {
+  const { vault } = makeTree(t);
+  const oversized = path.join(vault, 'outputs/oversized.txt');
+  fs.writeFileSync(oversized, 'small');
+  fs.truncateSync(oversized, vaultLib.MAX_TEXT_FILE_BYTES + 1);
+
+  assert.equal(vaultLib.readFile(vault, 'outputs/oversized.txt'), null);
+});

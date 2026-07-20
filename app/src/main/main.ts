@@ -4,11 +4,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawn } from 'child_process';
-import { randomUUID } from 'crypto';
 
 import * as vaultLib from './vault';
 import { AgentSession } from './agent';
+import { ArtifactStore } from './artifact-store';
 import { localDatePlusDays, localDateString } from './date';
+import { copyPathsIntoInbox, writeInboxNote } from './inbox';
 import { invalidateSearchIndex, searchVault } from './search';
 import { clearVaultToolGrants, grantTool, hasToolGrant, type ToolGrantState } from './grants';
 import { isSafeExternalUrl, isTrustedFileUrl, resolveInside, resolvedStaysInside } from './security';
@@ -42,6 +43,8 @@ let currentVault: string | null = null;
 const vaultTransition = new VaultTransitionGate();
 let session: AgentSession | null = null;
 let watchers: fs.FSWatcher[] = [];
+let watcherRestartTimer: ReturnType<typeof setTimeout> | null = null;
+let shuttingDown = false;
 let mdRenderer: ((md: string) => string) | null = null;
 // Files dropped on the Dock icon (mac) or taskbar/exe (Windows) before any vault is open;
 // flushed into the Inbox once vault:open succeeds.
@@ -56,28 +59,14 @@ function activeVaultPath(): string | null {
 protocol.registerSchemesAsPrivileged([
   { scheme: 'artifact', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
-const artifactStore = new Map<string, string>();      // id -> html
-const artifactByContent = new Map<string, string>();  // html -> id (dedup, so re-viewing costs nothing)
-function registerArtifact(html: string): string {
-  html = html || '';
-  const existing = artifactByContent.get(html);
-  if (existing && artifactStore.has(existing)) {
-    // LRU refresh: re-registering moves the artifact to the back of the eviction queue
-    artifactStore.delete(existing);
-    artifactStore.set(existing, html);
-    return `artifact://${existing}/index.html`;
-  }
-  // The host is the origin for a standard custom scheme. A random host gives every
-  // distinct document its own origin even if iframe sandbox flags change later.
-  const id = randomUUID();
-  artifactStore.set(id, html);
-  artifactByContent.set(html, id);
-  if (artifactStore.size > 200) {
-    const oldest = artifactStore.keys().next().value as string;
-    const oldHtml = artifactStore.get(oldest);
-    artifactStore.delete(oldest);
-    if (oldHtml != null && artifactByContent.get(oldHtml) === oldest) artifactByContent.delete(oldHtml);
-  }
+const artifactStore = new ArtifactStore(200);
+function artifactScope(vault: string): string {
+  try { return fs.realpathSync(vault); } catch (_) { return path.resolve(vault); }
+}
+function registerArtifact(html: string, vault: string): string {
+  // The host is the origin for a standard custom scheme. Deduplication is scoped
+  // to one canonical vault so identical dashboards cannot share localStorage.
+  const id = artifactStore.register(artifactScope(vault), html || '');
   return `artifact://${id}/index.html`;
 }
 
@@ -315,7 +304,31 @@ function emit(channel: string, payload: unknown): void {
 }
 
 // ---------- file watchers ----------
-function stopWatchers(): void { for (const w of watchers) { try { w.close(); } catch (_) {} } watchers = []; }
+function stopWatchers(): void {
+  if (watcherRestartTimer) clearTimeout(watcherRestartTimer);
+  watcherRestartTimer = null;
+  for (const w of watchers) { try { w.close(); } catch (_) {} }
+  watchers = [];
+}
+
+function scheduleWatcherRestart(vault: string): void {
+  if (shuttingDown || currentVault !== vault || watcherRestartTimer) return;
+  watcherRestartTimer = setTimeout(() => {
+    watcherRestartTimer = null;
+    if (shuttingDown || currentVault !== vault) return;
+    if (vaultTransition.active) { scheduleWatcherRestart(vault); return; }
+    startWatchers(vault);
+  }, 1000);
+}
+
+function retainWatcher(watcher: fs.FSWatcher, vault: string): void {
+  watcher.on('error', () => {
+    try { watcher.close(); } catch (_) {}
+    watchers = watchers.filter((candidate) => candidate !== watcher);
+    scheduleWatcherRestart(vault);
+  });
+  watchers.push(watcher);
+}
 
 function startWatchers(vault: string): void {
   stopWatchers();
@@ -335,7 +348,7 @@ function startWatchers(vault: string): void {
     const w = fs.watch(vault, { recursive: true }, (_eventType, filename) => {
       applyChange(filename ? String(filename) : '');
     });
-    watchers.push(w);
+    retainWatcher(w, vault);
     return;
   } catch (_) { /* fall back to standard panel folders below */ }
 
@@ -357,34 +370,18 @@ function startWatchers(vault: string): void {
         const changed = filename ? path.join(rel, String(filename)) : rel;
         timer = setTimeout(() => applyChange(changed, area), 250);
       });
-      watchers.push(w);
+      retainWatcher(w, vault);
     } catch (_) {}
   }
 }
 
 // ---------- inbox drop (drag & drop zone + files dropped on the app icon) ----------
 // Shared by ipcMain 'inbox:drop' and handleIconDrop below — behavior must stay identical
-// for both entry points: dedup suffix on name collision, cpSync for dirs, silent per-file catch.
+// for both entry points: dedup suffix on collision and isolate per-source failures.
 function copyIntoInbox(paths: string[], vault = activeVaultPath()): DropResult {
   if (!vault) return { ok: false };
-  const inbox = path.join(vault, 'Inbox');
-  const copied: string[] = [];
-  for (const src of paths || []) {
-    try {
-      const base = path.basename(src);
-      let dest = path.join(inbox, base);
-      let i = 1;
-      while (fs.existsSync(dest)) {
-        const ext = path.extname(base); const stem = base.slice(0, base.length - ext.length);
-        dest = path.join(inbox, `${stem}-${i}${ext}`); i++;
-      }
-      const stat = fs.statSync(src);
-      if (stat.isDirectory()) fs.cpSync(src, dest, { recursive: true });
-      else fs.copyFileSync(src, dest);
-      copied.push(path.basename(dest));
-    } catch (_) {}
-  }
-  return { ok: true, copied };
+  const copied = copyPathsIntoInbox(vault, paths);
+  return copied ? { ok: true, copied } : { ok: false, error: 'The vault Inbox is missing or unsafe' };
 }
 
 // Files dropped on the Dock icon / taskbar-exe / passed on argv. No vault yet -> queue for
@@ -394,7 +391,7 @@ function handleIconDrop(paths: string[]): void {
   const vault = activeVaultPath();
   if (!vault) { pendingDrops.push(...paths); return; }
   const res = copyIntoInbox(paths, vault);
-  emit('inbox:iconDrop', { copied: res.copied || [] });
+  emit('inbox:iconDrop', { copied: res.copied || [], error: res.error });
 }
 
 // Recovers files dropped on the taskbar/exe (Windows 'second-instance' argv) or passed at
@@ -513,7 +510,7 @@ async function resolveArtifact(vault: string, evt: Extract<AgentEvent, { kind: '
   if (rel && !content) {
     const f = vaultLib.readFile(vault, rel);
     if (f) {
-      if (f.kind === 'html') return { title: title || rel, kind: 'html', url: registerArtifact(f.content || ''), rel };
+      if (f.kind === 'html') return { title: title || rel, kind: 'html', url: registerArtifact(f.content || '', vault), rel };
       if (f.kind === 'image') return { title: title || rel, kind: 'image', dataUri: f.dataUri, rel };
       if (f.kind === 'markdown') return { title: title || rel, kind: 'markdown', html: await renderMarkdown(f.content || ''), rel };
       return { title: title || rel, kind: 'text', text: f.content, rel };
@@ -524,7 +521,7 @@ async function resolveArtifact(vault: string, evt: Extract<AgentEvent, { kind: '
     else if (content && /^\s*<!doctype|^\s*<html|^\s*<div|^\s*<section|^\s*<table/i.test(content)) kind = 'html';
     else kind = 'markdown';
   }
-  if (kind === 'html') return { title, kind: 'html', url: registerArtifact(content || ''), rel };
+  if (kind === 'html') return { title, kind: 'html', url: registerArtifact(content || '', vault), rel };
   return { title, kind: 'markdown', html: await renderMarkdown(content || ''), rel };
 }
 
@@ -661,7 +658,7 @@ function registerIpc(): void {
       if (pendingDrops.length) {
         const drops = pendingDrops; pendingDrops = [];
         const res = copyIntoInbox(drops, full);
-        emit('inbox:iconDrop', { copied: res.copied || [] });
+        emit('inbox:iconDrop', { copied: res.copied || [], error: res.error });
       }
       return { ok: true, summary: vaultLib.summary(full) };
     } finally {
@@ -763,7 +760,7 @@ function registerIpc(): void {
     const f = vaultLib.readFile(vault, rel);
     if (!f) return { type: 'missing' };
     if (f.kind === 'markdown') return { type: 'file', file: { ...f, html: await renderMarkdown(f.content || '') } };
-    if (f.kind === 'html') return { type: 'file', file: { kind: 'html', url: registerArtifact(f.content || ''), rel } };
+    if (f.kind === 'html') return { type: 'file', file: { kind: 'html', url: registerArtifact(f.content || '', vault), rel } };
     return { type: 'file', file: f };
   });
 
@@ -773,11 +770,14 @@ function registerIpc(): void {
     const f = vaultLib.readFile(vault, rel);
     if (!f) return null;
     if (f.kind === 'markdown') return { ...f, html: await renderMarkdown(f.content || '') };
-    if (f.kind === 'html') return { kind: 'html', url: registerArtifact(f.content || ''), rel };
+    if (f.kind === 'html') return { kind: 'html', url: registerArtifact(f.content || '', vault), rel };
     return f;
   });
 
-  handle('artifact:register', async (_e, html: string) => registerArtifact(html || ''));
+  handle('artifact:register', async (_e, html: string) => {
+    const vault = activeVaultPath();
+    return vault ? registerArtifact(html || '', vault) : '';
+  });
 
   handle('agent:send', async (_e, text: string) => {
     if (!activeVaultPath()) return { ok: false, error: 'Vault is switching' };
@@ -794,12 +794,10 @@ function registerIpc(): void {
   handle('inbox:addNote', async (_e, text: string) => {
     const vault = activeVaultPath();
     if (!vault) return { ok: false };
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    // the stamp has second precision — suffix on collision so rapid notes never overwrite
-    let file = path.join(vault, 'Inbox', `note-${stamp}.md`);
-    for (let i = 1; fs.existsSync(file); i++) file = path.join(vault, 'Inbox', `note-${stamp}-${i}.md`);
-    fs.writeFileSync(file, text.endsWith('\n') ? text : text + '\n');
-    return { ok: true, rel: path.relative(vault, file) };
+    const rel = writeInboxNote(vault, String(text ?? ''));
+    return rel
+      ? { ok: true, rel }
+      : { ok: false, error: 'Could not write to this vault\'s Inbox' };
   });
 
   handle('inbox:drop', async (_e, paths: string[]) => copyIntoInbox(paths));
@@ -861,9 +859,6 @@ if (!gotLock) {
         const gone = '<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:100vh;font-family:ui-sans-serif,system-ui,sans-serif;background:#1b1810;color:#bcb096"><div style="text-align:center;max-width:420px;padding:24px"><div style="font-size:36px;color:#e0a54a">✦</div><h2 style="color:#efe7d4;font-weight:600;margin:12px 0 8px">This artifact has expired</h2><p style="line-height:1.6;font-size:14px">Older artifacts are dropped from the cache as new ones arrive. Ask the agent to show it again, or open the source file from the Outbox.</p></div></body>';
         return new Response(gone, { status: 404, headers });
       }
-      // LRU refresh on view so revisited artifacts aren't the first evicted
-      artifactStore.delete(id);
-      artifactStore.set(id, html);
       return new Response(html, { headers });
     });
     registerIpc();
@@ -873,5 +868,25 @@ if (!gotLock) {
   });
 
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-  app.on('before-quit', async () => { stopWatchers(); if (session) { try { await session.stop(); } catch (_) {} } });
+
+  let quitCleanup: 'idle' | 'stopping' | 'complete' = 'idle';
+  app.on('before-quit', (event) => {
+    shuttingDown = true;
+    stopWatchers();
+    if (quitCleanup === 'complete') return;
+    if (quitCleanup === 'stopping') { event.preventDefault(); return; }
+    if (!session) { quitCleanup = 'complete'; return; }
+
+    event.preventDefault();
+    quitCleanup = 'stopping';
+    const closingSession = session;
+    session = null;
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    void Promise.race([closingSession.stop(), timeout])
+      .catch(() => {})
+      .finally(() => {
+        quitCleanup = 'complete';
+        app.quit();
+      });
+  });
 }

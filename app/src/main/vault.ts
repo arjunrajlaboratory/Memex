@@ -9,6 +9,10 @@ interface NoteData { [key: string]: unknown; }
 interface NoteFile { data: NoteData; body: string; raw: string; mtime: number; }
 interface CollectionEntry { name: string; rel: string; data: NoteData; body: string; mtime: number; }
 
+export const MAX_NOTE_FILE_BYTES = 2_000_000;
+export const MAX_TEXT_FILE_BYTES = 5_000_000;
+export const MAX_IMAGE_FILE_BYTES = 25_000_000;
+
 // True only when `full` is the base dir itself or genuinely inside it — startsWith
 // alone would also match a sibling like `<base>-secret`.
 export function within(base: string, full: string): boolean {
@@ -60,7 +64,7 @@ export function pathType(vault: string, rel: string): 'file' | 'directory' | nul
   return null;
 }
 
-function readVaultBytes(vault: string, rel: string): { bytes: Buffer; stat: fs.Stats } | null {
+function readVaultBytes(vault: string, rel: string, maxBytes: number): { bytes: Buffer; stat: fs.Stats } | null {
   const full = path.resolve(vault, rel);
   if (!within(vault, full)) return null;
   let fd: number | null = null;
@@ -68,13 +72,23 @@ function readVaultBytes(vault: string, rel: string): { bytes: Buffer; stat: fs.S
     const noFollow = process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0);
     fd = fs.openSync(full, fs.constants.O_RDONLY | noFollow);
     const opened = fs.fstatSync(fd);
-    if (!opened.isFile()) return null;
+    if (!opened.isFile() || opened.size > maxBytes) return null;
     const realRoot = fs.realpathSync(vault);
     const real = fs.realpathSync(full);
     if (!within(realRoot, real)) return null;
     const named = fs.statSync(real);
     if (!sameFile(opened, named)) return null;
-    return { bytes: fs.readFileSync(fd), stat: opened };
+    // Read through the validated handle and leave one byte of headroom so a file
+    // that grows after fstat cannot race the size cap.
+    const buffer = Buffer.allocUnsafe(opened.size + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const bytesRead = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > opened.size || offset > maxBytes) return null;
+    return { bytes: buffer.subarray(0, offset), stat: opened };
   } catch (_) {
     return null;
   } finally {
@@ -87,7 +101,7 @@ function safeList(dir: string): fs.Dirent[] {
 }
 
 function readNoteFile(vault: string, rel: string): NoteFile | null {
-  const opened = readVaultBytes(vault, rel);
+  const opened = readVaultBytes(vault, rel, MAX_NOTE_FILE_BYTES);
   if (!opened) return null;
   try {
     const raw = opened.bytes.toString('utf8');
@@ -323,11 +337,12 @@ export function summary(vault: string): VaultSummary {
 
 // Read an arbitrary vault note/file for the artifact viewer.
 export function readFile(vault: string, rel: string): VaultFile | null {
-  const opened = readVaultBytes(vault, rel);
+  const ext = path.extname(rel).toLowerCase();
+  const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext);
+  const opened = readVaultBytes(vault, rel, isImage ? MAX_IMAGE_FILE_BYTES : MAX_TEXT_FILE_BYTES);
   if (!opened) return null;
   try {
-    const ext = path.extname(rel).toLowerCase();
-    if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) {
+    if (isImage) {
       const b64 = opened.bytes.toString('base64');
       const mime = ext === '.svg' ? 'image/svg+xml' : `image/${ext.replace('.', '').replace('jpg', 'jpeg')}`;
       return { kind: 'image', dataUri: `data:${mime};base64,${b64}`, rel };

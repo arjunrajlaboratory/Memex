@@ -120,6 +120,7 @@ async function openVault(p: string): Promise<void> {
     const res = await M.openVault(p);
     if (epoch !== vaultEpoch) return;
     if (!res.ok || !res.summary) { flash(res.error || 'Could not open vault'); return; }
+    resetVaultScopedUi();
     state.vault = res.summary;
     $('onboard').style.display = 'none';
     $('workspace').style.display = 'grid';
@@ -129,8 +130,6 @@ async function openVault(p: string): Promise<void> {
     applySummary(res.summary);
     await loadAppConfig(epoch);
     if (epoch !== vaultEpoch) return;
-    state.history = []; state.histPos = -1;
-    liveQuickNote = null;   // a half-typed note belongs to the previous vault
     switchTab('dashboard');
   } catch (error) {
     if (epoch === vaultEpoch) flash('Could not open vault: ' + String((error as Error)?.message || error));
@@ -204,6 +203,21 @@ async function refreshSummary(): Promise<void> {
 // ============================================================ CHAT
 const chatScroll = $('chatScroll');
 const composer = $('composerInput') as HTMLTextAreaElement;
+const chatEmptyTemplate = document.getElementById('chatEmpty')?.cloneNode(true) as HTMLElement | undefined;
+
+function resetVaultScopedUi(): void {
+  resetVaultUiModel(state);
+  clearThinking();
+  currentArtifact = null;
+  liveQuickNote = null;
+  document.querySelectorAll('.tab[data-custom="1"], .chip[data-custom="1"]').forEach((element) => element.remove());
+  $('artifactTab').style.display = 'none';
+  $('panelBody').replaceChildren();
+  chatScroll.replaceChildren(...(chatEmptyTemplate ? [chatEmptyTemplate.cloneNode(true)] : []));
+  composer.value = '';
+  autosize();
+  setBusy(false);
+}
 
 function scrollChat(): void { chatScroll.scrollTop = chatScroll.scrollHeight; }
 
@@ -780,11 +794,30 @@ function quickNote(): void {
   const done = () => { liveQuickNote = null; form.remove(); };
   const submit = async () => {
     const text = input.value.trim();
-    done();
-    if (!text) return;
-    await M.addInboxNote(text);
-    if (state.tab === 'inbox') renderTab('inbox');
-    refreshSummary();
+    if (!text) { done(); return; }
+    const epoch = vaultEpoch;
+    save.setAttribute('disabled', '');
+    input.disabled = true;
+    try {
+      const result = await M.addInboxNote(text);
+      if (epoch !== vaultEpoch) return;
+      if (!result.ok) {
+        input.disabled = false;
+        save.removeAttribute('disabled');
+        flash(result.error || 'Could not save the quick note');
+        input.focus();
+        return;
+      }
+      done();
+      if (state.tab === 'inbox') void renderTab('inbox');
+      void refreshSummary();
+    } catch (error) {
+      if (epoch !== vaultEpoch) return;
+      input.disabled = false;
+      save.removeAttribute('disabled');
+      flash('Could not save the quick note: ' + String((error as Error)?.message || error));
+      input.focus();
+    }
   };
   save.onclick = submit;
   cancel.onclick = done;
@@ -805,6 +838,8 @@ async function pickFilesToInbox(): Promise<void> {
     $('statusLine').textContent = `Added ${(res.copied || []).length} to inbox`;
     refreshSummary();
     if (state.tab === 'inbox') renderTab('inbox');
+  } else {
+    flash(res?.error || 'Could not copy those files into the Inbox');
   }
 }
 
@@ -817,7 +852,8 @@ function outputRow(o: FileEntry): HTMLElement {
   main.appendChild(metaRow([span('mono', o.rel.replace(/^outputs\//, '')), span('mono', fmtSize(o.size)), span('mono', fmtTime(o.mtime))]));
   r.appendChild(main);
   const acts = el('div', 'r-actions');
-  if (/^(md|markdown|html?|txt|png|jpe?g|gif|svg|webp)$/.test(o.ext || '')) {
+  const viewable = /^(md|markdown|html?|txt|png|jpe?g|gif|svg|webp)$/.test(o.ext || '');
+  if (viewable) {
     const view = el('button', 'btn mini', 'View');
     view.onclick = (e) => { e.stopPropagation(); openNote(o.rel, o.name); };
     acts.appendChild(view);
@@ -826,7 +862,7 @@ function outputRow(o: FileEntry): HTMLElement {
   open.onclick = (e) => { e.stopPropagation(); M.openExternal(o.rel); };
   acts.appendChild(open);
   r.appendChild(acts);
-  r.onclick = () => openNote(o.rel, o.name);
+  r.onclick = viewable ? () => openNote(o.rel, o.name) : () => M.openExternal(o.rel);
   return r;
 }
 
@@ -1017,12 +1053,15 @@ async function handleDrop(e: DragEvent): Promise<void> {
     refreshSummary();
     if (state.tab === 'inbox') renderTab('inbox');
     flashChat(`Dropped ${(res.copied || []).length} file(s) into the inbox. Say “triage the inbox” when ready.`);
+  } else {
+    flashChat('⚠ ' + (res?.error || 'Could not copy those files into the Inbox'));
   }
 }
 
 // files dropped on the app's Dock/taskbar icon land here instead of the drop zone
-M.onIconDrop(({ copied }) => {
+M.onIconDrop(({ copied, error }) => {
   if (vaultOpening) return;
+  if (error) { flashChat('⚠ ' + error); return; }
   flashChat(`Dropped ${copied.length} file(s) into the inbox from the app icon. Say “triage the inbox” when ready.`);
   if (state.tab === 'inbox') renderTab('inbox');
   refreshSummary();

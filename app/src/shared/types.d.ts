@@ -126,7 +126,7 @@ interface TabContentResult {
 interface TabQueryResult { source: string; rows: DataRow[]; }
 interface OpenVaultResult { ok: boolean; error?: string; summary?: VaultSummary; }
 interface CreateVaultResult { ok: boolean; code: number; output: string; }
-interface DropResult { ok: boolean; copied?: string[]; }
+interface DropResult { ok: boolean; copied?: string[]; error?: string; }
 interface SendResult { ok: boolean; error?: string; }
 
 type DataKind = 'summary' | 'tasks' | 'projects' | 'ideas' | 'people' | 'sources'
@@ -157,7 +157,7 @@ interface MemexApi {
   sendMessage(text: string): Promise<SendResult>;
   interrupt(): Promise<{ ok: boolean }>;
 
-  addInboxNote(text: string): Promise<{ ok: boolean; rel?: string }>;
+  addInboxNote(text: string): Promise<{ ok: boolean; rel?: string; error?: string }>;
   dropIntoInbox(paths: string[]): Promise<DropResult>;
   getPathForFile(file: File): string;
   openExternal(target: string): Promise<void>;
@@ -166,7 +166,7 @@ interface MemexApi {
   onAgentEvent(cb: (evt: AgentEvent) => void): () => void;
   onFsChanged(cb: (evt: { area: string }) => void): () => void;
   onSetupProgress(cb: (evt: { line: string }) => void): () => void;
-  onIconDrop(cb: (evt: { copied: string[] }) => void): () => void;
+  onIconDrop(cb: (evt: { copied: string[]; error?: string }) => void): () => void;
 }
 
 // Electron's <webview> from the renderer's point of view (just what we use).
