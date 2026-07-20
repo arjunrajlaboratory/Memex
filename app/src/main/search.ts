@@ -9,14 +9,31 @@ const fsp = fs.promises;
 // the Quartz site build, and scripts.
 const SKIP_DIRS = new Set(['node_modules', 'quartz', 'scripts']);
 const MAX_DEPTH = 5;
-const MAX_CONTENT_BYTES = 1_000_000;
+const MAX_CONTENT_BYTES = 1_000_000n;
 const FILE_LIMIT = 8;
 const CONTENT_LIMIT = 10;
+export const SEARCH_QUERY_LIMIT = 256;
+export const SEARCH_INDEX_TTL_MS = 30_000;
 
 interface Candidate { rel: string; name: string; ext: string; isMd: boolean; }
 interface SearchDocument extends Candidate { title: string; description: string; body: string; }
 
-const indexCache = new Map<string, Promise<SearchDocument[]>>();
+interface CachedSearchIndex { createdAt: number; promise: Promise<SearchDocument[]>; }
+
+const indexCache = new Map<string, CachedSearchIndex>();
+
+async function readUtf8WithinLimit(handle: fs.promises.FileHandle): Promise<string | null> {
+  const max = Number(MAX_CONTENT_BYTES);
+  const buffer = Buffer.allocUnsafe(max + 1);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  if (offset > max) return null;
+  return buffer.subarray(0, offset).toString('utf8');
+}
 
 function shouldSkipName(name: string): boolean {
   const lower = name.toLowerCase();
@@ -70,22 +87,33 @@ async function buildSearchIndex(vault: string): Promise<SearchDocument[]> {
     let body = '';
     if (c.isMd) {
       const full = path.resolve(root, c.rel);
+      let handle: fs.promises.FileHandle | null = null;
       try {
-        // Re-check at read time so a replaced candidate still fails closed.
-        const stat = await fsp.lstat(full);
+        // Open once and use that handle for the size check and read. O_NOFOLLOW
+        // rejects a final-component symlink on platforms that expose the flag.
+        const noFollow = process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0);
+        handle = await fsp.open(full, fs.constants.O_RDONLY | noFollow);
+        const stat = await handle.stat({ bigint: true });
         if (!stat.isFile()) continue;
         const realFull = await fsp.realpath(full);
         if (!resolveInside(realRoot, realFull)) continue;
+        // realpath() is still a pathname lookup, so ensure it names the same
+        // filesystem object as the already-open handle before trusting it.
+        const pathStat = await fsp.stat(realFull, { bigint: true });
+        if (stat.dev !== pathStat.dev || stat.ino !== pathStat.ino) continue;
         if (stat.size <= MAX_CONTENT_BYTES) {
-          const raw = await fsp.readFile(full, 'utf8');
-          const parsed = matter(raw);
-          const data = parsed.data || {};
-          title = data.title ? String(data.title) : c.name;
-          description = [data.description, data.summary, Array.isArray(data.tags) ? data.tags.join(' ') : data.tags]
-            .filter(Boolean).map(String).join(' — ');
-          body = parsed.content || '';
+          const raw = await readUtf8WithinLimit(handle);
+          if (raw != null) {
+            const parsed = matter(raw);
+            const data = parsed.data || {};
+            title = data.title ? String(data.title) : c.name;
+            description = [data.description, data.summary, Array.isArray(data.tags) ? data.tags.join(' ') : data.tags]
+              .filter(Boolean).map(String).join(' — ');
+            body = parsed.content || '';
+          }
         }
       } catch (_) { /* unreadable regular file: retain its filename-only entry */ }
+      finally { if (handle) await handle.close().catch(() => {}); }
     }
     documents.push({ ...c, title, description, body });
   }
@@ -94,13 +122,15 @@ async function buildSearchIndex(vault: string): Promise<SearchDocument[]> {
 
 async function getSearchIndex(vault: string): Promise<SearchDocument[]> {
   const key = path.resolve(vault);
-  let index = indexCache.get(key);
-  if (!index) {
-    index = buildSearchIndex(key);
-    indexCache.set(key, index);
-    void index.catch(() => { if (indexCache.get(key) === index) indexCache.delete(key); });
+  const now = Date.now();
+  let cached = indexCache.get(key);
+  if (!cached || now - cached.createdAt >= SEARCH_INDEX_TTL_MS) {
+    const promise = buildSearchIndex(key);
+    cached = { createdAt: now, promise };
+    indexCache.set(key, cached);
+    void promise.catch(() => { if (indexCache.get(key) === cached) indexCache.delete(key); });
   }
-  return index;
+  return cached.promise;
 }
 
 /** Drop one vault's cached index, or every index when switching vaults. */
@@ -109,12 +139,12 @@ export function invalidateSearchIndex(vault?: string): void {
   else indexCache.clear();
 }
 
-function scoreName(hay: string, q: string): number {
+function scoreName(hay: string, q: string, boundaryMatcher: RegExp): number {
   const h = hay.toLowerCase();
   if (h === q) return 100;
   if (h.startsWith(q)) return 80;
   // word-boundary match ("cycle 33" in "the-cycle-33-proposal")
-  if (new RegExp(`(^|[\\s\\-_./])${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(h)) return 60;
+  if (boundaryMatcher.test(h)) return 60;
   if (h.includes(q)) return 40;
   return 0;
 }
@@ -132,16 +162,18 @@ function snippetAround(body: string, idx: number, qLen: number): string {
  * returns a snippet around the first hit. Both tiers are capped and ranked.
  */
 export async function searchVault(vault: string, query: string): Promise<SearchResults> {
-  const q = String(query || '').trim().toLowerCase();
+  const q = String(query || '').trim().slice(0, SEARCH_QUERY_LIMIT).toLowerCase();
   const out: SearchResults = { query: q, files: [], content: [] };
   if (q.length < 2) return out;
 
   const documents = await getSearchIndex(vault);
+  const escapedQuery = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const boundaryMatcher = new RegExp(`(^|[\\s\\-_./])${escapedQuery}`);
   const fileHits: Array<SearchHit & { score: number }> = [];
   const contentHits: SearchHit[] = [];
 
   for (const doc of documents) {
-    const score = Math.max(scoreName(doc.name, q), scoreName(doc.title, q));
+    const score = Math.max(scoreName(doc.name, q, boundaryMatcher), scoreName(doc.title, q, boundaryMatcher));
     const descIdx = doc.description.toLowerCase().indexOf(q);
     if (score > 0 || descIdx >= 0) {
       fileHits.push({

@@ -102,7 +102,8 @@ HTML shown in the artifact panel must be fully self-contained: inline its CSS an
 `data:` URLs for images, and do not depend on CDNs, remote assets, network requests, or embedded
 network frames. The app deliberately serves each document from its own `artifact://` origin under a
 strict no-network content security policy. Ordinary HTTP(S) links are delegated to the system
-browser. A live page that needs network access belongs in a custom `kind: "web"` tab instead.
+browser after a native confirmation. A live page that needs network access belongs in a custom
+`kind: "web"` tab instead.
 
 ## Notes
 

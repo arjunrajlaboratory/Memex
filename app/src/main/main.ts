@@ -9,9 +9,13 @@ import { randomUUID } from 'crypto';
 import * as vaultLib from './vault';
 import { AgentSession } from './agent';
 import { localDatePlusDays, localDateString } from './date';
-import { invalidateSearchIndex, searchPathAffectsIndex, searchVault } from './search';
+import { invalidateSearchIndex, searchVault } from './search';
 import { clearVaultToolGrants, grantTool, hasToolGrant, type ToolGrantState } from './grants';
 import { isSafeExternalUrl, isTrustedFileUrl, resolveInside, resolvedStaysInside } from './security';
+import { hardenMarkdownRenderer, wikilinkMarkdown } from './markdown';
+import { externalNavigationPolicy, installDenyByDefaultPermissions } from './web-policy';
+import { VaultTransitionGate } from './vault-transition';
+import { classifyVaultChange } from './watch-policy';
 
 const fsp = fs.promises;
 // Development runs inside the engine checkout; packaged builds carry the exact
@@ -35,12 +39,17 @@ function expandHome(p: string): string {
 
 let win: BrowserWindow | null = null;
 let currentVault: string | null = null;
+const vaultTransition = new VaultTransitionGate();
 let session: AgentSession | null = null;
 let watchers: fs.FSWatcher[] = [];
 let mdRenderer: ((md: string) => string) | null = null;
 // Files dropped on the Dock icon (mac) or taskbar/exe (Windows) before any vault is open;
 // flushed into the Inbox once vault:open succeeds.
 let pendingDrops: string[] = [];
+
+function activeVaultPath(): string | null {
+  return vaultTransition.canAccess(currentVault) ? currentVault : null;
+}
 
 // Artifacts are served from their own secure origin so their inline scripts run
 // (a file:// page's CSP is inherited by srcdoc/blob children; a distinct scheme is not).
@@ -126,9 +135,6 @@ function getWikiIndex(): Promise<Map<string, string>> {
   if (!wikiIndexPromise) wikiIndexPromise = buildWikiIndex(currentVault);
   return wikiIndexPromise;
 }
-const escText = (s: unknown) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' } as Record<string, string>)[c]);
-const escAttr = (s: unknown) => String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
-
 // Turn [[Target]], [[Target|Alias]], [[Target#heading]] into clickable internal
 // links when the target resolves to a note, else a plain (unbracketed) label.
 async function linkifyWikilinks(md: string): Promise<string> {
@@ -136,8 +142,7 @@ async function linkifyWikilinks(md: string): Promise<string> {
   return String(md || '').replace(/\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|([^\]\n]+))?\]\]/g, (m, target: string, alias?: string) => {
     const label = (alias || target).trim();
     const rel = idx.get(target.trim().toLowerCase());
-    if (rel) return `<a class="wikilink" data-rel="${escAttr(rel)}">${escText(label)}</a>`;
-    return `<span class="wikilink dead">${escText(label)}</span>`;
+    return wikilinkMarkdown(label, rel);
   });
 }
 
@@ -168,24 +173,46 @@ function filterRows<T extends FilterableRow>(rows: T[], where: QueryWhere | null
   });
 }
 
-// ---------- markdown -> safe-ish html ----------
+// ---------- markdown -> safe html ----------
 async function renderMarkdown(md: string): Promise<string> {
   if (!mdRenderer) {
-    const { marked } = await import('marked');
-    marked.setOptions({ breaks: true, gfm: true });
+    const { marked, Renderer } = await import('marked');
+    const renderer = new Renderer();
+    hardenMarkdownRenderer(renderer);
+    marked.setOptions({ breaks: true, gfm: true, renderer });
     mdRenderer = (s: string) => marked.parse(s) as string;
   }
-  const html = mdRenderer(await linkifyWikilinks(md || ''));
-  // local/trusted content, but strip obvious script/event-handler injection.
-  return String(html)
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/ on\w+="[^"]*"/gi, '')
-    .replace(/ on\w+='[^']*'/gi, '');
+  return mdRenderer(await linkifyWikilinks(md || ''));
 }
 
 // ---------- window ----------
-function openInSystemBrowser(url: string): void {
-  if (isSafeExternalUrl(url)) void shell.openExternal(url);
+function openInSystemBrowser(url: string, source: 'explicit' | 'automatic'): void {
+  if (externalNavigationPolicy(source, url) === 'open') void shell.openExternal(url);
+}
+
+let artifactNavigationPromptActive = false;
+function confirmArtifactNavigation(url: string): void {
+  if (artifactNavigationPromptActive || externalNavigationPolicy('explicit', url) !== 'open') return;
+  artifactNavigationPromptActive = true;
+  const ask = async (): Promise<void> => {
+    try {
+      if (!win || win.isDestroyed()) return;
+      const result = await dialog.showMessageBox(win, {
+        type: 'question',
+        title: 'Open external link?',
+        message: 'An artifact wants to open this link in your browser.',
+        detail: url.slice(0, 2000),
+        buttons: ['Cancel', 'Open in browser'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (result.response === 1) openInSystemBrowser(url, 'explicit');
+    } finally {
+      artifactNavigationPromptActive = false;
+    }
+  };
+  void ask().catch(() => {});
 }
 
 function createWindow(): void {
@@ -206,24 +233,28 @@ function createWindow(): void {
     },
   });
   const contents = win.webContents;
+  installDenyByDefaultPermissions(contents.session);
 
   // The preload bridge is intentionally powerful. Never let another origin replace
   // the renderer in this WebContents, and never create an inherited child window.
   contents.on('will-navigate', (event) => {
     if (isTrustedFileUrl(event.url, RENDERER_PATH)) return;
     event.preventDefault();
-    openInSystemBrowser(event.url);
+    openInSystemBrowser(event.url, 'automatic');
   });
   contents.on('will-frame-navigate', (event) => {
     if (event.isMainFrame) return; // the main-frame guard above owns this case
+    let sourceIsArtifact = false;
     try {
       if (new URL(event.url).protocol === 'artifact:') return;
+      sourceIsArtifact = [event.frame?.url, event.initiator?.url]
+        .some((source) => !!source && new URL(source).protocol === 'artifact:');
     } catch (_) {}
     event.preventDefault();
-    openInSystemBrowser(event.url);
+    if (sourceIsArtifact) confirmArtifactNavigation(event.url);
   });
   contents.setWindowOpenHandler(({ url }) => {
-    openInSystemBrowser(url);
+    openInSystemBrowser(url, 'automatic');
     return { action: 'deny' };
   });
 
@@ -242,7 +273,7 @@ function createWindow(): void {
   });
   contents.on('did-attach-webview', (_event, guest) => {
     guest.setWindowOpenHandler(({ url }) => {
-      openInSystemBrowser(url);
+      openInSystemBrowser(url, 'automatic');
       return { action: 'deny' };
     });
     guest.on('will-navigate', (event) => {
@@ -290,6 +321,24 @@ function startWatchers(vault: string): void {
   stopWatchers();
   // Only the active vault needs a cached search index.
   invalidateSearchIndex();
+  const applyChange = (relativePath: string, fallbackArea?: string): void => {
+    const effect = classifyVaultChange(relativePath);
+    if (effect.invalidateWiki) wikiIndexPromise = null;
+    if (effect.invalidateSearch) invalidateSearchIndex(vault);
+    const area = effect.area || fallbackArea;
+    if (area) emit('fs:changed', { area });
+  };
+
+  // A recursive root watcher covers panels, custom folders, search, and wikilinks
+  // without emitting duplicate events from overlapping watchers.
+  try {
+    const w = fs.watch(vault, { recursive: true }, (_eventType, filename) => {
+      applyChange(filename ? String(filename) : '');
+    });
+    watchers.push(w);
+    return;
+  } catch (_) { /* fall back to standard panel folders below */ }
+
   const targets: Array<[string, string]> = [
     ['Inbox', 'inbox'],
     ['outputs', 'outputs'],
@@ -305,32 +354,20 @@ function startWatchers(vault: string): void {
       let timer: ReturnType<typeof setTimeout> | null = null;
       const w = fs.watch(dir, { recursive: true }, (_eventType, filename) => {
         if (timer) clearTimeout(timer);
-        wikiIndexPromise = null;   // note added/renamed/removed -> rebuild link index
         const changed = filename ? path.join(rel, String(filename)) : rel;
-        if (searchPathAffectsIndex(changed)) invalidateSearchIndex(vault);
-        timer = setTimeout(() => emit('fs:changed', { area }), 250);
+        timer = setTimeout(() => applyChange(changed, area), 250);
       });
       watchers.push(w);
     } catch (_) {}
   }
-
-  // The renderer refresh watchers above cover specific panels. Search spans the
-  // entire vault, so use a separate filtered root watcher to invalidate its index
-  // for changes in custom knowledge folders too.
-  try {
-    const w = fs.watch(vault, { recursive: true }, (_eventType, filename) => {
-      if (!filename || searchPathAffectsIndex(String(filename))) invalidateSearchIndex(vault);
-    });
-    watchers.push(w);
-  } catch (_) { /* targeted watchers still cover the standard vault folders */ }
 }
 
 // ---------- inbox drop (drag & drop zone + files dropped on the app icon) ----------
 // Shared by ipcMain 'inbox:drop' and handleIconDrop below — behavior must stay identical
 // for both entry points: dedup suffix on name collision, cpSync for dirs, silent per-file catch.
-function copyIntoInbox(paths: string[]): DropResult {
-  if (!currentVault) return { ok: false };
-  const inbox = path.join(currentVault, 'Inbox');
+function copyIntoInbox(paths: string[], vault = activeVaultPath()): DropResult {
+  if (!vault) return { ok: false };
+  const inbox = path.join(vault, 'Inbox');
   const copied: string[] = [];
   for (const src of paths || []) {
     try {
@@ -354,8 +391,9 @@ function copyIntoInbox(paths: string[]): DropResult {
 // vault:open to flush; otherwise copy now and tell the renderer.
 function handleIconDrop(paths: string[]): void {
   if (!paths || !paths.length) return;
-  if (!currentVault) { pendingDrops.push(...paths); return; }
-  const res = copyIntoInbox(paths);
+  const vault = activeVaultPath();
+  if (!vault) { pendingDrops.push(...paths); return; }
+  const res = copyIntoInbox(paths, vault);
   emit('inbox:iconDrop', { copied: res.copied || [] });
 }
 
@@ -394,7 +432,7 @@ function requestAgentPermission(
   owningSession: AgentSession,
   request: AgentPermissionRequest,
 ): Promise<boolean> {
-  const isCurrent = (): boolean => session === owningSession && currentVault === vault;
+  const isCurrent = (): boolean => session === owningSession && currentVault === vault && !vaultTransition.active;
   if (canAutoAllowVaultTool(vault, request)) return Promise.resolve(isCurrent());
   if (!isCurrent()) return Promise.resolve(false);
   if (hasToolGrant(loadConfig(), vault, request.name)) return Promise.resolve(true);
@@ -587,16 +625,21 @@ function registerIpc(): void {
     return { recent, last: cfg.last && vaultLib.isVault(cfg.last) ? cfg.last : null };
   });
 
-  handle('vault:current', async () => (currentVault ? vaultLib.summary(currentVault) : null));
+  handle('vault:current', async () => {
+    const vault = activeVaultPath();
+    return vault ? vaultLib.summary(vault) : null;
+  });
 
   handle('vault:search', async (_e, q: string): Promise<SearchResults> => {
-    if (!currentVault) return { query: '', files: [], content: [] };
-    return searchVault(currentVault, String(q ?? ''));
+    const vault = activeVaultPath();
+    if (!vault) return { query: '', files: [], content: [] };
+    return searchVault(vault, String(q ?? ''));
   });
 
   handle('permissions:reset', async () => {
-    if (!currentVault) return { ok: false };
-    saveConfig(clearVaultToolGrants(loadConfig(), currentVault));
+    const vault = activeVaultPath();
+    if (!vault) return { ok: false };
+    saveConfig(clearVaultToolGrants(loadConfig(), vault));
     return { ok: true };
   });
 
@@ -608,31 +651,37 @@ function registerIpc(): void {
   handle('vault:open', async (_e, p: string) => {
     const full = expandHome(p);
     if (!vaultLib.isVault(full)) return { ok: false, error: 'Not a Memex vault' };
-    currentVault = full;
-    wikiIndexPromise = null;
-    rememberVault(full);
-    startWatchers(full);
-    try { await startSession(full); } catch (e) { emit('agent:event', { kind: 'error', message: String((e as Error)?.message || e) }); }
-    if (pendingDrops.length) {
-      const drops = pendingDrops; pendingDrops = [];
-      const res = copyIntoInbox(drops);
-      emit('inbox:iconDrop', { copied: res.copied || [] });
+    if (!vaultTransition.begin()) return { ok: false, error: 'Another vault is already opening' };
+    try {
+      currentVault = full;
+      wikiIndexPromise = null;
+      rememberVault(full);
+      startWatchers(full);
+      try { await startSession(full); } catch (e) { emit('agent:event', { kind: 'error', message: String((e as Error)?.message || e) }); }
+      if (pendingDrops.length) {
+        const drops = pendingDrops; pendingDrops = [];
+        const res = copyIntoInbox(drops, full);
+        emit('inbox:iconDrop', { copied: res.copied || [] });
+      }
+      return { ok: true, summary: vaultLib.summary(full) };
+    } finally {
+      vaultTransition.finish();
     }
-    return { ok: true, summary: vaultLib.summary(full) };
   });
 
   handle('data:get', async (_e, kind: DataKind) => {
-    if (!currentVault) return null;
+    const vault = activeVaultPath();
+    if (!vault) return null;
     switch (kind) {
-      case 'summary': return vaultLib.summary(currentVault);
-      case 'tasks': return vaultLib.readTasks(currentVault);
-      case 'projects': return vaultLib.readProjects(currentVault);
-      case 'ideas': return vaultLib.readIdeas(currentVault);
-      case 'people': return vaultLib.readPeople(currentVault);
-      case 'sources': return vaultLib.readSources(currentVault);
-      case 'inbox': return vaultLib.readInbox(currentVault);
-      case 'outputs': return vaultLib.readOutputs(currentVault);
-      case 'briefing': return vaultLib.latestBriefing(currentVault);
+      case 'summary': return vaultLib.summary(vault);
+      case 'tasks': return vaultLib.readTasks(vault);
+      case 'projects': return vaultLib.readProjects(vault);
+      case 'ideas': return vaultLib.readIdeas(vault);
+      case 'people': return vaultLib.readPeople(vault);
+      case 'sources': return vaultLib.readSources(vault);
+      case 'inbox': return vaultLib.readInbox(vault);
+      case 'outputs': return vaultLib.readOutputs(vault);
+      case 'briefing': return vaultLib.latestBriefing(vault);
       default: return null;
     }
   });
@@ -650,10 +699,11 @@ function registerIpc(): void {
 
   handle('data:appConfig', async (): Promise<AppConfig> => {
     const out: AppConfig = { tabs: [], chips: [] };
-    if (!currentVault) return out;
+    const vault = activeVaultPath();
+    if (!vault) return out;
     const builtins = new Set(['dashboard', 'tasks', 'projects', 'ideas', 'people', 'inbox', 'outbox', 'artifact']);
     try {
-      const raw = fs.readFileSync(path.join(currentVault, '_config', 'desktop-tabs.json'), 'utf8');
+      const raw = fs.readFileSync(path.join(vault, '_config', 'desktop-tabs.json'), 'utf8');
       const cfg = JSON.parse(raw) as { tabs?: unknown[]; chips?: unknown[] };
       if (Array.isArray(cfg.tabs)) {
         const seen = new Set<string>();
@@ -693,23 +743,24 @@ function registerIpc(): void {
   });
 
   handle('tab:query', async (_e, def: TabDef | null): Promise<TabQueryResult> => {
-    if (!currentVault || !def) return { source: 'tasks', rows: [] };
+    const vault = activeVaultPath();
+    if (!vault || !def) return { source: 'tasks', rows: [] };
     const source = def.source || 'tasks';
     const loaders: Record<string, (v: string) => DataRow[]> = {
       tasks: vaultLib.readTasks, projects: vaultLib.readProjects, ideas: vaultLib.readIdeas,
       people: vaultLib.readPeople, sources: vaultLib.readSources,
     };
     const load = loaders[source] || vaultLib.readTasks;
-    return { source, rows: filterRows(load(currentVault), def.where || {}, source) };
+    return { source, rows: filterRows(load(vault), def.where || {}, source) };
   });
 
   handle('tab:content', async (_e, rel: string): Promise<TabContentResult> => {
-    if (!currentVault) return { type: 'missing' };
-    const full = path.resolve(currentVault, rel);
-    if (!vaultLib.within(currentVault, full)) return { type: 'missing' };
-    let stat: fs.Stats; try { stat = fs.statSync(full); } catch (_) { return { type: 'missing' }; }
-    if (stat.isDirectory()) return { type: 'dir', items: vaultLib.listFolder(currentVault, rel) };
-    const f = vaultLib.readFile(currentVault, rel);
+    const vault = activeVaultPath();
+    if (!vault) return { type: 'missing' };
+    const type = vaultLib.pathType(vault, rel);
+    if (type === 'directory') return { type: 'dir', items: vaultLib.listFolder(vault, rel) };
+    if (type !== 'file') return { type: 'missing' };
+    const f = vaultLib.readFile(vault, rel);
     if (!f) return { type: 'missing' };
     if (f.kind === 'markdown') return { type: 'file', file: { ...f, html: await renderMarkdown(f.content || '') } };
     if (f.kind === 'html') return { type: 'file', file: { kind: 'html', url: registerArtifact(f.content || ''), rel } };
@@ -717,8 +768,9 @@ function registerIpc(): void {
   });
 
   handle('note:read', async (_e, rel: string): Promise<VaultFile | null> => {
-    if (!currentVault) return null;
-    const f = vaultLib.readFile(currentVault, rel);
+    const vault = activeVaultPath();
+    if (!vault) return null;
+    const f = vaultLib.readFile(vault, rel);
     if (!f) return null;
     if (f.kind === 'markdown') return { ...f, html: await renderMarkdown(f.content || '') };
     if (f.kind === 'html') return { kind: 'html', url: registerArtifact(f.content || ''), rel };
@@ -728,40 +780,45 @@ function registerIpc(): void {
   handle('artifact:register', async (_e, html: string) => registerArtifact(html || ''));
 
   handle('agent:send', async (_e, text: string) => {
+    if (!activeVaultPath()) return { ok: false, error: 'Vault is switching' };
     if (!session || !session.running) return { ok: false, error: 'No active session' };
     return { ok: session.send(text) };
   });
 
   handle('agent:interrupt', async () => {
+    if (!activeVaultPath()) return { ok: false };
     if (session) await session.interrupt();
     return { ok: true };
   });
 
   handle('inbox:addNote', async (_e, text: string) => {
-    if (!currentVault) return { ok: false };
+    const vault = activeVaultPath();
+    if (!vault) return { ok: false };
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     // the stamp has second precision — suffix on collision so rapid notes never overwrite
-    let file = path.join(currentVault, 'Inbox', `note-${stamp}.md`);
-    for (let i = 1; fs.existsSync(file); i++) file = path.join(currentVault, 'Inbox', `note-${stamp}-${i}.md`);
+    let file = path.join(vault, 'Inbox', `note-${stamp}.md`);
+    for (let i = 1; fs.existsSync(file); i++) file = path.join(vault, 'Inbox', `note-${stamp}-${i}.md`);
     fs.writeFileSync(file, text.endsWith('\n') ? text : text + '\n');
-    return { ok: true, rel: path.relative(currentVault, file) };
+    return { ok: true, rel: path.relative(vault, file) };
   });
 
   handle('inbox:drop', async (_e, paths: string[]) => copyIntoInbox(paths));
 
   handle('shell:open', async (_e, target: string) => {
-    if (isSafeExternalUrl(target)) return shell.openExternal(target);
-    if (currentVault) {
-      const full = resolveInside(currentVault, expandHome(target));
-      if (full && resolvedStaysInside(currentVault, full)) return shell.openPath(full);
+    if (externalNavigationPolicy('explicit', target) === 'open') return shell.openExternal(target);
+    const vault = activeVaultPath();
+    if (vault) {
+      const full = resolveInside(vault, expandHome(target));
+      if (full && resolvedStaysInside(vault, full)) return shell.openPath(full);
     }
     return null;
   });
 
   handle('shell:reveal', async (_e, rel: string) => {
-    if (!currentVault) return null;
-    const full = resolveInside(currentVault, expandHome(rel));
-    if (full && resolvedStaysInside(currentVault, full)) shell.showItemInFolder(full);
+    const vault = activeVaultPath();
+    if (!vault) return null;
+    const full = resolveInside(vault, expandHome(rel));
+    if (full && resolvedStaysInside(vault, full)) shell.showItemInFolder(full);
     return null;
   });
 }

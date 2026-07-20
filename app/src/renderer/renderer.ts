@@ -10,6 +10,11 @@ const el = (tag: string, cls?: string, html?: string): HTMLElement => {
   if (html != null) e.innerHTML = html;
   return e;
 };
+const textEl = (tag: string, cls: string, value: unknown): HTMLElement => {
+  const e = el(tag, cls);
+  e.textContent = String(value ?? '');
+  return e;
+};
 const esc = (s: unknown): string => String(s == null ? '' : s)
   .replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as Record<string, string>)[c]);
 
@@ -45,6 +50,8 @@ const state: UIState = {
   customTabs: [],
   customChips: [],
 };
+let vaultOpening = false;
+let vaultEpoch = 0;
 
 // ============================================================ ONBOARDING
 async function initOnboarding(): Promise<void> {
@@ -99,24 +106,46 @@ M.onSetupProgress(({ line }) => { const log = $('setupLog'); log.textContent += 
 
 // ============================================================ OPEN VAULT
 async function openVault(p: string): Promise<void> {
-  const res = await M.openVault(p);
-  if (!res.ok || !res.summary) { flash(res.error || 'Could not open vault'); return; }
+  if (vaultOpening) return;
+  const epoch = ++vaultEpoch;
+  renderEpoch++;   // prevent an old tab response from committing during the switch
   closeSearch();
-  state.vault = res.summary;
-  $('onboard').style.display = 'none';
-  $('workspace').style.display = 'grid';
-  $('vaultName').textContent = res.summary.name;
-  $('searchOpen').style.display = '';
-  $('connDot').classList.add('live');
-  applySummary(res.summary);
-  await loadAppConfig();
-  state.history = []; state.histPos = -1;
-  liveQuickNote = null;   // a half-typed note belongs to the previous vault
-  switchTab('dashboard');
+  if (fsTimer) window.clearTimeout(fsTimer);
+  fsTimer = null;
+  pendingFsAreas.clear();
+  vaultOpening = true;
+  $('workspace').inert = true;
+  $('onboard').inert = true;
+  try {
+    const res = await M.openVault(p);
+    if (epoch !== vaultEpoch) return;
+    if (!res.ok || !res.summary) { flash(res.error || 'Could not open vault'); return; }
+    state.vault = res.summary;
+    $('onboard').style.display = 'none';
+    $('workspace').style.display = 'grid';
+    $('vaultName').textContent = res.summary.name;
+    $('searchOpen').style.display = '';
+    $('connDot').classList.add('live');
+    applySummary(res.summary);
+    await loadAppConfig(epoch);
+    if (epoch !== vaultEpoch) return;
+    state.history = []; state.histPos = -1;
+    liveQuickNote = null;   // a half-typed note belongs to the previous vault
+    switchTab('dashboard');
+  } catch (error) {
+    if (epoch === vaultEpoch) flash('Could not open vault: ' + String((error as Error)?.message || error));
+  } finally {
+    if (epoch === vaultEpoch) {
+      vaultOpening = false;
+      $('workspace').inert = false;
+      $('onboard').inert = false;
+    }
+  }
 }
 
-async function loadAppConfig(): Promise<void> {
+async function loadAppConfig(expectedEpoch = vaultEpoch): Promise<void> {
   const cfg = (await M.appConfig()) || { tabs: [], chips: [] };
+  if (expectedEpoch !== vaultEpoch) return;
   state.customTabs = cfg.tabs || [];
   state.customChips = cfg.chips || [];
   // rebuild custom tab buttons
@@ -167,8 +196,9 @@ function applySummary(s: VaultSummary): void {
 }
 
 async function refreshSummary(): Promise<void> {
+  const epoch = vaultEpoch;
   const s = await M.data('summary');
-  if (s) { state.vault = s; applySummary(s); }
+  if (s && epoch === vaultEpoch && !vaultOpening) { state.vault = s; applySummary(s); }
 }
 
 // ============================================================ CHAT
@@ -332,7 +362,7 @@ function flashChat(text: string): void {
 
 async function sendMessage(text?: string): Promise<void> {
   text = (text || composer.value).trim();
-  if (!text || !state.vault) return;
+  if (!text || !state.vault || vaultOpening) return;
   addUserMsg(text);
   composer.value = ''; autosize();
   const r = await M.sendMessage(text);
@@ -611,7 +641,7 @@ function renderList<T>(body: HTMLElement, items: T[] | null | undefined, emptyMs
 
 function taskRow(t: TaskRow): HTMLElement {
   const r = el('div', 'row');
-  r.appendChild(el('span', `prio ${t.priority}`, t.priority));
+  r.appendChild(textEl('span', `prio ${t.priority}`, t.priority));
   const main = el('div', 'r-main');
   main.appendChild(el('div', 'r-title', esc(t.title)));
   main.appendChild(metaRow([
@@ -620,7 +650,7 @@ function taskRow(t: TaskRow): HTMLElement {
     t.effort ? span('mono', t.effort) : '',
   ]));
   r.appendChild(main);
-  r.appendChild(el('span', `pill s-${t.status}`, t.status.replace('_', ' ')));
+  r.appendChild(textEl('span', `pill s-${t.status}`, t.status.replace('_', ' ')));
   r.onclick = () => openNote(t.rel, t.title);
   return r;
 }
@@ -635,7 +665,7 @@ function projectRow(p: ProjectRow): HTMLElement {
     p.target_date ? span('mono', '→ ' + p.target_date) : '',
   ]));
   r.appendChild(main);
-  r.appendChild(el('span', `pill s-${p.status}`, p.status));
+  r.appendChild(textEl('span', `pill s-${p.status}`, p.status));
   r.onclick = () => openNote(p.rel, p.title);
   return r;
 }
@@ -649,7 +679,7 @@ function ideaRow(i: IdeaRow): HTMLElement {
     i.effort ? span('mono', i.effort + ' effort') : '',
   ]));
   r.appendChild(main);
-  r.appendChild(el('span', `pill s-${i.status}`, i.status));
+  r.appendChild(textEl('span', `pill s-${i.status}`, i.status));
   r.onclick = () => openNote(i.rel, i.title);
   return r;
 }
@@ -662,14 +692,14 @@ function peopleRow(p: PersonRow): HTMLElement {
   main.appendChild(el('div', 'r-title', esc(p.title)));
   main.appendChild(metaRow([p.role ? span('', p.role) : '', p.org ? span('', p.org) : '']));
   r.appendChild(main);
-  if (p.strength) r.appendChild(el('span', 'prio', p.strength));
+  if (p.strength) r.appendChild(textEl('span', 'prio', p.strength));
   r.onclick = () => openNote(p.rel, p.title);
   return r;
 }
 
 function sourceRow(s: SourceRow): HTMLElement {
   const r = el('div', 'row');
-  r.appendChild(el('div', 'file-ic', (s.kind || 'src').slice(0, 3)));
+  r.appendChild(textEl('div', 'file-ic', (s.kind || 'src').slice(0, 3)));
   const main = el('div', 'r-main');
   main.appendChild(el('div', 'r-title', esc(s.title)));
   main.appendChild(metaRow([s.author ? span('', s.author) : '', s.status ? span('mono', s.status) : '']));
@@ -718,7 +748,7 @@ async function renderInbox(body: HTMLElement): Promise<void> {
   const rows = el('div', 'rows');
   items.forEach((it) => {
     const r = el('div', 'row');
-    r.appendChild(el('div', 'file-ic', it.isDir ? '⁄' : (it.ext || 'txt')));
+    r.appendChild(textEl('div', 'file-ic', it.isDir ? '⁄' : (it.ext || 'txt')));
     const main = el('div', 'r-main');
     main.appendChild(el('div', 'r-title', esc(it.name)));
     main.appendChild(metaRow([span('mono', fmtSize(it.size)), span('mono', fmtTime(it.mtime))]));
@@ -735,6 +765,7 @@ let liveQuickNote: { form: HTMLElement; input: HTMLInputElement } | null = null;
 
 function quickNote(): void {
   // window.prompt() is not implemented in Electron — use an inline input in the dropzone.
+  if (vaultOpening) return;
   const dz = document.querySelector('.dropzone');
   if (!dz || liveQuickNote) return;
   const form = el('div', 'qn-form');
@@ -766,6 +797,7 @@ function quickNote(): void {
 }
 
 async function pickFilesToInbox(): Promise<void> {
+  if (vaultOpening) return;
   const paths = await M.pickFiles();
   if (!paths || !paths.length) return;
   const res = await M.dropIntoInbox(paths);
@@ -779,7 +811,7 @@ async function pickFilesToInbox(): Promise<void> {
 // ============================================================ OUTBOX
 function outputRow(o: FileEntry): HTMLElement {
   const r = el('div', 'row');
-  r.appendChild(el('div', 'file-ic', o.ext || 'txt'));
+  r.appendChild(textEl('div', 'file-ic', o.ext || 'txt'));
   const main = el('div', 'r-main');
   main.appendChild(el('div', 'r-title', esc(o.name)));
   main.appendChild(metaRow([span('mono', o.rel.replace(/^outputs\//, '')), span('mono', fmtSize(o.size)), span('mono', fmtTime(o.mtime))]));
@@ -947,7 +979,10 @@ function renderArtifact(): void {
 }
 
 async function openNote(rel: string, title?: string): Promise<void> {
+  if (vaultOpening) return;
+  const epoch = vaultEpoch;
   const f = await M.readNote(rel);
+  if (epoch !== vaultEpoch || vaultOpening) return;
   if (!f) { flash('Could not read ' + rel); return; }
   if (!title) title = (rel.split('/').pop() || rel).replace(/\.[^.]+$/, '');
   let art: ArtifactView;
@@ -966,13 +1001,13 @@ function wireDrop(zone: HTMLElement): void {
 }
 
 let dragDepth = 0;
-window.addEventListener('dragenter', (e) => { if (!state.vault) return; dragDepth++; e.preventDefault(); $('dropOverlay').classList.add('show'); });
+window.addEventListener('dragenter', (e) => { if (!state.vault || vaultOpening) return; dragDepth++; e.preventDefault(); $('dropOverlay').classList.add('show'); });
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (dragDepth === 0) $('dropOverlay').classList.remove('show'); });
 window.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; $('dropOverlay').classList.remove('show'); handleDrop(e); });
 
 async function handleDrop(e: DragEvent): Promise<void> {
-  if (!state.vault) return;
+  if (!state.vault || vaultOpening) return;
   const files = Array.from(e.dataTransfer?.files || []);
   if (!files.length) return;
   const paths = files.map((f) => M.getPathForFile(f)).filter(Boolean);
@@ -987,6 +1022,7 @@ async function handleDrop(e: DragEvent): Promise<void> {
 
 // files dropped on the app's Dock/taskbar icon land here instead of the drop zone
 M.onIconDrop(({ copied }) => {
+  if (vaultOpening) return;
   flashChat(`Dropped ${copied.length} file(s) into the inbox from the app icon. Say “triage the inbox” when ready.`);
   if (state.tab === 'inbox') renderTab('inbox');
   refreshSummary();
@@ -994,24 +1030,32 @@ M.onIconDrop(({ copied }) => {
 
 // ============================================================ FS WATCH
 let fsTimer: ReturnType<typeof setTimeout> | null = null;
+const pendingFsAreas = new AreaBatch();
 M.onFsChanged(({ area }) => {
+  pendingFsAreas.add(area);
   if (fsTimer) clearTimeout(fsTimer);
   fsTimer = setTimeout(async () => {
-    refreshSummary();
-    if (area === 'config') {
-      await loadAppConfig();
+    fsTimer = null;
+    const areas = pendingFsAreas.drain();
+    if (vaultOpening || !areas.length) return;
+    void refreshSummary();
+    const configChanged = areas.includes('config');
+    if (configChanged) {
+      const epoch = vaultEpoch;
+      await loadAppConfig(epoch);
+      if (epoch !== vaultEpoch || vaultOpening) return;
       // rebuilding the tab bar wipes the active class — and the active tab itself may be gone
       if (!document.querySelector(`.tab[data-tab="${CSS.escape(state.tab)}"]`)) return switchTab('dashboard');
       setActiveTab(state.tab);
-      renderTab(state.tab);   // the active tab's own definition may have changed
-      return;
     }
     const cdef = state.customTabs.find((t) => t.id === state.tab);
     // web tabs don't show vault data — re-rendering would reload the embedded page
-    // (the map's atlas entry matches ANY active tab, so bail out before it)
-    if (cdef && cdef.kind === 'web') return;
+    // unless their own configuration changed.
+    if (cdef && cdef.kind === 'web' && !configChanged) return;
     const map: Record<string, string> = { inbox: 'inbox', outputs: 'outbox', tasks: 'tasks', atlas: state.tab, briefings: 'dashboard' };
-    if (cdef || state.tab === map[area] || state.tab === 'dashboard') renderTab(state.tab);
+    if (configChanged || cdef || state.tab === 'dashboard' || areas.some((changed) => state.tab === map[changed])) {
+      void renderTab(state.tab);
+    }
   }, 200);
 });
 
@@ -1024,9 +1068,14 @@ let searchItems: Array<{ rel: string; ext: string; title: string; ask?: boolean 
 
 // extensions openNote can display in the artifact panel; everything else reveals in Finder
 const VIEWABLE_EXTS = new Set(['md', 'markdown', 'txt', 'html', 'htm', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
+const SEARCH_QUERY_LIMIT = 256;
+
+function currentSearchQuery(): string {
+  return ($('searchInput') as HTMLInputElement).value.trim().slice(0, SEARCH_QUERY_LIMIT);
+}
 
 function openSearch(): void {
-  if (!state.vault) return;
+  if (!state.vault || vaultOpening) return;
   window.clearTimeout(searchTimer);
   searchTimer = undefined;
   searchSeq++;   // invalidate a response left over from an earlier palette session
@@ -1069,7 +1118,7 @@ function updateSearchSel(): void {
 
 function renderSearchResults(res: SearchResults | null): void {
   const box = $('searchResults');
-  const q = ($('searchInput') as HTMLInputElement).value.trim();
+  const q = currentSearchQuery();
   searchItems = []; searchSel = 0;
   box.innerHTML = '';
   if (q.length < 2) {
@@ -1110,7 +1159,7 @@ function renderSearchResults(res: SearchResults | null): void {
 $('searchOpen').onclick = openSearch;
 $('searchOverlay').onclick = (e) => { if (e.target === $('searchOverlay')) closeSearch(); };
 $('searchInput').addEventListener('input', () => {
-  const q = ($('searchInput') as HTMLInputElement).value.trim();
+  const q = currentSearchQuery();
   window.clearTimeout(searchTimer);
   searchTimer = undefined;
   const seq = ++searchSeq;   // invalidate old results before the debounce elapses
@@ -1119,7 +1168,7 @@ $('searchInput').addEventListener('input', () => {
   searchTimer = window.setTimeout(() => {
     searchTimer = undefined;
     void M.search(q).then((res) => {
-      const current = ($('searchInput') as HTMLInputElement).value.trim();
+      const current = currentSearchQuery();
       if (seq === searchSeq && current === q && res.query === q.toLowerCase()) renderSearchResults(res);
     }).catch((error: unknown) => {
       if (seq !== searchSeq) return;

@@ -36,7 +36,7 @@ const APPEND_PROMPT = `You are running inside the Memex desktop app. The user se
 
 When you produce something visual or browsable — a dashboard, a status board, a table, a chart, a rendered report, or any HTML — call the \`show_artifact\` tool to display it in the right-hand panel instead of dumping a long block into chat. For prose write-ups, markdown is fine.
 
-IN-APP HTML CONTRACT: Any HTML shown as an artifact, whether passed inline or loaded from a vault \`.html\` file, must be a fully self-contained document. Inline all CSS and JavaScript, encode images as \`data:\` URLs, and do not use CDNs, remote fonts/assets, \`fetch\`, XHR, WebSockets, or embedded network frames. Ordinary HTTP(S) links are fine; the desktop app opens them in the system browser. If the user needs a live network page, configure a custom tab with \`"kind":"web"\` and an HTTP(S) \`url\` instead of making it an artifact.
+IN-APP HTML CONTRACT: Any HTML shown as an artifact, whether passed inline or loaded from a vault \`.html\` file, must be a fully self-contained document. Inline all CSS and JavaScript, encode images as \`data:\` URLs, and do not use CDNs, remote fonts/assets, \`fetch\`, XHR, WebSockets, or embedded network frames. Ordinary HTTP(S) links are fine; after confirmation, the desktop app opens them in the system browser. If the user needs a live network page, configure a custom tab with \`"kind":"web"\` and an HTTP(S) \`url\` instead of making it an artifact.
 
 Keep your chat replies short and conversational — a sentence or two saying what you did or found — and put the rich, long, or visual content in an artifact. You can also pass a \`path\` (relative to the vault root) to show an existing file (e.g. a generated dashboard in outputs/ or a note in Atlas/).
 

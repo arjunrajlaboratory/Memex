@@ -6,7 +6,7 @@ import * as path from 'path';
 import matter from 'gray-matter';
 
 interface NoteData { [key: string]: unknown; }
-interface NoteFile { data: NoteData; body: string; raw: string; }
+interface NoteFile { data: NoteData; body: string; raw: string; mtime: number; }
 interface CollectionEntry { name: string; rel: string; data: NoteData; body: string; mtime: number; }
 
 // True only when `full` is the base dir itself or genuinely inside it — startsWith
@@ -21,23 +21,79 @@ export function isVault(dir: string | null | undefined): boolean {
   if (!dir) return false;
   try {
     return (
-      fs.existsSync(path.join(dir, 'AGENTS.md')) &&
-      fs.existsSync(path.join(dir, 'Atlas')) &&
-      fs.existsSync(path.join(dir, 'Ops'))
+      pathType(dir, 'AGENTS.md') === 'file' &&
+      pathType(dir, 'Atlas') === 'directory' &&
+      pathType(dir, 'Ops') === 'directory'
     );
   } catch (_) { return false; }
+}
+
+function sameFile(a: fs.Stats, b: fs.Stats): boolean {
+  return a.dev === b.dev && a.ino === b.ino;
+}
+
+function resolvedVaultPath(vault: string, rel: string): { full: string; real: string } | null {
+  const full = path.resolve(vault, rel);
+  if (!within(vault, full)) return null;
+  try {
+    const realRoot = fs.realpathSync(vault);
+    const real = fs.realpathSync(full);
+    if (!within(realRoot, real)) return null;
+    return { full, real };
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Return a path's safe type without following a symlink outside the vault. */
+export function pathType(vault: string, rel: string): 'file' | 'directory' | null {
+  const resolved = resolvedVaultPath(vault, rel);
+  if (!resolved) return null;
+  try {
+    const lexical = fs.lstatSync(resolved.full);
+    if (lexical.isSymbolicLink()) return null;
+    const real = fs.statSync(resolved.real);
+    if (!sameFile(lexical, real)) return null;
+    if (real.isFile()) return 'file';
+    if (real.isDirectory()) return 'directory';
+  } catch (_) {}
+  return null;
+}
+
+function readVaultBytes(vault: string, rel: string): { bytes: Buffer; stat: fs.Stats } | null {
+  const full = path.resolve(vault, rel);
+  if (!within(vault, full)) return null;
+  let fd: number | null = null;
+  try {
+    const noFollow = process.platform === 'win32' ? 0 : (fs.constants.O_NOFOLLOW || 0);
+    fd = fs.openSync(full, fs.constants.O_RDONLY | noFollow);
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile()) return null;
+    const realRoot = fs.realpathSync(vault);
+    const real = fs.realpathSync(full);
+    if (!within(realRoot, real)) return null;
+    const named = fs.statSync(real);
+    if (!sameFile(opened, named)) return null;
+    return { bytes: fs.readFileSync(fd), stat: opened };
+  } catch (_) {
+    return null;
+  } finally {
+    if (fd != null) { try { fs.closeSync(fd); } catch (_) {} }
+  }
 }
 
 function safeList(dir: string): fs.Dirent[] {
   try { return fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return []; }
 }
 
-function readNoteFile(file: string): NoteFile {
+function readNoteFile(vault: string, rel: string): NoteFile | null {
+  const opened = readVaultBytes(vault, rel);
+  if (!opened) return null;
   try {
-    const raw = fs.readFileSync(file, 'utf8');
+    const raw = opened.bytes.toString('utf8');
     const { data, content } = matter(raw);
-    return { data: data || {}, body: content || '', raw };
-  } catch (_) { return { data: {}, body: '', raw: '' }; }
+    return { data: data || {}, body: content || '', raw, mtime: opened.stat.mtimeMs };
+  } catch (_) { return null; }
 }
 
 function clean(v: unknown): string {
@@ -58,16 +114,18 @@ function dstr(v: unknown): string {
 function collection<T>(vault: string, subdir: string, mapper: (e: CollectionEntry) => T): T[] {
   const dir = path.join(vault, subdir);
   const out: T[] = [];
+  if (pathType(vault, subdir) !== 'directory') return out;
   for (const ent of safeList(dir)) {
     if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
     if (ent.name === 'README.md') continue;
-    const file = path.join(dir, ent.name);
-    const { data, body } = readNoteFile(file);
-    const stat = fs.statSync(file);
+    const rel = path.join(subdir, ent.name);
+    const note = readNoteFile(vault, rel);
+    if (!note) continue;
+    const { data, body, mtime } = note;
     out.push(mapper({
       name: ent.name.replace(/\.md$/, ''),
-      rel: path.relative(vault, file),
-      data, body, mtime: stat.mtimeMs,
+      rel,
+      data, body, mtime,
     }));
   }
   return out;
@@ -166,10 +224,14 @@ export function readSources(vault: string): SourceRow[] {
 export function readInbox(vault: string): FileEntry[] {
   const dir = path.join(vault, 'Inbox');
   const out: FileEntry[] = [];
+  if (pathType(vault, 'Inbox') !== 'directory') return out;
   for (const ent of safeList(dir)) {
     if (ent.name === 'README.md' || ent.name.startsWith('.') || ent.name === '_filed') continue;
+    if (ent.isSymbolicLink()) continue;
     const file = path.join(dir, ent.name);
-    let stat: fs.Stats; try { stat = fs.statSync(file); } catch (_) { continue; }
+    const rel = path.join('Inbox', ent.name);
+    if (!pathType(vault, rel)) continue;
+    let stat: fs.Stats; try { stat = fs.lstatSync(file); } catch (_) { continue; }
     out.push({
       name: ent.name,
       rel: path.relative(vault, file),
@@ -183,17 +245,21 @@ export function readInbox(vault: string): FileEntry[] {
   return out;
 }
 
-function walk(dir: string, base: string, acc: FileEntry[], depth: number): void {
+function walk(dir: string, vault: string, acc: FileEntry[], depth: number): void {
   if (depth > 4) return;
   for (const ent of safeList(dir)) {
     if (ent.name.startsWith('.') || ent.name === 'README.md') continue;
+    if (ent.isSymbolicLink()) continue;
     const full = path.join(dir, ent.name);
-    if (ent.isDirectory()) { walk(full, base, acc, depth + 1); continue; }
+    const rel = path.relative(vault, full);
+    const type = pathType(vault, rel);
+    if (type === 'directory') { walk(full, vault, acc, depth + 1); continue; }
+    if (type !== 'file') continue;
     if (ent.name.endsWith('.log')) continue;   // infra noise (e.g. quartz-serve.log)
-    let stat: fs.Stats; try { stat = fs.statSync(full); } catch (_) { continue; }
+    let stat: fs.Stats; try { stat = fs.lstatSync(full); } catch (_) { continue; }
     acc.push({
       name: ent.name,
-      rel: path.relative(base, full),
+      rel,
       size: stat.size,
       mtime: stat.mtimeMs,
       ext: path.extname(ent.name).replace('.', '').toLowerCase(),
@@ -204,6 +270,7 @@ function walk(dir: string, base: string, acc: FileEntry[], depth: number): void 
 export function readOutputs(vault: string): FileEntry[] {
   const dir = path.join(vault, 'outputs');
   const acc: FileEntry[] = [];
+  if (pathType(vault, 'outputs') !== 'directory') return acc;
   walk(dir, vault, acc, 0);
   acc.sort((a, b) => b.mtime - a.mtime);
   return acc;
@@ -211,7 +278,7 @@ export function readOutputs(vault: string): FileEntry[] {
 
 export function listFolder(vault: string, relDir: string): FileEntry[] {
   const dir = path.resolve(vault, relDir);
-  if (!within(vault, dir)) return [];
+  if (!within(vault, dir) || pathType(vault, relDir) !== 'directory') return [];
   const acc: FileEntry[] = [];
   walk(dir, vault, acc, 0);
   acc.sort((a, b) => b.mtime - a.mtime);
@@ -220,11 +287,16 @@ export function listFolder(vault: string, relDir: string): FileEntry[] {
 
 export function latestBriefing(vault: string): BriefingInfo | null {
   const dir = path.join(vault, 'Ops/Briefings');
-  const files = safeList(dir).filter((e) => e.isFile() && e.name.endsWith('.md')).map((e) => e.name).sort();
+  if (pathType(vault, 'Ops/Briefings') !== 'directory') return null;
+  const files = safeList(dir)
+    .filter((e) => e.isFile() && e.name.endsWith('.md') && pathType(vault, path.join('Ops/Briefings', e.name)) === 'file')
+    .map((e) => e.name).sort();
   if (!files.length) return null;
   const name = files[files.length - 1];
   const rel = path.join('Ops/Briefings', name);
-  const { body, raw } = readNoteFile(path.join(vault, rel));
+  const note = readNoteFile(vault, rel);
+  if (!note) return null;
+  const { body, raw } = note;
   return { name, rel, body, raw };
 }
 
@@ -251,16 +323,16 @@ export function summary(vault: string): VaultSummary {
 
 // Read an arbitrary vault note/file for the artifact viewer.
 export function readFile(vault: string, rel: string): VaultFile | null {
-  const full = path.resolve(vault, rel);
-  if (!within(vault, full)) return null; // no escaping the vault
+  const opened = readVaultBytes(vault, rel);
+  if (!opened) return null;
   try {
-    const ext = path.extname(full).toLowerCase();
+    const ext = path.extname(rel).toLowerCase();
     if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) {
-      const b64 = fs.readFileSync(full).toString('base64');
+      const b64 = opened.bytes.toString('base64');
       const mime = ext === '.svg' ? 'image/svg+xml' : `image/${ext.replace('.', '').replace('jpg', 'jpeg')}`;
       return { kind: 'image', dataUri: `data:${mime};base64,${b64}`, rel };
     }
-    const raw = fs.readFileSync(full, 'utf8');
+    const raw = opened.bytes.toString('utf8');
     if (ext === '.html' || ext === '.htm') return { kind: 'html', content: raw, rel };
     if (ext === '.md' || ext === '.markdown') {
       const { content } = matter(raw);

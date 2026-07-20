@@ -124,7 +124,7 @@
     <div class="search-panel">
       <div class="search-row">
         <svg viewBox="0 0 24 24" class="search-ic"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-        <input id="searchInput" placeholder="Search your vault…" spellcheck="false" autocomplete="off" />
+        <input id="searchInput" placeholder="Search your vault…" spellcheck="false" autocomplete="off" maxlength="256" />
         <kbd>esc</kbd>
       </div>
       <div class="search-results" id="searchResults"></div>
@@ -180,6 +180,7 @@
     </div>
   </div>
 
+  <script src="../shared/area-batch.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>
