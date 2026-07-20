@@ -28,3 +28,23 @@ test('vault UI reset clears all session-scoped model state', () => {
   assert.deepEqual(Array.from(result.customTabs), []);
   assert.deepEqual(Array.from(result.customChips), []);
 });
+
+test('a failed vault-open request does not advance the committed vault epoch', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../dist/shared/vault-ui-state.js'), 'utf8');
+  const context = vm.createContext({});
+  vm.runInContext(source, context);
+  const result = vm.runInContext(`(() => {
+    const state = { request: 0, epoch: 7 };
+    const failedRequest = beginVaultOpen(state);
+    const epochAfterFailure = state.epoch;
+    const successfulRequest = beginVaultOpen(state);
+    const staleCommit = commitVaultOpen(state, failedRequest);
+    const committedEpoch = commitVaultOpen(state, successfulRequest);
+    return { epochAfterFailure, staleCommit, committedEpoch, state };
+  })()`, context);
+
+  assert.equal(result.epochAfterFailure, 7);
+  assert.equal(result.staleCommit, null);
+  assert.equal(result.committedEpoch, 8);
+  assert.equal(result.state.epoch, 8);
+});

@@ -124,7 +124,13 @@ interface TabContentResult {
   file?: VaultFile;
 }
 interface TabQueryResult { source: string; rows: DataRow[]; }
-interface OpenVaultResult { ok: boolean; error?: string; summary?: VaultSummary; }
+interface OpenVaultResult {
+  ok: boolean;
+  error?: string;
+  warning?: string;
+  summary?: VaultSummary;
+  pendingDrop?: DropResult;
+}
 interface CreateVaultResult { ok: boolean; code: number; output: string; }
 interface DropResult { ok: boolean; copied?: string[]; error?: string; }
 interface SendResult { ok: boolean; error?: string; }

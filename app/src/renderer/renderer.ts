@@ -52,6 +52,9 @@ const state: UIState = {
 };
 let vaultOpening = false;
 let vaultEpoch = 0;
+const vaultOpenEpochs: VaultOpenEpochState = { request: 0, epoch: 0 };
+let deferredAgentErrors: string[] = [];
+let deferredIconDrops: Array<{ copied: string[]; error?: string }> = [];
 
 // ============================================================ ONBOARDING
 async function initOnboarding(): Promise<void> {
@@ -107,7 +110,8 @@ M.onSetupProgress(({ line }) => { const log = $('setupLog'); log.textContent += 
 // ============================================================ OPEN VAULT
 async function openVault(p: string): Promise<void> {
   if (vaultOpening) return;
-  const epoch = ++vaultEpoch;
+  const request = beginVaultOpen(vaultOpenEpochs);
+  let committed = false;
   renderEpoch++;   // prevent an old tab response from committing during the switch
   closeSearch();
   if (fsTimer) window.clearTimeout(fsTimer);
@@ -118,8 +122,12 @@ async function openVault(p: string): Promise<void> {
   $('onboard').inert = true;
   try {
     const res = await M.openVault(p);
-    if (epoch !== vaultEpoch) return;
+    if (request !== vaultOpenEpochs.request) return;
     if (!res.ok || !res.summary) { flash(res.error || 'Could not open vault'); return; }
+    const epoch = commitVaultOpen(vaultOpenEpochs, request);
+    if (epoch == null) return;
+    vaultEpoch = epoch;
+    committed = true;
     resetVaultScopedUi();
     state.vault = res.summary;
     $('onboard').style.display = 'none';
@@ -128,16 +136,29 @@ async function openVault(p: string): Promise<void> {
     $('searchOpen').style.display = '';
     $('connDot').classList.add('live');
     applySummary(res.summary);
-    await loadAppConfig(epoch);
-    if (epoch !== vaultEpoch) return;
+    try {
+      await loadAppConfig(epoch);
+    } catch (error) {
+      flashChat('⚠ Could not load this vault\'s desktop tabs: ' + String((error as Error)?.message || error));
+    }
+    if (request !== vaultOpenEpochs.request) return;
     switchTab('dashboard');
+    if (res.warning) flashChat('⚠ ' + res.warning);
+    if (res.pendingDrop) reportIconDrop(res.pendingDrop.copied || [], res.pendingDrop.error);
   } catch (error) {
-    if (epoch === vaultEpoch) flash('Could not open vault: ' + String((error as Error)?.message || error));
+    if (request === vaultOpenEpochs.request) flash('Could not open vault: ' + String((error as Error)?.message || error));
   } finally {
-    if (epoch === vaultEpoch) {
+    if (request === vaultOpenEpochs.request) {
       vaultOpening = false;
       $('workspace').inert = false;
       $('onboard').inert = false;
+      if (!committed && state.vault) void renderTab(state.tab);
+      const errors = deferredAgentErrors;
+      deferredAgentErrors = [];
+      for (const message of errors) flashChat('⚠ ' + message);
+      const iconDrops = deferredIconDrops;
+      deferredIconDrops = [];
+      for (const drop of iconDrops) reportIconDrop(drop.copied, drop.error);
     }
   }
 }
@@ -344,6 +365,12 @@ function clearThinking(): void { thinkingBuf = ''; document.getElementById('thin
 
 // agent events
 M.onAgentEvent((evt) => {
+  // Session startup runs while the open IPC is pending. Preserve an early
+  // failure until the vault UI has either reset or resumed its prior view.
+  if (vaultOpening && evt.kind === 'error') {
+    deferredAgentErrors.push(evt.message);
+    return;
+  }
   switch (evt.kind) {
     case 'session': $('modelTag').textContent = evt.model ? evt.model.replace('claude-', '') : ''; break;
     case 'turn_start': setBusy(true); break;
@@ -831,9 +858,11 @@ function quickNote(): void {
 
 async function pickFilesToInbox(): Promise<void> {
   if (vaultOpening) return;
+  const epoch = vaultEpoch;
   const paths = await M.pickFiles();
-  if (!paths || !paths.length) return;
+  if (epoch !== vaultEpoch || vaultOpening || !paths || !paths.length) return;
   const res = await M.dropIntoInbox(paths);
+  if (epoch !== vaultEpoch || vaultOpening) return;
   if (res && res.ok) {
     $('statusLine').textContent = `Added ${(res.copied || []).length} to inbox`;
     refreshSummary();
@@ -1044,10 +1073,12 @@ window.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; $('d
 
 async function handleDrop(e: DragEvent): Promise<void> {
   if (!state.vault || vaultOpening) return;
+  const epoch = vaultEpoch;
   const files = Array.from(e.dataTransfer?.files || []);
   if (!files.length) return;
   const paths = files.map((f) => M.getPathForFile(f)).filter(Boolean);
   const res = await M.dropIntoInbox(paths);
+  if (epoch !== vaultEpoch || vaultOpening) return;
   if (res && res.ok) {
     $('statusLine').textContent = `Added ${(res.copied || []).length} to inbox`;
     refreshSummary();
@@ -1058,13 +1089,17 @@ async function handleDrop(e: DragEvent): Promise<void> {
   }
 }
 
-// files dropped on the app's Dock/taskbar icon land here instead of the drop zone
-M.onIconDrop(({ copied, error }) => {
-  if (vaultOpening) return;
+function reportIconDrop(copied: string[], error?: string): void {
   if (error) { flashChat('⚠ ' + error); return; }
   flashChat(`Dropped ${copied.length} file(s) into the inbox from the app icon. Say “triage the inbox” when ready.`);
   if (state.tab === 'inbox') renderTab('inbox');
   refreshSummary();
+}
+
+// files dropped on the app's Dock/taskbar icon land here instead of the drop zone
+M.onIconDrop(({ copied, error }) => {
+  if (vaultOpening) deferredIconDrops.push({ copied, error });
+  else reportIconDrop(copied, error);
 });
 
 // ============================================================ FS WATCH

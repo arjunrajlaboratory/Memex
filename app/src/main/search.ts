@@ -14,6 +14,25 @@ const FILE_LIMIT = 8;
 const CONTENT_LIMIT = 10;
 export const SEARCH_QUERY_LIMIT = 256;
 export const SEARCH_INDEX_TTL_MS = 30_000;
+export const SEARCH_INDEX_FILE_LIMIT = 10_000;
+export const SEARCH_INDEX_CONTENT_BYTES = 64_000_000;
+
+export class SearchContentBudget {
+  private used = 0;
+  private readonly limit: number;
+
+  constructor(limit = SEARCH_INDEX_CONTENT_BYTES) {
+    this.limit = Number.isSafeInteger(limit) && limit >= 0 ? limit : 0;
+  }
+
+  get remainingBytes(): number { return this.limit - this.used; }
+
+  take(bytes: number): boolean {
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || this.used + bytes > this.limit) return false;
+    this.used += bytes;
+    return true;
+  }
+}
 
 interface Candidate { rel: string; name: string; ext: string; isMd: boolean; }
 interface SearchDocument extends Candidate { title: string; description: string; body: string; }
@@ -22,15 +41,24 @@ interface CachedSearchIndex { createdAt: number; promise: Promise<SearchDocument
 
 const indexCache = new Map<string, CachedSearchIndex>();
 
-async function readUtf8WithinLimit(handle: fs.promises.FileHandle): Promise<string | null> {
+async function readUtf8WithinLimit(
+  handle: fs.promises.FileHandle,
+  budget: SearchContentBudget,
+): Promise<string | null> {
   const max = Number(MAX_CONTENT_BYTES);
-  const buffer = Buffer.allocUnsafe(max + 1);
+  const capacity = Math.min(max + 1, budget.remainingBytes);
+  if (capacity <= 0) return null;
+  const buffer = Buffer.allocUnsafe(capacity);
   let offset = 0;
   while (offset < buffer.length) {
     const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
     if (bytesRead === 0) break;
+    if (!budget.take(bytesRead)) return null;
     offset += bytesRead;
   }
+  // When the global budget, rather than EOF, stopped the read, reject the
+  // partial document instead of indexing a truncated body.
+  if (capacity < max + 1 && offset === capacity) return null;
   if (offset > max) return null;
   return buffer.subarray(0, offset).toString('utf8');
 }
@@ -50,24 +78,31 @@ export function searchPathAffectsIndex(relativePath: string): boolean {
 async function listCandidates(vault: string): Promise<Candidate[]> {
   const root = path.resolve(vault);
   const acc: Candidate[] = [];
+  let visited = 0;
   const walkDir = async (dir: string, depth: number): Promise<void> => {
-    if (depth > MAX_DEPTH) return;
-    let ents: fs.Dirent[];
-    try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch (_) { return; }
-    for (const e of ents) {
-      if (shouldSkipName(e.name)) continue;
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) { await walkDir(full, depth + 1); continue; }
-      // Never index symlinks, sockets, or other special entries. In particular,
-      // readFile/stat must not follow a vault symlink into the rest of the machine.
-      if (!e.isFile()) continue;
-      const ext = path.extname(e.name).replace('.', '').toLowerCase();
-      acc.push({
-        rel: path.relative(root, full),
-        name: e.name.replace(/\.(?:md|markdown)$/i, ''),
-        ext,
-        isMd: ext === 'md' || ext === 'markdown',
-      });
+    if (depth > MAX_DEPTH || visited >= SEARCH_INDEX_FILE_LIMIT) return;
+    let directory: fs.Dir;
+    try { directory = await fsp.opendir(dir); } catch (_) { return; }
+    try {
+      for await (const e of directory) {
+        if (visited >= SEARCH_INDEX_FILE_LIMIT) break;
+        visited += 1;
+        if (shouldSkipName(e.name)) continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) { await walkDir(full, depth + 1); continue; }
+        // Never index symlinks, sockets, or other special entries. In particular,
+        // readFile/stat must not follow a vault symlink into the rest of the machine.
+        if (!e.isFile()) continue;
+        const ext = path.extname(e.name).replace('.', '').toLowerCase();
+        acc.push({
+          rel: path.relative(root, full),
+          name: e.name.replace(/\.(?:md|markdown)$/i, ''),
+          ext,
+          isMd: ext === 'md' || ext === 'markdown',
+        });
+      }
+    } finally {
+      try { await directory.close(); } catch (_) {}
     }
   };
   await walkDir(root, 0);
@@ -80,6 +115,7 @@ async function buildSearchIndex(vault: string): Promise<SearchDocument[]> {
   try { realRoot = await fsp.realpath(root); } catch (_) { return []; }
   const candidates = await listCandidates(root);
   const documents: SearchDocument[] = [];
+  const contentBudget = new SearchContentBudget();
 
   for (const c of candidates) {
     let title = c.name;
@@ -102,7 +138,7 @@ async function buildSearchIndex(vault: string): Promise<SearchDocument[]> {
         const pathStat = await fsp.stat(realFull, { bigint: true });
         if (stat.dev !== pathStat.dev || stat.ino !== pathStat.ino) continue;
         if (stat.size <= MAX_CONTENT_BYTES) {
-          const raw = await readUtf8WithinLimit(handle);
+          const raw = await readUtf8WithinLimit(handle, contentBudget);
           if (raw != null) {
             const parsed = matter(raw);
             const data = parsed.data || {};

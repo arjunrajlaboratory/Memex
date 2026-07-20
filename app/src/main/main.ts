@@ -17,6 +17,8 @@ import { hardenMarkdownRenderer, wikilinkMarkdown } from './markdown';
 import { externalNavigationPolicy, installDenyByDefaultPermissions } from './web-policy';
 import { VaultTransitionGate } from './vault-transition';
 import { classifyVaultChange } from './watch-policy';
+import { buildWikiIndex } from './wiki-index';
+import { SerialQueue } from './serial-queue';
 
 const fsp = fs.promises;
 // Development runs inside the engine checkout; packaged builds carry the exact
@@ -49,6 +51,7 @@ let mdRenderer: ((md: string) => string) | null = null;
 // Files dropped on the Dock icon (mac) or taskbar/exe (Windows) before any vault is open;
 // flushed into the Inbox once vault:open succeeds.
 let pendingDrops: string[] = [];
+const inboxCopyQueue = new SerialQueue();
 
 function activeVaultPath(): string | null {
   return vaultTransition.canAccess(currentVault) ? currentVault : null;
@@ -60,13 +63,16 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'artifact', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 const artifactStore = new ArtifactStore(200);
+const ARTIFACT_TOO_LARGE = '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:32px;background:#1b1810;color:#efe7d4"><h2>Artifact too large to display</h2><p>Save it as a smaller file or split it into multiple artifacts.</p></body>';
 function artifactScope(vault: string): string {
   try { return fs.realpathSync(vault); } catch (_) { return path.resolve(vault); }
 }
 function registerArtifact(html: string, vault: string): string {
   // The host is the origin for a standard custom scheme. Deduplication is scoped
   // to one canonical vault so identical dashboards cannot share localStorage.
-  const id = artifactStore.register(artifactScope(vault), html || '');
+  const scope = artifactScope(vault);
+  const id = artifactStore.register(scope, html || '') || artifactStore.register(scope, ARTIFACT_TOO_LARGE);
+  if (!id) throw new Error('Artifact size policy is invalid');
   return `artifact://${id}/index.html`;
 }
 
@@ -101,24 +107,6 @@ function rememberVault(p: string): void {
 // Built asynchronously (and memoized as a promise) so a large vault's file walk never
 // blocks the main process. Invalidated by setting wikiIndexPromise = null.
 let wikiIndexPromise: Promise<Map<string, string>> | null = null;
-async function buildWikiIndex(vault: string): Promise<Map<string, string>> {
-  const idx = new Map<string, string>();
-  const roots = ['Atlas', 'Ops', 'Raw', 'Drafts'];
-  const walkIdx = async (dir: string, depth: number): Promise<void> => {
-    if (depth > 5) return;
-    let ents: fs.Dirent[]; try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch (_) { return; }
-    for (const e of ents) {
-      if (e.name.startsWith('.') || e.name === 'README.md') continue;
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) { await walkIdx(full, depth + 1); continue; }
-      if (!e.name.endsWith('.md')) continue;
-      const key = e.name.replace(/\.md$/, '').toLowerCase();
-      if (!idx.has(key)) idx.set(key, path.relative(vault, full));
-    }
-  };
-  await Promise.all(roots.map((r) => walkIdx(path.join(vault, r), 0)));
-  return idx;
-}
 function getWikiIndex(): Promise<Map<string, string>> {
   if (!currentVault) return Promise.resolve(new Map());
   if (!wikiIndexPromise) wikiIndexPromise = buildWikiIndex(currentVault);
@@ -217,7 +205,7 @@ function createWindow(): void {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       webviewTag: true,   // <webview> is used for embedded "web" dashboard tabs
     },
   });
@@ -335,6 +323,9 @@ function startWatchers(vault: string): void {
   // Only the active vault needs a cached search index.
   invalidateSearchIndex();
   const applyChange = (relativePath: string, fallbackArea?: string): void => {
+    // fs.watch may deliver an already-queued callback after close(). Do not let
+    // an old vault invalidate or refresh the newly selected vault's renderer.
+    if (shuttingDown || currentVault !== vault || vaultTransition.active) return;
     const effect = classifyVaultChange(relativePath);
     if (effect.invalidateWiki) wikiIndexPromise = null;
     if (effect.invalidateSearch) invalidateSearchIndex(vault);
@@ -378,20 +369,45 @@ function startWatchers(vault: string): void {
 // ---------- inbox drop (drag & drop zone + files dropped on the app icon) ----------
 // Shared by ipcMain 'inbox:drop' and handleIconDrop below — behavior must stay identical
 // for both entry points: dedup suffix on collision and isolate per-source failures.
-function copyIntoInbox(paths: string[], vault = activeVaultPath()): DropResult {
+async function copyIntoInbox(paths: string[], vault = activeVaultPath()): Promise<DropResult> {
   if (!vault) return { ok: false };
-  const copied = copyPathsIntoInbox(vault, paths);
-  return copied ? { ok: true, copied } : { ok: false, error: 'The vault Inbox is missing or unsafe' };
+  try {
+    const copied = await copyPathsIntoInbox(vault, paths);
+    return copied ? { ok: true, copied } : { ok: false, error: 'The vault Inbox is missing or unsafe' };
+  } catch (_) {
+    return { ok: false, error: 'Could not copy those files into the Inbox' };
+  }
+}
+
+function queueInboxCopy(paths: string[], vault: string): Promise<DropResult> {
+  return inboxCopyQueue.run(() => copyIntoInbox(paths, vault));
+}
+
+async function takePendingDrops(vault: string): Promise<DropResult | undefined> {
+  if (!pendingDrops.length) return undefined;
+  const drops = pendingDrops.splice(0, pendingDrops.length);
+  return queueInboxCopy(drops, vault);
+}
+
+async function flushPendingDrops(vault: string): Promise<void> {
+  const result = await takePendingDrops(vault);
+  if (result && currentVault === vault && !vaultTransition.active) {
+    emit('inbox:iconDrop', { copied: result.copied || [], error: result.error });
+  }
 }
 
 // Files dropped on the Dock icon / taskbar-exe / passed on argv. No vault yet -> queue for
 // vault:open to flush; otherwise copy now and tell the renderer.
-function handleIconDrop(paths: string[]): void {
+async function handleIconDrop(paths: string[]): Promise<void> {
   if (!paths || !paths.length) return;
   const vault = activeVaultPath();
   if (!vault) { pendingDrops.push(...paths); return; }
-  const res = copyIntoInbox(paths, vault);
-  emit('inbox:iconDrop', { copied: res.copied || [], error: res.error });
+  const res = await queueInboxCopy(paths, vault);
+  // A slow copy can finish after the user switches vaults. Never report its
+  // result in a different vault's renderer session.
+  if (currentVault === vault && !vaultTransition.active) {
+    emit('inbox:iconDrop', { copied: res.copied || [], error: res.error });
+  }
 }
 
 // Recovers files dropped on the taskbar/exe (Windows 'second-instance' argv) or passed at
@@ -501,7 +517,13 @@ async function startSession(vault: string): Promise<void> {
     requestPermission: (request) => requestAgentPermission(vault, nextSession, request),
   });
   session = nextSession;
-  await nextSession.start();
+  try {
+    await nextSession.start();
+  } catch (error) {
+    if (session === nextSession) session = null;
+    try { await nextSession.stop(); } catch (_) {}
+    throw error;
+  }
 }
 
 async function resolveArtifact(vault: string, evt: Extract<AgentEvent, { kind: 'artifact' }>): Promise<ArtifactView> {
@@ -648,21 +670,26 @@ function registerIpc(): void {
   handle('vault:open', async (_e, p: string) => {
     const full = expandHome(p);
     if (!vaultLib.isVault(full)) return { ok: false, error: 'Not a Memex vault' };
+    let summary: VaultSummary;
+    try { summary = vaultLib.summary(full); }
+    catch (_) { return { ok: false, error: 'Could not read this Memex vault' }; }
     if (!vaultTransition.begin()) return { ok: false, error: 'Another vault is already opening' };
     try {
       currentVault = full;
       wikiIndexPromise = null;
       rememberVault(full);
       startWatchers(full);
-      try { await startSession(full); } catch (e) { emit('agent:event', { kind: 'error', message: String((e as Error)?.message || e) }); }
-      if (pendingDrops.length) {
-        const drops = pendingDrops; pendingDrops = [];
-        const res = copyIntoInbox(drops, full);
-        emit('inbox:iconDrop', { copied: res.copied || [], error: res.error });
-      }
-      return { ok: true, summary: vaultLib.summary(full) };
+      let warning: string | undefined;
+      let pendingDrop: DropResult | undefined;
+      try { await startSession(full); }
+      catch (e) { warning = 'Agent session failed to start: ' + String((e as Error)?.message || e); }
+      pendingDrop = await takePendingDrops(full);
+      return { ok: true, summary, warning, pendingDrop };
     } finally {
       vaultTransition.finish();
+      // An OS drop can arrive after the in-transition drain above. Once access
+      // reopens, flush that tail rather than leaving it for the next vault open.
+      if (currentVault === full && pendingDrops.length) void flushPendingDrops(full);
     }
   });
 
@@ -700,7 +727,9 @@ function registerIpc(): void {
     if (!vault) return out;
     const builtins = new Set(['dashboard', 'tasks', 'projects', 'ideas', 'people', 'inbox', 'outbox', 'artifact']);
     try {
-      const raw = fs.readFileSync(path.join(vault, '_config', 'desktop-tabs.json'), 'utf8');
+      const file = vaultLib.readFile(vault, path.join('_config', 'desktop-tabs.json'));
+      if (!file || file.kind !== 'text') return out;
+      const raw = file.content || '';
       const cfg = JSON.parse(raw) as { tabs?: unknown[]; chips?: unknown[] };
       if (Array.isArray(cfg.tabs)) {
         const seen = new Set<string>();
@@ -800,7 +829,10 @@ function registerIpc(): void {
       : { ok: false, error: 'Could not write to this vault\'s Inbox' };
   });
 
-  handle('inbox:drop', async (_e, paths: string[]) => copyIntoInbox(paths));
+  handle('inbox:drop', async (_e, paths: string[]) => {
+    const vault = activeVaultPath();
+    return vault ? queueInboxCopy(paths, vault) : { ok: false };
+  });
 
   handle('shell:open', async (_e, target: string) => {
     if (externalNavigationPolicy('explicit', target) === 'open') return shell.openExternal(target);

@@ -83,3 +83,10 @@ test('display reads reject files larger than their content limit', (t) => {
 
   assert.equal(vaultLib.readFile(vault, 'outputs/oversized.txt'), null);
 });
+
+test('vault collection content budgets are cumulative', () => {
+  const budget = new vaultLib.VaultContentBudget(10);
+  assert.equal(budget.take(6), true);
+  assert.equal(budget.take(4), true);
+  assert.equal(budget.take(1), false);
+});

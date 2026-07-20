@@ -5,6 +5,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
+  SearchContentBudget,
+  SEARCH_INDEX_FILE_LIMIT,
   SEARCH_INDEX_TTL_MS,
   SEARCH_QUERY_LIMIT,
   invalidateSearchIndex,
@@ -27,6 +29,13 @@ function makeVault(t) {
     '---\ntitle: Telescope notes\n---\nThe NIRCam background systematic near bright sources.\n');
   fs.writeFileSync(path.join(vault, '_schemas/cycle.md'), '---\ntitle: cycle schema\n---\ncycle cycle cycle\n');
   return vault;
+}
+
+function fakeDirectory(entries) {
+  return {
+    async *[Symbol.asyncIterator]() { yield* entries; },
+    async close() {},
+  };
 }
 
 test('title and filename matches land in files tier, ranked above substring', async (t) => {
@@ -176,4 +185,48 @@ test('watcher filtering ignores infrastructure but includes custom knowledge pat
   assert.equal(searchPathAffectsIndex('.git/index'), false);
   assert.equal(searchPathAffectsIndex('outputs/quartz-serve.log'), false);
   assert.equal(searchPathAffectsIndex('CV/variants/academic.md'), true);
+});
+
+test('search candidate walks stop at the configured file limit', async (t) => {
+  const vault = makeVault(t);
+  const originalOpendir = fs.promises.opendir;
+  fs.promises.opendir = async (requested, options) => {
+    if (path.resolve(String(requested)) !== path.resolve(vault)) return originalOpendir(requested, options);
+    return fakeDirectory(Array.from({ length: SEARCH_INDEX_FILE_LIMIT + 1 }, (_, index) => ({
+      name: `synthetic-${index}.txt`, isDirectory: () => false, isFile: () => true,
+    })));
+  };
+  t.after(() => { fs.promises.opendir = originalOpendir; });
+
+  invalidateSearchIndex(vault);
+  assert.equal((await searchVault(vault, `synthetic-${SEARCH_INDEX_FILE_LIMIT - 1}`)).files.length, 1);
+  invalidateSearchIndex(vault);
+  assert.equal((await searchVault(vault, `synthetic-${SEARCH_INDEX_FILE_LIMIT}`)).files.length, 0);
+});
+
+test('search walk budget also counts directories', async (t) => {
+  const vault = makeVault(t);
+  const originalOpendir = fs.promises.opendir;
+  let calls = 0;
+  fs.promises.opendir = async (requested) => {
+    calls += 1;
+    if (path.resolve(String(requested)) !== path.resolve(vault)) return fakeDirectory([]);
+    return fakeDirectory(Array.from({ length: SEARCH_INDEX_FILE_LIMIT + 1 }, (_, index) => ({
+      name: `synthetic-dir-${index}`, isDirectory: () => true, isFile: () => false,
+    })));
+  };
+  t.after(() => { fs.promises.opendir = originalOpendir; });
+
+  invalidateSearchIndex(vault);
+  await searchVault(vault, 'nothing');
+  assert.equal(calls, SEARCH_INDEX_FILE_LIMIT); // root plus only the bounded child walks
+});
+
+test('search content storage honors a cumulative byte budget', () => {
+  const budget = new SearchContentBudget(10);
+  assert.equal(budget.remainingBytes, 10);
+  assert.equal(budget.take(6), true);
+  assert.equal(budget.take(4), true);
+  assert.equal(budget.take(1), false);
+  assert.equal(budget.remainingBytes, 0);
 });

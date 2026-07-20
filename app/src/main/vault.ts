@@ -6,12 +6,30 @@ import * as path from 'path';
 import matter from 'gray-matter';
 
 interface NoteData { [key: string]: unknown; }
-interface NoteFile { data: NoteData; body: string; raw: string; mtime: number; }
+interface NoteFile { data: NoteData; body: string; raw: string; mtime: number; bytes: number; }
 interface CollectionEntry { name: string; rel: string; data: NoteData; body: string; mtime: number; }
 
 export const MAX_NOTE_FILE_BYTES = 2_000_000;
 export const MAX_TEXT_FILE_BYTES = 5_000_000;
 export const MAX_IMAGE_FILE_BYTES = 25_000_000;
+export const MAX_COLLECTION_CONTENT_BYTES = 16_000_000;
+export const MAX_DIRECTORY_ENTRIES = 50_000;
+export const MAX_LISTED_FILES = 50_000;
+
+export class VaultContentBudget {
+  private used = 0;
+  private readonly limit: number;
+
+  constructor(limit = MAX_COLLECTION_CONTENT_BYTES) {
+    this.limit = Number.isSafeInteger(limit) && limit >= 0 ? limit : 0;
+  }
+
+  take(bytes: number): boolean {
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || this.used + bytes > this.limit) return false;
+    this.used += bytes;
+    return true;
+  }
+}
 
 // True only when `full` is the base dir itself or genuinely inside it — startsWith
 // alone would also match a sibling like `<base>-secret`.
@@ -96,8 +114,19 @@ function readVaultBytes(vault: string, rel: string, maxBytes: number): { bytes: 
   }
 }
 
-function safeList(dir: string): fs.Dirent[] {
-  try { return fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return []; }
+function safeList(dir: string, limit = MAX_DIRECTORY_ENTRIES): fs.Dirent[] {
+  const entries: fs.Dirent[] = [];
+  let directory: fs.Dir | null = null;
+  try {
+    directory = fs.opendirSync(dir);
+    let entry: fs.Dirent | null;
+    while (entries.length < limit && (entry = directory.readSync()) != null) entries.push(entry);
+  } catch (_) {
+    return entries;
+  } finally {
+    if (directory) { try { directory.closeSync(); } catch (_) {} }
+  }
+  return entries;
 }
 
 function readNoteFile(vault: string, rel: string): NoteFile | null {
@@ -106,7 +135,7 @@ function readNoteFile(vault: string, rel: string): NoteFile | null {
   try {
     const raw = opened.bytes.toString('utf8');
     const { data, content } = matter(raw);
-    return { data: data || {}, body: content || '', raw, mtime: opened.stat.mtimeMs };
+    return { data: data || {}, body: content || '', raw, mtime: opened.stat.mtimeMs, bytes: opened.bytes.length };
   } catch (_) { return null; }
 }
 
@@ -128,6 +157,7 @@ function dstr(v: unknown): string {
 function collection<T>(vault: string, subdir: string, mapper: (e: CollectionEntry) => T): T[] {
   const dir = path.join(vault, subdir);
   const out: T[] = [];
+  const budget = new VaultContentBudget();
   if (pathType(vault, subdir) !== 'directory') return out;
   for (const ent of safeList(dir)) {
     if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
@@ -135,6 +165,7 @@ function collection<T>(vault: string, subdir: string, mapper: (e: CollectionEntr
     const rel = path.join(subdir, ent.name);
     const note = readNoteFile(vault, rel);
     if (!note) continue;
+    if (!budget.take(note.bytes)) break;
     const { data, body, mtime } = note;
     out.push(mapper({
       name: ent.name.replace(/\.md$/, ''),
@@ -240,6 +271,7 @@ export function readInbox(vault: string): FileEntry[] {
   const out: FileEntry[] = [];
   if (pathType(vault, 'Inbox') !== 'directory') return out;
   for (const ent of safeList(dir)) {
+    if (out.length >= MAX_LISTED_FILES) break;
     if (ent.name === 'README.md' || ent.name.startsWith('.') || ent.name === '_filed') continue;
     if (ent.isSymbolicLink()) continue;
     const file = path.join(dir, ent.name);
@@ -260,8 +292,9 @@ export function readInbox(vault: string): FileEntry[] {
 }
 
 function walk(dir: string, vault: string, acc: FileEntry[], depth: number): void {
-  if (depth > 4) return;
+  if (depth > 4 || acc.length >= MAX_LISTED_FILES) return;
   for (const ent of safeList(dir)) {
+    if (acc.length >= MAX_LISTED_FILES) return;
     if (ent.name.startsWith('.') || ent.name === 'README.md') continue;
     if (ent.isSymbolicLink()) continue;
     const full = path.join(dir, ent.name);
