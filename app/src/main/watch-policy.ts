@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { searchPathAffectsIndex } from './search';
+import { isSyncArtifact } from './sync-artifacts';
 
 export interface VaultChangeEffect {
   area: string | null;
@@ -13,6 +14,10 @@ const WIKI_ROOTS = new Set(['Atlas', 'Ops', 'Raw', 'Drafts']);
 export function classifyVaultChange(relativePath: string): VaultChangeEffect {
   const normalized = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   const parts = normalized.split('/').filter(Boolean);
+  // Sync-service noise must not trigger renderer refreshes or cache invalidation.
+  if (parts.length && isSyncArtifact(parts[parts.length - 1])) {
+    return { area: null, invalidateSearch: false, invalidateWiki: false };
+  }
   const first = parts[0] || '';
   let area: string | null = null;
   if (first === '_config') area = 'config';

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { pathType } from './vault';
+import { isSyncArtifact } from './sync-artifacts';
 
 const fsp = fs.promises;
 const WIKI_ROOTS = ['Atlas', 'Ops', 'Raw', 'Drafts'];
@@ -26,7 +27,7 @@ export async function buildWikiIndex(
       for await (const entry of directory) {
         if (visited >= limit) return;
         visited += 1;
-        if (entry.name.startsWith('.') || entry.name === 'README.md') continue;
+        if (entry.name.startsWith('.') || entry.name === 'README.md' || isSyncArtifact(entry.name)) continue;
         const rel = path.join(relDir, entry.name);
         if (entry.isDirectory()) {
           await walk(rel, depth + 1);

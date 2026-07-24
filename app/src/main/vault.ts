@@ -4,6 +4,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import matter from 'gray-matter';
+import { isSyncArtifact } from './sync-artifacts';
 
 interface NoteData { [key: string]: unknown; }
 interface NoteFile { data: NoteData; body: string; raw: string; mtime: number; bytes: number; }
@@ -161,7 +162,7 @@ function collection<T>(vault: string, subdir: string, mapper: (e: CollectionEntr
   if (pathType(vault, subdir) !== 'directory') return out;
   for (const ent of safeList(dir)) {
     if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
-    if (ent.name === 'README.md') continue;
+    if (ent.name === 'README.md' || isSyncArtifact(ent.name)) continue;
     const rel = path.join(subdir, ent.name);
     const note = readNoteFile(vault, rel);
     if (!note) continue;
@@ -273,6 +274,7 @@ export function readInbox(vault: string): FileEntry[] {
   for (const ent of safeList(dir)) {
     if (out.length >= MAX_LISTED_FILES) break;
     if (ent.name === 'README.md' || ent.name.startsWith('.') || ent.name === '_filed') continue;
+    if (isSyncArtifact(ent.name)) continue;
     if (ent.isSymbolicLink()) continue;
     const file = path.join(dir, ent.name);
     const rel = path.join('Inbox', ent.name);
@@ -295,7 +297,7 @@ function walk(dir: string, vault: string, acc: FileEntry[], depth: number): void
   if (depth > 4 || acc.length >= MAX_LISTED_FILES) return;
   for (const ent of safeList(dir)) {
     if (acc.length >= MAX_LISTED_FILES) return;
-    if (ent.name.startsWith('.') || ent.name === 'README.md') continue;
+    if (ent.name.startsWith('.') || ent.name === 'README.md' || isSyncArtifact(ent.name)) continue;
     if (ent.isSymbolicLink()) continue;
     const full = path.join(dir, ent.name);
     const rel = path.relative(vault, full);
@@ -336,7 +338,7 @@ export function latestBriefing(vault: string): BriefingInfo | null {
   const dir = path.join(vault, 'Ops/Briefings');
   if (pathType(vault, 'Ops/Briefings') !== 'directory') return null;
   const files = safeList(dir)
-    .filter((e) => e.isFile() && e.name.endsWith('.md') && pathType(vault, path.join('Ops/Briefings', e.name)) === 'file')
+    .filter((e) => e.isFile() && e.name.endsWith('.md') && !isSyncArtifact(e.name) && pathType(vault, path.join('Ops/Briefings', e.name)) === 'file')
     .map((e) => e.name).sort();
   if (!files.length) return null;
   const name = files[files.length - 1];

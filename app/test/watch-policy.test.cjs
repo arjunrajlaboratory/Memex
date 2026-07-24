@@ -19,6 +19,15 @@ test('root watcher changes refresh custom tabs and all wikilink roots', () => {
   assert.equal(classifyVaultChange('_schemas/task.md').invalidateSearch, false);
 });
 
+test('sync-service conflict files cause no refresh or invalidation', () => {
+  assert.deepEqual(classifyVaultChange('Ops/Tasks/task (conflicted copy 2026-07-21).md'), {
+    area: null, invalidateSearch: false, invalidateWiki: false,
+  });
+  assert.deepEqual(classifyVaultChange('Atlas/note.sync-conflict-20260721-101112-ABCDEF.md'), {
+    area: null, invalidateSearch: false, invalidateWiki: false,
+  });
+});
+
 test('area batches retain every distinct area in a burst', () => {
   const source = fs.readFileSync(path.join(__dirname, '../dist/shared/area-batch.js'), 'utf8');
   const context = vm.createContext({});

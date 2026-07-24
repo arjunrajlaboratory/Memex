@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import matter from 'gray-matter';
 import { resolveInside } from './security';
+import { isSyncArtifact } from './sync-artifacts';
 
 const fsp = fs.promises;
 
@@ -66,7 +67,7 @@ async function readUtf8WithinLimit(
 function shouldSkipName(name: string): boolean {
   const lower = name.toLowerCase();
   return name.startsWith('.') || name.startsWith('_') || SKIP_DIRS.has(lower) ||
-    lower === 'readme.md' || lower.endsWith('.log');
+    lower === 'readme.md' || lower.endsWith('.log') || isSyncArtifact(name);
 }
 
 /** Whether a watcher event could change the searchable index. */
