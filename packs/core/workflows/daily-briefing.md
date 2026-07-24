@@ -14,12 +14,12 @@ closes (plus passed calendar-event closes if the `calendar` stream is enabled) b
 numbered `## 0. State confirmation needed` section, confirmed in one batch. Skip this pass
 for backfilled briefings more than ~2 days old.
 
-When reading `_config/sources.md`, also respect `mailboxes.*`: the Gmail MCP searches only
-`mailboxes.gmail_connected`. Forwarding-in addresses can make received mail visible, but sent
+When reading `_config/sources.md`, also respect `mailboxes.*`: the mail connector searches only
+`mailboxes.connected` (legacy vaults: `mailboxes.gmail_connected`). Forwarding-in addresses can make received mail visible, but sent
 mail from that address, or from `mailboxes.other_sending_accounts`, is invisible unless those
 mailboxes are separately connected. For outbound-contact tasks, an empty connected-mailbox
 `in:sent` result is therefore **inconclusive**, not evidence of "not sent"; surface it as
-"couldn't confirm from connected Gmail — did this go from another account?" instead of
+"couldn't confirm from the connected mailbox — did this go from another account?" instead of
 "awaiting send." Independently of accounts, `search_threads` can return a **stale** cached view
 of even the connected mailbox — days behind reality, and unrefreshed by repeating the search — so
 confirm a specific thread with `get_thread(threadId)` and never read "not sent" off an empty

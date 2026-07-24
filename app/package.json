@@ -1,0 +1,120 @@
+{
+  "name": "memex-desktop",
+  "version": "0.1.0",
+  "description": "Desktop app for Memex — install, set up, and drive your second brain with a chat + dashboards UI on top of the Claude agent.",
+  "author": "Memex",
+  "license": "MIT",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "assets": "mkdir -p dist/renderer && cp src/renderer/index.html src/renderer/styles.css dist/renderer/",
+    "build": "tsc && npm run assets",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test test/*.test.cjs",
+    "watch": "npm run assets && tsc -w",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && MEMEX_DEV=1 electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.211",
+    "gray-matter": "^4.0.3",
+    "marked": "^12.0.2",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2"
+  },
+  "build": {
+    "appId": "app.memex.desktop",
+    "productName": "Memex",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../tools",
+        "to": "engine/tools",
+        "filter": [
+          "memex_init.py",
+          "memex_bake.py"
+        ]
+      },
+      {
+        "from": "../packs",
+        "to": "engine/packs"
+      },
+      {
+        "from": "../hardened",
+        "to": "engine/hardened",
+        "filter": [
+          "**/*",
+          "!**/.gitignore",
+          "!**/tsconfig.tsbuildinfo"
+        ]
+      },
+      {
+        "from": "../placeholders.json",
+        "to": "engine/placeholders.json"
+      },
+      {
+        "from": "../packs.json",
+        "to": "engine/packs.json"
+      },
+      {
+        "from": "../engine_layout.json",
+        "to": "engine/engine_layout.json"
+      },
+      {
+        "from": "../VERSION",
+        "to": "engine/VERSION"
+      }
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "None",
+            "LSItemContentTypes": [
+              "public.data",
+              "public.folder"
+            ]
+          }
+        ]
+      }
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Office",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
+  }
+}

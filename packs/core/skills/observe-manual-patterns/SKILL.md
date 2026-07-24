@@ -51,7 +51,7 @@ For each kept line, extract a normalized shape:
 <verb> <target-type>
 ```
 
-Where `target-type` is inferred from the wikilink target (e.g., `[[X]]` → `person`, `[[Y]]` → `task`, `[[Z]]` → `decision`, `[[W]]` → `project`). If the target isn't a vault entity (e.g., "Google Calendar event for ...", "GitHub repo X"), use the target's category as the type (`calendar-event`, `external-repo`, `email-draft`).
+Where `target-type` is inferred from the wikilink target (e.g., `[[X]]` → `person`, `[[Y]]` → `task`, `[[Z]]` → `decision`, `[[W]]` → `project`). If the target isn't a vault entity (e.g., "calendar event for ...", "GitHub repo X"), use the target's category as the type (`calendar-event`, `external-repo`, `email-draft`).
 
 Group by shape. Count occurrences. Drop shapes with fewer than `<threshold>` occurrences.
 
@@ -63,7 +63,7 @@ Group by shape. Count occurrences. Drop shapes with fewer than `<threshold>` occ
 | Shape | Count | Example log lines |
 | --- | --- | --- |
 | `update person.last_contact` | 5 | 2026-05-12 — me — update — [[X]] — last_contact bump; 2026-05-17 — ... |
-| `schedule calendar-event` | 4 | 2026-05-09 — me — schedule — Google Calendar event for ...; ... |
+| `schedule calendar-event` | 4 | 2026-05-09 — me — schedule — calendar event for ...; ... |
 | ... | ... | ... |
 
 ### Proposed skill candidates

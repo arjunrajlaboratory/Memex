@@ -91,7 +91,7 @@ For every group marked "parallel" above, dispatch one sub-agent **per note** in 
 | --- | --- | --- |
 | Reading source material, extracting facts, summarizing | `haiku` | Cheap, fast, plenty smart enough for "read this and tell me the 5 key claims" |
 | Writing one Source / Organization / Concept / Followup / Task note from clear inputs | `haiku` | One schema, one template, mechanical fill-in |
-| Writing one Person note (Gmail backfill + judgment about cadence/role) | `sonnet` | Needs judgment to interpret Gmail signal — delegates to `ingest-person` skill which sets its own model |
+| Writing one Person note (mail backfill + judgment about cadence/role) | `sonnet` | Needs judgment to interpret mail signal — delegates to `ingest-person` skill which sets its own model |
 | Writing one Project / Sub-project / Implementation page (rich cross-linking, judgment about outcome/status/why-it-matters) | `sonnet` | These are the synthesis pages — quality matters more than speed |
 | Writing one Tracker (cadence, search-strategy, "material change" definition) | `sonnet` | Judgment-heavy; delegates to `new-tracker` wizard logic |
 | The orchestrator (this skill, deciding what to dispatch, reconciling outputs) | inherited (typically `opus`) | Don't override the parent model |
@@ -131,7 +131,7 @@ After a parallel batch returns, **read each written file** (just frontmatter, in
 
 ## Step 4 — People are special: delegate to `ingest-person`
 
-For every new Person identified in Step 1, invoke the `ingest-person` skill (or replicate its Gmail-backfill move) rather than writing the Person note inline. The `ingest-person` skill knows to search Gmail for prior threads, infer role from signatures, set `last_contact`, and seed `# Conversation history`. The user has a standing preference (recorded in memory: `feedback_enrich_people_from_gmail`) that Person notes get backfilled from Gmail — honor it.
+For every new Person identified in Step 1, invoke the `ingest-person` skill (or replicate its mail-backfill move) rather than writing the Person note inline. The `ingest-person` skill knows to search the connected mailbox for prior threads, infer role from signatures, set `last_contact`, and seed `# Conversation history`. The user has a standing preference (recorded in memory: `feedback_enrich_people_from_gmail`) that Person notes get backfilled from mail — honor it.
 
 If you batch several new People in parallel, dispatch each as its own sub-agent invoking the skill, all in the same message.
 
@@ -153,7 +153,7 @@ Append entries in chronological order at the top of `log.md` (newest first, per 
 ```
 <datetime> — agent:librarian — create — [[<name>]] — new area for <project> ingest
 <datetime> — agent:librarian — create — 3 Organizations: [[Org - A]], [[Org - B]], [[Org - C]] — anchors for <project>
-<datetime> — agent:librarian — create — 5 People: [[X]] … — collaborators/stakeholders for <project>; <N> backfilled from Gmail
+<datetime> — agent:librarian — create — 5 People: [[X]] … — collaborators/stakeholders for <project>; <N> backfilled from mail
 <datetime> — agent:librarian — ingest — 4 Sources from Inbox/ — <one-line summary>
 <datetime> — agent:librarian — create — 3 Concepts: [[A]], [[B]], [[C]]
 <datetime> — agent:librarian — create — [[<name>]] (master) + N sub-projects + <M> tasks + <K> trackers — <one-sentence framing>
@@ -195,7 +195,7 @@ Ingest complete.
 Created:
 - Area: [[…]] (new | existing)
 - Project: [[…]] + N sub-projects
-- People: N (M backfilled from Gmail)
+- People: N (M backfilled from mail)
 - Orgs: N
 - Sources: N
 - Concepts: N

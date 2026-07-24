@@ -41,11 +41,31 @@ TEXT_EXTS = {
 # Source streams + git mode are behavior answers, not {{TOKEN}} placeholders.
 VALID_STREAMS = ["email", "slack", "calendar"]
 DEFAULT_STREAMS = ["email", "slack"]
+VALID_PROVIDERS = ["google", "microsoft"]
 STREAM_MCP = {
-    "email": "claude_ai_Gmail",
-    "slack": "claude_ai_Slack",
-    "calendar": "claude_ai_Google_Calendar",
+    "google": {
+        "email": "claude_ai_Gmail",
+        "slack": "claude_ai_Slack",
+        "calendar": "claude_ai_Google_Calendar",
+    },
+    # One connector serves both mail and calendar on the Microsoft side. This is
+    # an init-time server-id string, not a tool name: skills discover tools from
+    # `streams.*.mcp` at run time, so users can correct it in _config/sources.md.
+    "microsoft": {
+        "email": "claude_ai_Microsoft_365",
+        "slack": "claude_ai_Slack",
+        "calendar": "claude_ai_Microsoft_365",
+    },
 }
+
+
+def normalize_provider(raw: Any) -> str:
+    p = raw.strip().lower() if isinstance(raw, str) else "google"
+    return p if p in VALID_PROVIDERS else "google"
+
+
+def stream_mcp(provider: Any) -> dict[str, str]:
+    return STREAM_MCP[normalize_provider(provider)]
 VALID_GIT_MODES = ["local", "none", "remote"]
 PORT_TOKENS = {"QUARTZ_PORT", "QUARTZ_WS_PORT"}
 
@@ -247,11 +267,15 @@ def sources_config_yaml(
     connected_email: str = "",
     forwarding_email: str = "",
     other_sending_accounts: Any = None,
+    provider: str = "google",
 ) -> str:
+    provider = normalize_provider(provider)
+    mcp_ids = stream_mcp(provider)
+
     def line(name: str) -> str:
         en = "true" if name in streams else "false"
         extra = ", mode: minimal" if name == "calendar" else ""
-        return f"  {name}: {{ enabled: {en}, mcp: {STREAM_MCP[name]}{extra} }}"
+        return f"  {name}: {{ enabled: {en}, mcp: {mcp_ids[name]}{extra} }}"
 
     connected = str(connected_email or "").strip()
     forwarding = str(forwarding_email or "").strip()
@@ -260,10 +284,11 @@ def sources_config_yaml(
     return f"""---
 type: config
 scope: sources
+provider: {provider}
 git_mode: {git_mode}
 updated: {today}
 mailboxes:
-  gmail_connected: {_yaml_string(connected)}
+  connected: {_yaml_string(connected)}
   forwarding_in: {_yaml_string(forwarding)}
   other_sending_accounts: {_yaml_list(other_senders)}
 streams:
@@ -274,7 +299,9 @@ streams:
 
 Which streams the daily loop-closing flow checks. `capture-comms` +
 `reconcile-from-comms` run by default at the top of `daily-briefing`; flip an
-`enabled:` above to turn a stream on or off - no re-init needed.
+`enabled:` above to turn a stream on or off - no re-init needed. Skills resolve
+their mail/calendar tools from the `mcp:` server ids above at run time - if your
+connector registers under a different id, edit the `mcp:` values here.
 
 - **email** / **slack** - scanned by `capture-comms` (sent + received). Sent
   messages are the strongest loop-*closing* signals.
@@ -283,14 +310,15 @@ Which streams the daily loop-closing flow checks. `capture-comms` +
 
 ## Email visibility
 
-- **Connected Gmail mailbox:** {_inline_or_none(connected)} - this is the only mailbox
-  the Gmail MCP searches.
+- **Connected mailbox:** {_inline_or_none(connected)} - this is the only mailbox
+  the mail connector searches.
 - **Forwarding-in address:** {_inline_or_none(forwarding)} - received mail may arrive
   in the connected mailbox, but sent mail from this address is invisible unless it was
   also sent through the connected mailbox.
 - **Other sending accounts:** {_inline_or_none(", ".join(other_senders))} - sent mail
-  from these accounts is invisible to `in:sent` unless those mailboxes are separately
-  connected. Treat missing sent-mail evidence for them as inconclusive, not "not sent."
+  from these accounts is invisible to the connector's sent-mail view unless those
+  mailboxes are separately connected. Treat missing sent-mail evidence for them as
+  inconclusive, not "not sent."
 
 If this file is absent, skills fall back to: email + slack enabled, calendar
 planning-only.
@@ -438,6 +466,7 @@ def _write_seed_files(target: pathlib.Path, answers: dict[str, Any], streams: li
         connected_email=answers.get("OWNER_PRIMARY_EMAIL", ""),
         forwarding_email=answers.get("OWNER_FORWARDING_EMAIL", ""),
         other_sending_accounts=answers.get("OWNER_SENDING_ACCOUNTS", ""),
+        provider=normalize_provider(answers.get("PROVIDER")),
     )
     seeds["_config/overrides.md"] = (
         "---\n"

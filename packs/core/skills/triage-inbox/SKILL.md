@@ -82,7 +82,7 @@ For each item, follow the routing decision tree below. **Do not batch-process** 
 | "Remember to do X on date D" | `followup` | Write `Ops/Followups/<Subject> - <due-date>.md`. |
 | Reflective entry, daily-journal-shaped | `journal` | Append to `Inbox/_journal/<date>.md` — the canonical path per `_schemas/journal.md` (a future schema revision may relocate journals to a top-level folder, but until then the inbox-adjacent path is it). |
 | Draft wiki page (Concept / Project / etc.) | `<type>` | Write directly to `Atlas/<Type>/...` after schema reconciliation. |
-| New person mentioned, no existing Person note | `person` | Invoke `/ingest-person` (Gmail backfill is mandatory per standing user pref). |
+| New person mentioned, no existing Person note | `person` | Invoke `/ingest-person` (mail backfill is mandatory per standing user pref). |
 
 ### Search-before-write
 
@@ -142,6 +142,6 @@ Inherit `opus` for the orchestrator. Classification + judgment is the bottleneck
 - `Agents/Prompts/triage-inbox.md` — paste-able prompt equivalent (use outside Claude Code).
 - `_workflows/capture-triage.md` — the full long-form workflow.
 - `ingest-source`, `ingest-person`, `ingest-project` — sibling skills invoked from inside this one.
-- `create-task` — invoked for any Task-shaped capture (a time-blocked capture also gets a Google Calendar event via that skill).
+- `create-task` — invoked for any Task-shaped capture (a time-blocked capture also gets a calendar event via that skill).
 - `capture-decision` — invoked for any Decision-shaped capture.
 - `session-start` — when run as part of a session-start, it often surfaces "you have N unfiled items" before this skill is invoked.
