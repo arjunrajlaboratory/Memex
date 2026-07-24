@@ -490,6 +490,35 @@ function requestAgentPermission(
   return result;
 }
 
+// AppleScript string literal: escape backslashes and quotes.
+function appleScriptString(s: string): string {
+  return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+// Launch a terminal running `claude` in dirPath. The permission dialog (this
+// tool is never auto-allowed) is the user's confirmation step.
+async function launchClaudeCode(dirPath: string): Promise<{ ok: boolean; message: string }> {
+  const full = path.resolve(expandHome(String(dirPath || '')));
+  let stat: fs.Stats;
+  try { stat = fs.statSync(full); } catch (_) {
+    return { ok: false, message: `Directory not found: ${full}` };
+  }
+  if (!stat.isDirectory()) return { ok: false, message: `Not a directory: ${full}` };
+  try {
+    if (process.platform === 'darwin') {
+      const script = `tell application "Terminal"\n  do script "cd " & quoted form of ${appleScriptString(full)} & " && claude"\n  activate\nend tell`;
+      spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
+    } else if (process.platform === 'win32') {
+      spawn('cmd', ['/c', 'start', 'cmd', '/k', 'claude'], { cwd: full, detached: true, stdio: 'ignore' }).unref();
+    } else {
+      spawn('x-terminal-emulator', ['-e', 'claude'], { cwd: full, detached: true, stdio: 'ignore' }).unref();
+    }
+  } catch (err) {
+    return { ok: false, message: `Could not open a terminal: ${String((err as Error)?.message || err)}` };
+  }
+  return { ok: true, message: `Opened a Claude Code session in ${full}. Tell the user it is running in their terminal.` };
+}
+
 async function startSession(vault: string): Promise<void> {
   if (session) { try { await session.stop(); } catch (_) {} session = null; }
   let nextSession: AgentSession;
@@ -515,6 +544,7 @@ async function startSession(vault: string): Promise<void> {
     cwd: vault,
     onEvent: (evt: AgentEvent) => { chain = chain.then(() => handleEvent(evt)).catch(() => {}); },
     requestPermission: (request) => requestAgentPermission(vault, nextSession, request),
+    openInClaudeCode: launchClaudeCode,
   });
   session = nextSession;
   try {

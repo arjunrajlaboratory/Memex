@@ -296,6 +296,7 @@ const TOOL_LABELS: Record<string, string> = {
 };
 function toolLabel(name: string): string {
   if (name.startsWith('mcp__ui__show_artifact')) return 'Showing artifact';
+  if (name.startsWith('mcp__ui__open_in_claude_code')) return 'Opening in Claude Code';
   if (name.startsWith('mcp__')) return name.replace('mcp__', '').replace(/__/g, ' · ');
   return TOOL_LABELS[name] || name;
 }

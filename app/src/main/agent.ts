@@ -51,12 +51,17 @@ Each tab has a short lowercase unique \`id\` (never dashboard/tasks/projects/ide
 - \`"kind":"query"\` with \`"source"\` (one of tasks/projects/ideas/people/sources) and an optional \`"where"\` filter. \`where\` keys (all optional, ANDed): status (array), priority (array, e.g. ["p0","p1"]), project (substring), area (substring), tag (for ideas), overdue (true), dueBefore ("YYYY-MM-DD"), dueWithinDays (number). e.g. {"id":"due","label":"Due this week","kind":"query","source":"tasks","where":{"status":["next","in_progress","waiting"],"dueWithinDays":7}}.
 - \`"kind":"web"\` with \`"url"\`: embeds a page (e.g. the vault's Quartz dashboard site, usually http://localhost:<QUARTZ_PORT>/... — the port is in _config). e.g. {"id":"board","label":"Dashboards","kind":"web","url":"http://localhost:8137/"}.
 
-Each chip has \`"label"\` and \`"prompt"\` (the message sent to you when clicked). e.g. {"label":"Blockers","prompt":"What's blocked right now and why?"}. Custom chips appear after the built-in ones.`;
+Each chip has \`"label"\` and \`"prompt"\` (the message sent to you when clicked). e.g. {"label":"Blockers","prompt":"What's blocked right now and why?"}. Custom chips appear after the built-in ones.
+
+ARTIFACT FRESHNESS: The artifact panel is a living surface, not an archive. When the conversation moves on and an earlier artifact no longer matches what the user is working on, replace it with something relevant — prefer refreshing an existing dashboard or report over minting a near-duplicate — or simply leave replies chat-only; the user can close a stale artifact with the × on its tab. Never keep steering the user back to an outdated artifact.
+
+CLAUDE CODE HAND-OFF: Memex is a knowledge tool, not an IDE. When the user starts real software-engineering work on a code repository (multi-file changes, tests, a git repo outside this vault), offer to hand off: call the \`open_in_claude_code\` tool with the repo directory to launch a Claude Code session in their terminal, and keep the vault side (notes, tasks, decisions) here. Small vault-local scripts and one-off snippets are fine to do in place.`;
 
 export class AgentSession {
   private cwd: string;
   private onEvent: (evt: AgentEvent) => void;
   private requestPermission: (request: AgentPermissionRequest) => Promise<boolean>;
+  private openInClaudeCode: (dirPath: string) => Promise<{ ok: boolean; message: string }>;
   private queue = new MessageQueue();
   private query: Query | null = null;
   running = false;
@@ -66,15 +71,19 @@ export class AgentSession {
     cwd,
     onEvent,
     requestPermission,
+    openInClaudeCode,
   }: {
     cwd: string;
     onEvent: (evt: AgentEvent) => void;
     requestPermission?: (request: AgentPermissionRequest) => Promise<boolean>;
+    openInClaudeCode?: (dirPath: string) => Promise<{ ok: boolean; message: string }>;
   }) {
     this.cwd = cwd;
     this.onEvent = onEvent || (() => {});
     // Fail closed if a host ever constructs a session without a permission UI.
     this.requestPermission = requestPermission || (async () => false);
+    // Fail closed if a host does not supply a launcher.
+    this.openInClaudeCode = openInClaudeCode || (async () => ({ ok: false, message: 'Claude Code hand-off is not available in this host.' }));
   }
 
   async start(): Promise<void> {
@@ -99,7 +108,19 @@ export class AgentSession {
       { annotations: { readOnlyHint: true } }
     );
 
-    const uiServer = createSdkMcpServer({ name: 'ui', version: '1.0.0', tools: [showArtifact] });
+    const openInClaudeCode = tool(
+      'open_in_claude_code',
+      'Hand off to Claude Code: open the user\'s terminal running the `claude` CLI in a project directory. Use when the user wants to do real software-engineering work on a code repository.',
+      {
+        path: z.string().describe('Directory to open (absolute, or ~/... relative to the user home)'),
+      },
+      async (args) => {
+        const res = await this.openInClaudeCode(args.path);
+        return { content: [{ type: 'text' as const, text: res.message }], isError: res.ok ? undefined : true };
+      }
+    );
+
+    const uiServer = createSdkMcpServer({ name: 'ui', version: '1.0.0', tools: [showArtifact, openInClaudeCode] });
 
     this.query = query({
       prompt: this.queue,
