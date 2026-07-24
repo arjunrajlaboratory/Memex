@@ -5,7 +5,8 @@ import tempfile
 import unittest
 from memex_bake import bake_file
 from memex_init import (
-    bake, parse_account_list, parse_streams, normalize_git_mode, sources_config_yaml, DEFAULT_STREAMS,
+    bake, parse_account_list, parse_streams, normalize_git_mode, normalize_provider,
+    sources_config_yaml, stream_mcp, DEFAULT_STREAMS,
 )
 
 class TestBake(unittest.TestCase):
@@ -157,16 +158,43 @@ class TestSourcesConfigYaml(unittest.TestCase):
         self.assertIn("calendar: { enabled: false,", out)
         self.assertIn("git_mode: local", out)
         self.assertIn("updated: 2026-06-04", out)
-        self.assertIn('gmail_connected: "jane@example.com"', out)
+        self.assertIn('connected: "jane@example.com"', out)
+        self.assertNotIn("gmail_connected", out)
         self.assertIn('forwarding_in: ""', out)
         self.assertIn('other_sending_accounts: ["jane@lab.example.edu", "jane@hospital.example.org"]', out)
-        self.assertIn("Treat missing sent-mail evidence for them as inconclusive", out)
+        self.assertIn("Treat missing sent-mail evidence for them as", out)
 
     def test_calendar_carries_minimal_mode_when_enabled(self):
         out = sources_config_yaml(["calendar"], "remote", "2026-06-04")
         self.assertIn("mode: minimal", out)
         self.assertIn("calendar: { enabled: true,", out)
         self.assertIn("git_mode: remote", out)
+
+    def test_sources_config_provider_google_default(self):
+        out = sources_config_yaml(["email"], "local", "2026-07-24", connected_email="jane@example.com")
+        self.assertIn('connected: "jane@example.com"', out)
+        self.assertNotIn("gmail_connected", out)
+        self.assertIn("provider: google", out)
+        self.assertIn("mcp: claude_ai_Gmail", out)
+
+    def test_sources_config_provider_microsoft(self):
+        out = sources_config_yaml(
+            ["email", "calendar"], "local", "2026-07-24",
+            connected_email="jane@example.com", provider="microsoft",
+        )
+        self.assertIn("provider: microsoft", out)
+        self.assertIn("mcp: claude_ai_Microsoft_365", out)
+        self.assertNotIn("claude_ai_Gmail", out)
+        self.assertNotIn("claude_ai_Google_Calendar", out)
+
+    def test_provider_normalization(self):
+        self.assertEqual(normalize_provider(None), "google")
+        self.assertEqual(normalize_provider("MICROSOFT "), "microsoft")
+        self.assertEqual(normalize_provider("outlook"), "google")   # unknown → default
+        self.assertEqual(stream_mcp("microsoft")["email"], "claude_ai_Microsoft_365")
+        # microsoft maps BOTH email and calendar to the one 365 connector
+        self.assertEqual(stream_mcp("microsoft")["calendar"], "claude_ai_Microsoft_365")
+        self.assertEqual(stream_mcp("google")["calendar"], "claude_ai_Google_Calendar")
 
 class TestSeedSafety(unittest.TestCase):
     def test_seeds_skip_existing_files(self):

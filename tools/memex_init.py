@@ -29,11 +29,13 @@ from memex_bake import (
     bake,
     bake_engine,
     normalize_git_mode,
+    normalize_provider,
     parse_account_list,
     parse_streams,
     placeholder_allows_blank,
     read_json,
     sources_config_yaml,
+    stream_mcp,
     strip_sections,
     validate_packs,
     write_manifest_and_baseline,
@@ -46,7 +48,9 @@ __all__ = [
     "parse_account_list",
     "parse_streams",
     "normalize_git_mode",
+    "normalize_provider",
     "sources_config_yaml",
+    "stream_mcp",
     "DEFAULT_STREAMS",
 ]
 
@@ -161,6 +165,14 @@ def ask_git_mode() -> str:
     return normalize_git_mode(_prompt_input("  git mode [local]: ").strip().lower())
 
 
+def ask_provider() -> str:
+    """Which suite the mail/calendar Claude connectors come from."""
+    print("\nMail & calendar provider for this vault:")
+    print("  google    - Gmail + Google Calendar connectors (default)")
+    print("  microsoft - Microsoft 365 connector (Outlook mail & calendar)")
+    return normalize_provider(_prompt_input("  provider [google]: ").strip().lower())
+
+
 def interview(manifest: dict, packs: list[str], target: pathlib.Path) -> dict:
     """Ask for each catalogued token, honoring the displayed default: Enter
     accepts what the prompt shows (never silently bakes "" behind a default)."""
@@ -207,11 +219,12 @@ def interview(manifest: dict, packs: list[str], target: pathlib.Path) -> dict:
             answers[token] = ""
             break
     answers["STREAMS"] = ask_streams()
+    answers["PROVIDER"] = ask_provider()
     answers["GIT_MODE"] = ask_git_mode()
     return answers
 
 
-def print_post_init(streams: list[str], git_mode: str) -> None:
+def print_post_init(streams: list[str], git_mode: str, provider: str = "google") -> None:
     """Print stream-access grant instructions + git-mode guidance/warnings."""
     print("\nLocal-only state: .memex/ (manifest incl. your answers, baseline cache) is")
     print("gitignored and never leaves this machine.")
@@ -220,7 +233,7 @@ def print_post_init(streams: list[str], git_mode: str) -> None:
         print("To let Claude read each, connect its MCP connector in your client")
         print("(Claude.ai -> Settings -> Connectors, or your MCP config):")
         for stream in streams:
-            print(f"  - {stream}: {STREAM_MCP[stream]}")
+            print(f"  - {stream}: {stream_mcp(provider)[stream]}")
         print("Capture stays empty (never errors) until a stream is connected.")
     if git_mode == "none":
         print("\ngit mode: none - no version history. You lose the audit trail,")
@@ -302,9 +315,11 @@ def main() -> int:
     target.mkdir(parents=True, exist_ok=True)
     streams = parse_streams(answers.get("STREAMS"))
     git_mode = normalize_git_mode(answers.get("GIT_MODE"))
+    provider = normalize_provider(answers.get("PROVIDER"))
     answers = answers_with_defaults(placeholder_manifest, answers)
     answers["STREAMS"] = streams
     answers["GIT_MODE"] = git_mode
+    answers["PROVIDER"] = provider
 
     source_map = bake_engine(
         engine_dir,
@@ -336,7 +351,7 @@ def main() -> int:
             print("warning: git not found - vault has no repo despite git mode " + git_mode)
 
     print(f"init: created instance at {target} (packs: {','.join(packs)})")
-    print_post_init(streams, git_mode)
+    print_post_init(streams, git_mode, provider)
     return 0
 
 
