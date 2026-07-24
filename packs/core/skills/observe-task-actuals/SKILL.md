@@ -1,6 +1,6 @@
 ---
 name: observe-task-actuals
-description: For Tasks closed in the period, triangulate actual time spent from observable signals (Gmail send timestamps on linked threads, Google Drive `modifiedTime` on linked docs, git commit ranges on referenced repos, calendar block slips on `scheduled` Tasks) and set `actual_effort:` + `actual_effort_source:` on the Task; for Tasks with no observable signal, surface 3–5 to the user at the weekly review for sparse self-report; then compare estimates vs actuals at the Project/area level. Use when the user wants the effort-actuals observation pass run — signaled by phrases like "how long did tasks really take", "check effort estimates", "where am I underestimating", "compare estimates vs actuals", "observe task actuals", or direct invocation "/observe-task-actuals". Auto-invoked by the weekly-review skill. Writes `actual_effort:` and `actual_effort_source:` directly on closed Tasks (this is the one observer that DOES mutate state — Tasks are immutable post-close anyway, so adding a measured field is safe), produces a comparison table in the open weekly review or a standalone `Ops/Reviews/Observations/Task actuals - <ISO-week>.md`, and prompts the user for self-report on Tasks with no observable signal.
+description: For Tasks closed in the period, triangulate actual time spent from observable signals (mail send timestamps on linked threads, cloud-drive `modifiedTime` on linked docs, git commit ranges on referenced repos, calendar block slips on `scheduled` Tasks) and set `actual_effort:` + `actual_effort_source:` on the Task; for Tasks with no observable signal, surface 3–5 to the user at the weekly review for sparse self-report; then compare estimates vs actuals at the Project/area level. Use when the user wants the effort-actuals observation pass run — signaled by phrases like "how long did tasks really take", "check effort estimates", "where am I underestimating", "compare estimates vs actuals", "observe task actuals", or direct invocation "/observe-task-actuals". Auto-invoked by the weekly-review skill. Writes `actual_effort:` and `actual_effort_source:` directly on closed Tasks (this is the one observer that DOES mutate state — Tasks are immutable post-close anyway, so adding a measured field is safe), produces a comparison table in the open weekly review or a standalone `Ops/Reviews/Observations/Task actuals - <ISO-week>.md`, and prompts the user for self-report on Tasks with no observable signal.
 ---
 
 # Observe task actuals
@@ -53,11 +53,11 @@ If the Task had `scheduled_start:` AND `scheduled_end:` AND `status: scheduled` 
 
 ### 2c. Doc mod time (reliable for write-shaped Tasks)
 
-If the Task's `# Inputs` or `# Work log` references a Google Doc URL, query the Drive MCP for the file's `modifiedTime` and `createdTime`. The window from `min(createdTime, task.created)` to `modifiedTime` is the working span. Set `actual_effort_source: doc-mtime`.
+If the Task's `# Inputs` or `# Work log` references a cloud-doc URL (Google Doc or Office 365), query the corresponding drive connector for the file's `modifiedTime` and `createdTime`. The window from `min(createdTime, task.created)` to `modifiedTime` is the working span. Set `actual_effort_source: doc-mtime`.
 
-### 2d. Gmail send timestamp (reliable for email-shaped Tasks)
+### 2d. Mail send timestamp (reliable for email-shaped Tasks)
 
-If the Task's `# Work log` or `# Outputs` references a Gmail thread (a Gmail URL or "sent email to X"), query Gmail MCP for the thread's last sent message from the user. The span from `task.created` to the send time, capped at 4 hours (anything longer suggests the email wasn't the bottleneck), is the actual_effort. Set `actual_effort_source: email-timestamp`.
+If the Task's `# Work log` or `# Outputs` references a mail thread (a mailbox URL or "sent email to X"), query the mail connector for the thread's last sent message from the user. The span from `task.created` to the send time, capped at 4 hours (anything longer suggests the email wasn't the bottleneck), is the actual_effort. Set `actual_effort_source: email-timestamp`.
 
 ### 2e. Unknown
 
@@ -88,7 +88,7 @@ Accept "skip" for any individual Task (sets `actual_effort_source: unknown` perm
 
 ## Step 4.5 — Letter submission detection (extension)
 
-In addition to Task time-actuals, this skill also scans **Letter notes** at `status: drafting` for evidence the user submitted off-vault. The signal sources are deliberately broad — the user submits letters via two distinct channels and both produce Gmail-detectable artifacts:
+In addition to Task time-actuals, this skill also scans **Letter notes** at `status: drafting` for evidence the user submitted off-vault. The signal sources are deliberately broad — the user submits letters via two distinct channels and both produce mailbox-detectable artifacts:
 
 1. **Outbound email send** (e.g., Alex Kim tenure letter → emailed to the department chair): the user sends the `.docx` to a named recipient.
 2. **Inbound portal confirmation receipt** (e.g., Jordan Lee fellowship → GrantPortal, Sam Carter → FolioSystem): the portal sends a "Your letter has been received" email after upload.
@@ -105,7 +105,7 @@ For each Letter, extract:
 - `submission_portal:` — if it contains an email address (e.g., `"Email to the department chair (chair@example.edu) ..."`), use that email.
 - Recipient's email from `Atlas/People/<Recipient>.md` `email:` field (fallback — the user sometimes copies the recipient on the submission email).
 
-Search sent Gmail in the last 30 days for messages TO any of the extracted addresses with subject or body mentioning the recipient's name or the program name. If a hit lands, capture (a) the Gmail message ID, (b) the send timestamp, (c) the recipient address. Propose `status: drafting → submitted`, `submitted: <send-timestamp date>`.
+Search sent mail in the last 30 days for messages TO any of the extracted addresses with subject or body mentioning the recipient's name or the program name. If a hit lands, capture (a) the mail message ID, (b) the send timestamp, (c) the recipient address. Propose `status: drafting → submitted`, `submitted: <send-timestamp date>`.
 
 ### 4.5c — Inbound-confirmation signal (the portal acknowledged the upload)
 
@@ -119,7 +119,7 @@ For each Letter, extract:
 | ExamplePortal | `@exampleportal.example.org`, `service@example.org` |
 | the undergraduate research office (Example U) | `@example.edu` from the undergraduate research office address |
 
-Search inbox in the last 30 days for messages FROM any of these domains AND containing the recipient's full name OR the cycle year. If a hit lands, capture (a) the Gmail message ID, (b) the receipt timestamp, (c) the sender address. Propose `status: drafting → submitted`, `submitted: <receipt-timestamp date - 1>` (the portal usually confirms shortly after upload; lean conservative by 1 day if the portal-confirmation timestamp is late in the day).
+Search inbox in the last 30 days for messages FROM any of these domains AND containing the recipient's full name OR the cycle year. If a hit lands, capture (a) the mail message ID, (b) the receipt timestamp, (c) the sender address. Propose `status: drafting → submitted`, `submitted: <receipt-timestamp date - 1>` (the portal usually confirms shortly after upload; lean conservative by 1 day if the portal-confirmation timestamp is late in the day).
 
 ### 4.5d — Conflict resolution
 
@@ -130,7 +130,7 @@ If both 4.5b and 4.5c fire for the same Letter, use the *earlier* timestamp as `
 For each Letter where a signal fired:
 
 1. Set `status: submitted` AND `submitted: <date>`.
-2. Append a `# Work log` entry: `<date> — submitted via <channel>; detected by /observe-task-actuals from <gmail signal> (Gmail message id: <id>). Status drafting → submitted.`
+2. Append a `# Work log` entry: `<date> — submitted via <channel>; detected by /observe-task-actuals from <mail signal> (mail message id: <id>). Status drafting → submitted.`
 3. Update the Person note's `## Letters` line to reflect the new status.
 4. Close the paired submission Followup at `Ops/Followups/Submit <Recipient> - <Program> <Year>.md` — set `status: acted_on`, append a `# What happened` entry.
 5. Log the closure.
@@ -139,7 +139,7 @@ If running in **propose-only mode** (default for any auto-invocation, override p
 
 ### 4.5f — Coverage notes
 
-- Portal confirmations sometimes go to spam or are filtered into a "Notifications" Gmail label. The Gmail MCP only searches the All-Mail scope by default, so this should catch them — but if a Letter has `due` 30+ days past with no signal, escalate to the user as a possible portal-spam-filter case.
+- Portal confirmations sometimes go to spam or are filtered into a notifications label/folder. The mail connector generally searches the full mailbox by default (Gmail: All-Mail scope), so this should catch them — but if a Letter has `due` 30+ days past with no signal, escalate to the user as a possible portal-spam-filter case.
 - Tenure / promotion letters often go via email *only* (no portal); 4.5b is the canonical signal for those. Fellowship and admissions letters often go via portal *only*; 4.5c is the canonical signal.
 - Email-only-submitted letters might never get a portal-confirmation; that's expected, not a bug. Don't loop waiting for 4.5c if 4.5b already fired.
 

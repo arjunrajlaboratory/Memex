@@ -6,8 +6,8 @@ description: >-
   "create a task", "I need to", "remind me", "schedule a block", "put time on
   for", or `/create-task`, including Task creation delegated by other skills.
   Enforce the scheduling-field contract and, only when the request includes a
-  time block and approval requirements are satisfied, create a matching Google
-  Calendar event.
+  time block and approval requirements are satisfied, create a matching
+  calendar event via the connected calendar connector.
 ---
 
 # Create a Task
@@ -16,7 +16,7 @@ You are running as **`agent:capture`** (when invoked directly by the user on a f
 
 ## Why this skill exists
 
-Without it, every Task creation re-derives the same chores by hand: pick today's next sequential ID, remember that `status: scheduled` requires both `scheduled_start` and `scheduled_end`, find the right parent project from the seven ExampleProject sub-projects (or whatever the right cluster is), remember that a time-blocked task should usually also be on Google Calendar, and remember to append to `log.md`. That's seven independent steps, and at least two of them get skipped in any given session. This skill codifies them.
+Without it, every Task creation re-derives the same chores by hand: pick today's next sequential ID, remember that `status: scheduled` requires both `scheduled_start` and `scheduled_end`, find the right parent project from the seven ExampleProject sub-projects (or whatever the right cluster is), remember that a time-blocked task should usually also be on the user's calendar, and remember to append to `log.md`. That's seven independent steps, and at least two of them get skipped in any given session. This skill codifies them.
 
 It also enforces the **bidirectional contract** between a Task with a `scheduled_start` and a Calendar event: if the user said "put time on tomorrow at noon," the Task and the calendar block should be created together, with a link in the calendar description back to the Task file.
 
@@ -85,7 +85,7 @@ Seed `# Work log` with a single creation line:
 
 ## Step 5 — Create the calendar event (when scheduled)
 
-If and only if `status: scheduled`, create a Google Calendar event on the user's primary calendar.
+If and only if `status: scheduled`, create a calendar event on the user's primary calendar via the connected calendar connector (`streams.calendar.mcp` in `_config/sources.md` — Google Calendar or Microsoft 365).
 
 - Summary: the Task subject (or a lightly cleaned version — strip trailing schema-words like "end-to-end" if it makes the calendar event noisier).
 - Start / end: the ISO datetimes from the Task, in `{{TIMEZONE}}` (unless the user specified another zone).

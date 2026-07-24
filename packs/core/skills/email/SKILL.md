@@ -2,7 +2,8 @@
 name: email
 description: >-
   Search, read, triage, summarize, capture, and draft replies for the user's
-  Gmail. Use for "search my email", "what did X say", "find the thread",
+  mail — Gmail or Microsoft 365, whichever connector `_config/sources.md`
+  names. Use for "search my email", "what did X say", "find the thread",
   "did Y reply", "what's in my inbox", "draft a reply", "what do I owe over
   email", or `/email`. Search broadly before concluding mail is absent, read
   complete threads, and route durable content through the appropriate Source,
@@ -11,26 +12,35 @@ description: >-
 
 # Use the user's email well
 
-You are running as **`agent:executor`** for this skill (or `agent:capture` when the outcome is a vault note). The job: do whatever the user asked of their email — find it, read it, summarize it, capture it, or draft a reply — using the Gmail MCP correctly.
+You are running as **`agent:executor`** for this skill (or `agent:capture` when the outcome is a vault note). The job: do whatever the user asked of their email — find it, read it, summarize it, capture it, or draft a reply — using the connected mail connector correctly.
 
 ## Why this skill exists
 
-Gmail is already wired into this vault (the Gmail MCP powers `ingest-person` backfill, `draft-letter` seeding, and `daily-briefing` calendar/inbox pulls). But "how to use email" lived only *inside* those skills. The recurring failure modes were (a) concluding "this isn't in Gmail" after a too-narrow query — a **technique** gap, not a capability gap; (b) treating a miss in the connected mailbox as proof when the user may have sent from another account the Gmail MCP cannot read; and (c) trusting a `search_threads` snapshot as a thread's current state when that index can be **stale** — observed days behind reality, and unchanged by re-running the same search — so only `get_thread` reflects the truth. See memories `feedback_gmail_search_technique` and `feedback_gmail_mcp_stale_reads`. This skill is the general, reusable place for email competence so any session can search/read/capture/draft well without reinventing it.
+Mail is already wired into this vault (the mail connector powers `ingest-person` backfill, `draft-letter` seeding, and `daily-briefing` calendar/inbox pulls). But "how to use email" lived only *inside* those skills. The recurring failure modes were (a) concluding "this isn't in the mailbox" after a too-narrow query — a **technique** gap, not a capability gap; (b) treating a miss in the connected mailbox as proof when the user may have sent from another account the connector cannot read; and (c) trusting a search snapshot as a thread's current state when that index can be **stale** — observed days behind reality, and unchanged by re-running the same search — so only a full-thread read reflects the truth. See memories `feedback_gmail_search_technique` and `feedback_gmail_mcp_stale_reads`. This skill is the general, reusable place for email competence so any session can search/read/capture/draft well without reinventing it.
 
 ## Hard rules (non-negotiable)
 
-- **NEVER send email.** No `send`/auto-send. Drafting is allowed *only* via `mcp__claude_ai_Gmail__create_draft`, and only when the user asked for a draft. Tell the user the draft is in Gmail for them to review + send. (Sending is a vault hard-no without explicit per-session opt-in.)
+- **NEVER send email.** No `send`/auto-send. Drafting is allowed *only* via the connector's draft tool (Gmail: `mcp__claude_ai_Gmail__create_draft`), and only when the user asked for a draft. Tell the user the draft is in their mailbox for them to review + send. (Sending is a vault hard-no without explicit per-session opt-in.)
 - **Sensitivity.** Email content is `private` by default. Any vault note created from email inherits `sensitivity: private`. Never paste private email bodies into a `normal`/public note.
 - **Don't invent.** Quote/paraphrase only what's actually in the thread. If you didn't find it, say so.
 - **Log** any vault mutation that results (the capture/Task/Person), via the normal `log.md` discipline (or the child skill does it).
 
-## Step 0 — Load the Gmail tools
+## Step 0 — Resolve the mail connector and load its tools
 
-The Gmail tools are deferred. Load what you need first:
+`_config/sources.md` names the mail server under `streams.email.mcp` (e.g.
+`claude_ai_Gmail` or `claude_ai_Microsoft_365`). Read it first, then load that
+server's tools by id — never assume Gmail:
 ```
-ToolSearch: select:mcp__claude_ai_Gmail__search_threads,mcp__claude_ai_Gmail__get_thread,mcp__claude_ai_Gmail__create_draft
+ToolSearch: +<server-id> search thread draft
 ```
-(`list_labels` only if you need to resolve a label name → id; `label:` queries take label IDs, not display names.)
+Whatever the provider, you need three capabilities: thread/message **search**,
+full-thread **read**, and **draft creation** (Gmail: `search_threads`,
+`get_thread`, `create_draft`; load those directly with
+`ToolSearch: select:mcp__claude_ai_Gmail__search_threads,mcp__claude_ai_Gmail__get_thread,mcp__claude_ai_Gmail__create_draft`).
+If the configured server id matches no tools, say so — the user may need to fix
+`streams.email.mcp` or connect the connector. (Gmail: `list_labels` only if you
+need to resolve a label name → id; `label:` queries take label IDs, not display
+names.)
 
 ## Step 1 — Search broadly first, then narrow
 
@@ -40,9 +50,9 @@ Order of operations:
 1. **Broad, both directions:** `(from:<name-or-addr> OR to:<name-or-addr>)` with `in:anywhere`, no date filter (or a generous one). Names work as well as address fragments.
 2. **Content keywords:** search a distinctive phrase from what you're looking for (`"universal data extraction"`, `"patient navigation"`) — catches threads where the person is only cc'd or the subject is unrelated.
 3. **Only then narrow** by date / sender / `is:unread` / `label:` once you've located the thread family.
-4. **Only conclude "not in the connected Gmail mailbox"** after a content-keyword search across `in:anywhere` comes up empty. If the thread could live in a non-connected sending account, call that an access gap instead of absence; ask the user to forward/paste it or confirm which account they used.
+4. **Only conclude "not in the connected mailbox"** after a broad content-keyword search (Gmail: across `in:anywhere`) comes up empty. If the thread could live in a non-connected sending account, call that an access gap instead of absence; ask the user to forward/paste it or confirm which account they used.
 
-### Gmail query cheat-sheet (pass as the `query` arg; natural language must be pre-translated)
+### If the mail server is Gmail — query cheat-sheet (pass as the `query` arg; natural language must be pre-translated)
 
 | Need | Query |
 | --- | --- |
@@ -57,21 +67,31 @@ Order of operations:
 | Restrict to inbox | `in:inbox` |
 | Group / OR | `{from:amy from:david}` or `from:amy OR from:david` |
 
-Notes: `search_threads` returns snippets + headers only — **not full bodies**. **Mailbox visibility:** the Gmail MCP searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}. `{{OWNER_FORWARDING_EMAIL}}` forwards received mail into it, but sent mail from that address is invisible unless it was also sent through the connected mailbox{{/OWNER_FORWARDING_EMAIL}}{{?OWNER_SENDING_ACCOUNTS}}. Other sending accounts the user may use: `{{OWNER_SENDING_ACCOUNTS}}`; mail sent from those accounts is invisible to this Gmail MCP unless those mailboxes are separately connected{{/OWNER_SENDING_ACCOUNTS}}. For threads expected to be in the connected mailbox, assume a **query miss, not an access gap** until broad content-keyword search fails (memory `feedback_gmail_search_technique`). For mail sent from or housed in a non-connected account, an empty search is **inconclusive access-gap evidence**, not proof that the user did not send it.
+Notes: `search_threads` returns snippets + headers only — **not full bodies**. **Mailbox visibility (applies to every provider):** the mail connector searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}. `{{OWNER_FORWARDING_EMAIL}}` forwards received mail into it, but sent mail from that address is invisible unless it was also sent through the connected mailbox{{/OWNER_FORWARDING_EMAIL}}{{?OWNER_SENDING_ACCOUNTS}}. Other sending accounts the user may use: `{{OWNER_SENDING_ACCOUNTS}}`; mail sent from those accounts is invisible to this connector unless those mailboxes are separately connected{{/OWNER_SENDING_ACCOUNTS}}. For threads expected to be in the connected mailbox, assume a **query miss, not an access gap** until broad content-keyword search fails (memory `feedback_gmail_search_technique`). For mail sent from or housed in a non-connected account, an empty search is **inconclusive access-gap evidence**, not proof that the user did not send it.
 
 **Search can be stale — a separate axis from visibility.** `search_threads` is a possibly-stale cached index: observed days behind reality, and re-running the *same* search does **not** refresh it. This is orthogonal to mailbox visibility — it happens even inside the connected mailbox, for every user. So use search only to **locate** candidate threads; never judge a thread's latest state, or whether a recent message exists, from a search snippet. Confirm with `get_thread` (Step 2), which is live ground truth. A negative/empty search is therefore never proof a message wasn't sent (memory `feedback_gmail_mcp_stale_reads`).
 
+### If the mail server is Microsoft 365 / Outlook
+
+Gmail operators (`from:`, `in:anywhere`, `newer_than:`) do NOT apply. Use the
+connector's own search parameters as its tool schemas describe them (sender /
+recipient / date-range / keyword arguments, or KQL where the tool takes a query
+string). The technique above is unchanged: search broadly in both directions
+first, then narrow; read the full thread with the connector's thread/message
+read tool before concluding anything; treat search snippets as possibly stale.
+The mailbox-visibility caveats in the Notes above apply equally here.
+
 ## Step 2 — Read the actual thread
 
-To get bodies, call `mcp__claude_ai_Gmail__get_thread` with the `threadId` and `messageFormat: FULL_CONTENT`. Read the whole chain (both sides) before summarizing — snippets routinely hide the substance (a "thanks!" snippet can sit on a thread whose body is the actual decision).
+To get bodies, use the connector's full-thread read tool (Gmail: `mcp__claude_ai_Gmail__get_thread` with the `threadId` and `messageFormat: FULL_CONTENT`). Read the whole chain (both sides) before summarizing — snippets routinely hide the substance (a "thanks!" snippet can sit on a thread whose body is the actual decision).
 
 `get_thread(threadId)` is also the **authority on a thread's current state** — `search_threads` can lag it by days (see Step 1's stale-search note). So whenever the question is "did they reply?", "did I send it?", or "what's the latest?", decide from `get_thread`, never from a search snippet. If broad search turns up nothing, that is **"couldn't confirm,"** not proof it didn't happen — if the user says they sent it, believe them and reconcile state accordingly. Never emit "unsent (high confidence)" or "awaiting send" off an empty search.
 
 ## Step 3 — Do what was asked
 
 - **Answer a question** ("what did X say?", "did they reply?") — summarize faithfully with dates; quote the load-bearing lines. Done.
-- **Capture substantive content into the vault** — if the thread carries decisions, priorities, or commitments worth keeping, hand off to **`ingest-source`** (it creates `Atlas/Sources/<...>.md` from the email, with a `Raw/sources/<date>-<slug>.md` capture, and updates affected wiki pages). Mirror the pattern of existing email-Sources, e.g. `<person-or-topic> decision summary - <date>`. If the email isn't retrievable from Gmail but the user pasted it, still capture: write the `Raw/sources/` file from the paste with a header comment noting the origin.
-- **New correspondent with no Person note** — hand off to **`ingest-person`** (Gmail backfill is automatic there).
+- **Capture substantive content into the vault** — if the thread carries decisions, priorities, or commitments worth keeping, hand off to **`ingest-source`** (it creates `Atlas/Sources/<...>.md` from the email, with a `Raw/sources/<date>-<slug>.md` capture, and updates affected wiki pages). Mirror the pattern of existing email-Sources, e.g. `<person-or-topic> decision summary - <date>`. If the email isn't retrievable from the connected mailbox but the user pasted it, still capture: write the `Raw/sources/` file from the paste with a header comment noting the origin.
+- **New correspondent with no Person note** — hand off to **`ingest-person`** (mail backfill is automatic there).
 - **Action item the email creates** — hand off to **`create-task`** (e.g. "reply by Thursday", "send the data"); or a `Ops/Followups/` tickler if it's a "check whether they replied" nudge.
 - **Draft a reply** — see Step 4.
 
@@ -80,13 +100,13 @@ To get bodies, call `mcp__claude_ai_Gmail__get_thread` with the `threadId` and `
 When the user asks you to reply/respond:
 1. Read the full thread (Step 2) so the draft is in-context.
 2. Draft in the user's voice — concise, no AI throat-clearing. For letters specifically, use `draft-letter` instead.
-3. Create the draft with `mcp__claude_ai_Gmail__create_draft` (reply on the same thread where possible). **Do not send.**
-4. Tell the user: "Draft is in your Gmail on the thread — review and send." Offer to revise.
+3. Create the draft with the connector's draft tool (Gmail: `mcp__claude_ai_Gmail__create_draft`), replying on the same thread where possible. **Do not send.**
+4. Tell the user: "Draft is in your mailbox on the thread — review and send." Offer to revise.
 5. If the reply was itself a tracked obligation, close/advance the matching Task/Followup.
 
 ## Step 5 — Calendar adjacency
 
-Scheduling lives next door: if the email is about setting a time, the Calendar MCP (`mcp__claude_ai_Google_Calendar__*`) can check availability / create events — but creating calendar events follows the same authorized-write rules as `create-task` (only on explicit intent). Don't auto-create events from email without the user asking.
+Scheduling lives next door: if the email is about setting a time, the calendar connector (`streams.calendar.mcp` in `_config/sources.md`, e.g. `claude_ai_Google_Calendar` or `claude_ai_Microsoft_365`) can check availability / create events — but creating calendar events follows the same authorized-write rules as `create-task` (only on explicit intent). Don't auto-create events from email without the user asking.
 
 ## What this skill does NOT do
 
@@ -98,7 +118,7 @@ Scheduling lives next door: if the email is about setting a time, the Calendar M
 ## Related
 
 - `ingest-source` — turns one substantive email thread into a Source note (+ Raw capture).
-- `ingest-person` — new correspondent → Person note (auto Gmail backfill).
+- `ingest-person` — new correspondent → Person note (auto mail backfill).
 - `create-task` / followups — action items an email creates.
 - `draft-letter` — letters of rec / cover / nomination (not plain replies).
 - `daily-briefing` — already pulls inbox + calendar; this skill is the on-demand counterpart.

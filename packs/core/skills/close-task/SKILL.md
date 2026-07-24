@@ -107,7 +107,7 @@ If `agent:executor` did the work and is closing to `needs_review`, the actor is 
 
 ## Step 8 — Calendar follow-up (if relevant)
 
-If the Task had `scheduled_start` / `scheduled_end` and a matching Google Calendar event was created (per `create-task`), the calendar event is now history — leave it. Don't edit the title to add "✓ DONE" or anything; the calendar is a time-truth source, not a status-truth source.
+If the Task had `scheduled_start` / `scheduled_end` and a matching calendar event was created (per `create-task`), the calendar event is now history — leave it. Don't edit the title to add "✓ DONE" or anything; the calendar is a time-truth source, not a status-truth source.
 
 The exception: if the Task was `canceled` and the calendar event is in the future, **suggest** deleting the calendar event. Don't delete without a confirm.
 

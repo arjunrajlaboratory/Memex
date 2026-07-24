@@ -1,12 +1,12 @@
 ---
 name: capture-comms
 description: >-
-  Capture today's Gmail and Slack activity (whichever of those streams is
+  Capture today's mail and Slack activity (whichever of those streams is
   enabled in `_config/sources.md`) into `Inbox/comms/YYYY-MM-DD` as a
   structured digest of summaries, action items, routable threads, and filtered
   noise. Use for "capture today's comms", "daily comms summary", "summarize my
   email and Slack", "what loops did my comms open or close", or
-  `/capture-comms`. Read-only against Gmail and Slack; never sends, drafts,
+  `/capture-comms`. Read-only against mail and Slack; never sends, drafts,
   reacts, or marks read. This is capture-only phase 1: it proposes targets and
   actions but applies no vault state changes.
 ---
@@ -30,7 +30,7 @@ You are running as **`agent:capture`** for this skill.
 - **Capture only — APPLY NOTHING.** Never edit a typed note, close a Task, flip a status, bump
   `last_contact`/`next_touch`, mark a Followup `acted_on`, or touch a Letter. The output is
   staging material in `Inbox/`. All consequential mutation is phase 2 under manual review.
-- **Read-only against Gmail and Slack.** Never `send`, `create_draft`, `slack_send_message`,
+- **Read-only against mail and Slack.** Never `send`, `create_draft`, `slack_send_message`,
   `slack_send_message_draft`, `slack_schedule_message`, `slack_add_reaction`, label, or mark
   read. This skill only searches and reads.
 - **Honor sensitivity.** Treat all comms as `private` by default (the output frontmatter says
@@ -57,8 +57,8 @@ Inbox/comms/<YYYY-MM-DD>/email.md
 Inbox/comms/<YYYY-MM-DD>/slack.md
 ```
 
-Rationale: (1) Gmail and Slack are independently authenticated MCP servers with independent
-failure modes — if Slack auth is absent in a given run, the Gmail file still lands clean and the
+Rationale: (1) the mail and Slack connectors are independently authenticated MCP servers with independent
+failure modes — if Slack auth is absent in a given run, the email file still lands clean and the
 Slack file records the gap, rather than one combined file being half-empty with no signal why;
 (2) it mirrors the shape the source idea note specified; (3) each source gets source-appropriate
 provenance. Phase 2 globs `Inbox/comms/<date>/*.md` and reads the `## Action items` section from
@@ -98,7 +98,7 @@ Mirror cv-scan's checkbox + provenance shape (one parseable `↳ key: value` lin
 ```markdown
 - [ ] **<one-line description of the loop>**
       ↳ signal: <sent email to Alex / Slack DM I sent to Jordan / received from Riley>  ·  <date/time>
-      ↳ thread: <Gmail `threadId` for email items — lets phase 2 confirm via `get_thread` without re-searching; `n/a` for Slack>
+      ↳ thread: <mail thread id for email items (Gmail: `threadId`) — lets phase 2 confirm with a full-thread read without re-searching; `n/a` for Slack>
       ↳ likely target: [[<Task or Person or Letter or Followup>]] (<type>)  — or `(no obvious target)`
       ↳ suggested action: <close task | bump last_contact | flip Letter drafting→submitted | mark Followup acted_on | create task>
       ↳ confidence: high | medium | low
@@ -124,9 +124,10 @@ received. Received comms more often *open* loops (someone asks you for something
    — dedupe handles it; missing a loop is worse than re-listing one). Record `window_start` /
    `window_end` in frontmatter.
 
-2. **Load the MCP tools** (they're deferred). One ToolSearch each:
+2. **Load the MCP tools** (they're deferred). Resolve the mail server id from
+   `streams.email.mcp` in `_config/sources.md`, then one ToolSearch per source:
    ```
-   ToolSearch: select:mcp__claude_ai_Gmail__search_threads,mcp__claude_ai_Gmail__get_thread
+   ToolSearch: +<mail-server-id> search thread     (Gmail example: select:mcp__claude_ai_Gmail__search_threads,mcp__claude_ai_Gmail__get_thread)
    ToolSearch: select:mcp__claude_ai_Slack__slack_search_public_and_private,mcp__claude_ai_Slack__slack_read_channel,mcp__claude_ai_Slack__slack_read_thread,mcp__claude_ai_Slack__slack_read_user_profile,mcp__claude_ai_Slack__slack_search_users
    ```
    If either server is unavailable (interactive auth absent — a documented caveat for
@@ -135,19 +136,19 @@ received. Received comms more often *open* loops (someone asks you for something
    proceed with the other source. This is exactly the partial-failure case the two-file split
    exists to handle.
 
-3. **Scan Gmail — both directions** (only if `email` is enabled per Step 0). Use the [[email]] broad-search technique (don't start
-   narrow). Cover sent AND received in the window:
-   - Received: `in:inbox newer_than:<window>` (and a wider `in:anywhere newer_than:<window>` for
-     threads that skip the inbox).
-   - **Sent: `in:sent newer_than:<window>`** — the loop-closing gold. What did *I* send today?
+3. **Scan mail — both directions** (only if `email` is enabled per Step 0). Use the [[email]] broad-search technique (don't start
+   narrow; on Microsoft 365 use the connector's own search parameters, not Gmail operators). Cover sent AND received in the window:
+   - Received: the inbox for the window (Gmail: `in:inbox newer_than:<window>`, plus a wider
+     `in:anywhere newer_than:<window>` for threads that skip the inbox).
+   - **Sent mail in the window** (Gmail: `in:sent newer_than:<window>`) — the loop-closing gold. What did *I* send today?
    - For any thread that looks loop-relevant, `get_thread` with `messageFormat: FULL_CONTENT` to
      read the actual chain before classifying (snippets hide the substance). Record that thread's
      `threadId` in the action item's `↳ thread:` field so phase-2 reconcile can re-confirm via
      `get_thread` without re-searching a possibly-stale index.
-   - Mailbox visibility: the Gmail MCP searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}.
+   - Mailbox visibility: the mail connector searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}.
      `{{OWNER_FORWARDING_EMAIL}}` forwards received mail into it, but sent mail from that address
      is invisible unless it was also sent through the connected mailbox{{/OWNER_FORWARDING_EMAIL}}{{?OWNER_SENDING_ACCOUNTS}}.
-     Other sending accounts the user may use: `{{OWNER_SENDING_ACCOUNTS}}`; `in:sent` cannot see
+     Other sending accounts the user may use: `{{OWNER_SENDING_ACCOUNTS}}`; the connector's sent-mail view cannot see
      mail sent from those accounts unless their mailboxes are separately connected{{/OWNER_SENDING_ACCOUNTS}}.
      For threads expected in the connected mailbox, a miss is usually a query miss (memory
      `feedback_gmail_search_technique`). For sends from non-connected accounts, an empty `in:sent`
@@ -155,8 +156,8 @@ received. Received comms more often *open* loops (someone asks you for something
      "awaiting send."
    - **`search_threads` can be stale — separate from visibility.** The search index can sit days
      behind reality even for the connected mailbox, and re-running the same query does not refresh
-     it. So an empty `in:sent` is never proof a send didn't happen, even when no other account is in
-     play: confirm a specific thread's latest state with `get_thread(threadId)` (live ground truth),
+     it. So an empty sent-mail search is never proof a send didn't happen, even when no other account is in
+     play: confirm a specific thread's latest state with a full-thread read (Gmail: `get_thread(threadId)` — live ground truth),
      and label any unconfirmed send **couldn't confirm** — never "not sent" / "awaiting send." If the
      user says they sent it, believe them and capture the loop accordingly (memory
      `feedback_gmail_mcp_stale_reads`).
@@ -225,7 +226,7 @@ Phase 1 (this skill) **never** does step 2 or 3. It only produces step 1's input
 ## Related
 
 - `_config/sources.md` — the per-stream enable/disable config this skill reads in Step 0.
-- [[cv-scan]] — the propose-only-from-Gmail pattern this mirrors.
+- [[cv-scan]] — the propose-only-from-mail pattern this mirrors.
 - [[email]] — the broad-search technique + Gmail query cheat-sheet this reuses.
 - [[triage-inbox]] — consumes `Inbox/` items, including the `## Threads worth routing` entries.
 - `Daily comms digest and automated loop-closing` (idea) — full design rationale + phase 2 spec.

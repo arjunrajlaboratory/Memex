@@ -122,7 +122,7 @@ The four observers:
 1. **`revisit-decisions`** — surfaces Decisions whose `revisit_on:` has fallen due and `outcome: pending`. Prompts the user for outcome + one-line note, then writes the outcome back into the Decision note.
 2. **`observe-skill-corrections`** — scans Claude Code transcripts in `~/.claude/projects/{{CC_PROJECT_SLUG}}/` for corrective turns following Skill invocations. Surfaces skills with the highest correction count this week.
 3. **`observe-manual-patterns`** — scans `log.md` for `actor:me` mutations not wrapped in known skills, flags repeated shapes as skill candidates.
-4. **`observe-task-actuals`** — for Tasks closed in the period, triangulates actual time from Gmail / Drive / git / calendar signals, writes `actual_effort:` + `actual_effort_source:` on the Tasks, and surfaces a small number for sparse self-report.
+4. **`observe-task-actuals`** — for Tasks closed in the period, triangulates actual time from mail / drive / git / calendar signals, writes `actual_effort:` + `actual_effort_source:` on the Tasks, and surfaces a small number for sparse self-report.
 
 Each observer is self-contained — it knows to append its findings under the open weekly review's `## Learnings` section (or create a standalone observation file if no open review exists). It also logs its own line to `log.md`. The weekly-review skill does not duplicate this work; it only dispatches.
 

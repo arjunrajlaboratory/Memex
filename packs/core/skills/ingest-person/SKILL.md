@@ -1,15 +1,15 @@
 ---
 name: ingest-person
-description: Create a vault Person note with Gmail backfill of email, last_contact, role, organization, and seeded conversation history. Use whenever a new Person needs a profile in the Memex vault — signaled by phrases like "add a Person for X", "create a Person note for Y", "I just met Z and want to track them", "set up a CRM entry for ...", or implicitly whenever another skill (ingest-project, triage-inbox, ingest-source) introduces a person who doesn't already have a `Atlas/People/<Name>.md`. This skill always searches Gmail for prior threads with the person and backfills email, last_contact, role inferred from signatures, organization, and a seeded `# Conversation history` section before writing — that Gmail backfill is a standing user preference (see memory `feedback_enrich_people_from_gmail`) and is the main reason this exists as a dedicated skill rather than inline note-writing. Use it even for one-off Person creation; the backfill catches "wait, I've been emailing this person for two years" 80% of the time.
+description: Create a vault Person note with mail backfill of email, last_contact, role, organization, and seeded conversation history. Use whenever a new Person needs a profile in the Memex vault — signaled by phrases like "add a Person for X", "create a Person note for Y", "I just met Z and want to track them", "set up a CRM entry for ...", or implicitly whenever another skill (ingest-project, triage-inbox, ingest-source) introduces a person who doesn't already have a `Atlas/People/<Name>.md`. This skill always searches the connected mailbox for prior threads with the person and backfills email, last_contact, role inferred from signatures, organization, and a seeded `# Conversation history` section before writing — that mail backfill is a standing user preference (see memory `feedback_enrich_people_from_gmail`) and is the main reason this exists as a dedicated skill rather than inline note-writing. Use it even for one-off Person creation; the backfill catches "wait, I've been emailing this person for two years" 80% of the time.
 ---
 
 # Ingest a Person into the vault
 
-You are running as **`agent:librarian`** for this skill. Your job is to write **one** Person note at `Atlas/People/<Display Name>.md`, with the Gmail backfill move always applied before the write.
+You are running as **`agent:librarian`** for this skill. Your job is to write **one** Person note at `Atlas/People/<Display Name>.md`, with the mail backfill move always applied before the write.
 
 ## Why this skill exists
 
-The user's standing preference (memory `feedback_enrich_people_from_gmail`): "when creating a Person note, search Gmail and backfill email, last_contact, role, and conversation history." Writing a Person note without that backfill leaves a stub that's worse than no note at all, because future workflows assume Person notes are real CRM entries. This skill enforces the backfill.
+The user's standing preference (memory `feedback_enrich_people_from_gmail`): "when creating a Person note, search mail and backfill email, last_contact, role, and conversation history." Writing a Person note without that backfill leaves a stub that's worse than no note at all, because future workflows assume Person notes are real CRM entries. This skill enforces the backfill.
 
 ## Inputs
 
@@ -18,7 +18,7 @@ The caller (you, or a parent skill like `ingest-project`) should supply:
 - **Display name** (required) — full name, e.g., "Jordan Lee".
 - **Context** (recommended) — one or two sentences on why this Person is being added. "Example U collaborator on the clinical trials project" beats "a researcher".
 - **Email hint** (optional) — if the user already knows the address, pass it. If not, you'll discover it in Step 1.
-- **Likely organization** (optional) — speeds up Gmail filtering.
+- **Likely organization** (optional) — speeds up mail filtering.
 - **Sensitivity** (optional) — defaults to `private`. Override only on explicit user instruction.
 
 If any of the above are missing and the calling context can't supply them, ask the user before proceeding. Don't fabricate.
@@ -32,9 +32,9 @@ Read in full:
 
 Both are short. Don't skip — the schema's defaults change occasionally and the privacy rules are non-negotiable.
 
-## Step 1 — Search Gmail and backfill
+## Step 1 — Search mail and backfill
 
-Use the Gmail tools (`mcp__claude_ai_Gmail__search_threads`, `mcp__claude_ai_Gmail__get_thread`) to find prior correspondence.
+Use the mail connector's search and thread tools (resolve the server from `streams.email.mcp` in `_config/sources.md`; Gmail: `mcp__claude_ai_Gmail__search_threads`, `mcp__claude_ai_Gmail__get_thread`) to find prior correspondence.
 
 **Search strategy** — issue several queries in parallel:
 
@@ -47,7 +47,7 @@ from:<email-hint>            (if email_hint provided)
 
 If the Person has a likely org, also try `"<Display Name>" <org-domain>` to disambiguate from unrelated namesakes.
 
-**Token discipline** — Gmail threads can be long. Default to:
+**Token discipline** — mail threads can be long. Default to:
 
 - `list_threads` / `search_threads` first (cheap, returns thread IDs + subjects + snippets).
 - Pull full thread bodies only for the **3 most recent threads** and the **earliest thread** (to date the relationship). Skip middle threads unless something material happens.
@@ -63,7 +63,7 @@ If the Person has a likely org, also try `"<Display Name>" <org-domain>` to disa
 - Concepts discussed → candidates for `can_help_with:` and `active_threads:`
 - 3–5 most-recent threads → seed `# Conversation history` bullets, one per thread, dated, with a one-line summary and a thread-ID reference if possible
 
-If you find **zero threads**, that's fine — note it in the body ("# Conversation history" gets a single bullet: `- <today> — no prior Gmail correspondence found`). Don't invent.
+If you find **zero threads**, that's fine — note it in the body ("# Conversation history" gets a single bullet: `- <today> — no prior mail correspondence found`). Don't invent.
 
 ## Step 2 — Search the vault for related entities
 
@@ -92,7 +92,7 @@ Use `_schemas/person.md` as the contract. Fill every field you confidently infer
 **Body sections — what to actually fill:**
 
 - `# At a glance` — 1–2 sentences. Name, role, why-they-matter.
-- `# Current relationship context` — one paragraph synthesizing what the Gmail threads tell you about where the relationship is right now. Honest, not aspirational.
+- `# Current relationship context` — one paragraph synthesizing what the mail threads tell you about where the relationship is right now. Honest, not aspirational.
 - `# Active threads` — bullet list of topics currently in flight, from the most recent threads.
 - `# What they can help with` — capability tags + relevant Concept links.
 - `# What I can help them with` — leave a placeholder if unclear.
@@ -109,10 +109,10 @@ Use `_schemas/person.md` as the contract. Fill every field you confidently infer
 Append one line to `log.md` at the top (newest first):
 
 ```
-<datetime> — agent:librarian — create — [[<Display Name>]] — backfilled from Gmail (<N> threads, last contact <date>) | <one-line context>
+<datetime> — agent:librarian — create — [[<Display Name>]] — backfilled from mail (<N> threads, last contact <date>) | <one-line context>
 ```
 
-If you found zero threads, say `seeded fresh; no prior Gmail correspondence`.
+If you found zero threads, say `seeded fresh; no prior mail correspondence`.
 
 ## Step 5 — Open in browser via Quartz (default)
 
@@ -132,7 +132,7 @@ When this skill is invoked as a sub-agent of `ingest-project`, suppress the open
 
 ```
 Created [[<Display Name>]] at Atlas/People/<Display Name>.md
-- Gmail backfill: <N> threads found, last contact <date>, email <addr>
+- Mail backfill: <N> threads found, last contact <date>, email <addr>
 - Org: <existing wikilink | suggested new: <Org>>
 - Suggested follow-ups:
   - Add [[<Display Name>]] to [[<Y>]] people.collaborators? (existing project, did not auto-edit)
@@ -142,9 +142,9 @@ Created [[<Display Name>]] at Atlas/People/<Display Name>.md
 ## When to call this skill vs. inline
 
 - **Always call this skill** when a new Person enters the vault — even one-off, even from a triage flow.
-- **Don't recurse** if you're already inside this skill — you're already doing the Gmail move.
-- **Parent skills** (`ingest-project`, `triage-inbox`) should dispatch this skill in parallel for each new Person, one sub-agent per Person, with `model: "sonnet"` (Gmail interpretation needs judgment — Haiku is risky here).
+- **Don't recurse** if you're already inside this skill — you're already doing the mail-backfill move.
+- **Parent skills** (`ingest-project`, `triage-inbox`) should dispatch this skill in parallel for each new Person, one sub-agent per Person, with `model: "sonnet"` (mail interpretation needs judgment — Haiku is risky here).
 
 ## Model recommendation when this skill is the sub-agent
 
-If a parent skill is dispatching you as a sub-agent, run on **Sonnet**. The Gmail extraction has enough judgment in it (which signature is theirs vs. a colleague's; which threads are "recent and relevant" vs. one-off) that Haiku occasionally gets it wrong. Reserve Haiku for the inner "read these specific threads and pull fields" step where the prompt is mechanical.
+If a parent skill is dispatching you as a sub-agent, run on **Sonnet**. The mail extraction has enough judgment in it (which signature is theirs vs. a colleague's; which threads are "recent and relevant" vs. one-off) that Haiku occasionally gets it wrong. Reserve Haiku for the inner "read these specific threads and pull fields" step where the prompt is mechanical.

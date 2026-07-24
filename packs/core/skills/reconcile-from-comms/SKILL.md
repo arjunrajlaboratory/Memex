@@ -31,9 +31,9 @@ pre-flight — it relied on the user remembering; this reads the captured signal
   user confirms a close, route it through [[close-task]] (which enforces the Work-log + unblocks
   bookkeeping) — do not hand-edit `status: done`.
 - **Read-only on comms.** Never send / draft / react-to / schedule email or Slack. You may re-read
-  a thread (via the phase-1-loaded MCP tools) to confirm a match, but you never write to Gmail/Slack.
-- **Mailbox access gaps are not negative evidence.** The Gmail MCP searches only the connected
-  mailbox recorded in `_config/sources.md` (`mailboxes.gmail_connected`). Sent mail from
+  a thread (via the phase-1-loaded MCP tools) to confirm a match, but you never write to mail/Slack.
+- **Mailbox access gaps are not negative evidence.** The mail connector searches only the connected
+  mailbox recorded in `_config/sources.md` (`mailboxes.connected`; legacy vaults: `mailboxes.gmail_connected`). Sent mail from
   `mailboxes.forwarding_in` or `mailboxes.other_sending_accounts` is invisible unless those
   mailboxes are separately connected. If a proposal depends on "no sent email found" for one of
   those accounts, mark it inconclusive and ask the user; never assert "not sent" / "awaiting send."
@@ -92,7 +92,7 @@ job, and the mark is the idempotency key. For each reconciled item:
 1. **Resolve the date + load the files.** Date = today (or the date arg). `ls Inbox/comms/<date>/`.
    If the folder is missing, tell the user to run [[capture-comms]] first and stop. Read every
    `*.md` there; parse each `## Action items` block (checkbox + the `↳ signal / thread / likely
-   target / suggested action / confidence` fields — `thread` is the Gmail `threadId` for email
+   target / suggested action / confidence` fields — `thread` is the mail thread id (Gmail: `threadId`) for email
    items, used in Step 3 to confirm via `get_thread`). Read any existing `## Reconciliation` ledger.
 
 2. **Merge cross-file duplicates.** The same loop can appear in both `email.md` and `slack.md`
@@ -105,16 +105,17 @@ job, and the mark is the idempotency key. For each reconciled item:
    (the way `observe-task-actuals` triangulates) before giving up. To confirm an action truly
    happened, re-read the live thread **on its own channel** — confirmation never crosses sources
    (an item's source is in the digest frontmatter and its `↳ signal`):
-   - **Email items** (`↳ thread:` holds a Gmail `threadId`): read it with `get_thread(threadId)`
-     (the authority on current state). If the id is missing (an older digest), re-locate the
-     candidate with `search_threads` first — search *locates*, `get_thread` *confirms* — just never
-     conclude from the search result itself, whose index can be stale. First check
-     `_config/sources.md` for mailbox visibility: a miss in connected Gmail can be a query miss *or*
+   - **Email items** (`↳ thread:` holds a mail thread id): read it with the connector's
+     full-thread read tool (Gmail: `get_thread(threadId)` — the authority on current state). If
+     the id is missing (an older digest), re-locate the candidate with the connector's search
+     first — search *locates*, the thread read *confirms* — just never conclude from the search
+     result itself, whose index can be stale. First check
+     `_config/sources.md` for mailbox visibility: a miss in the connected mailbox can be a query miss *or*
      a stale-index miss for threads expected there; for non-connected sending accounts it is an
      access gap.
    - **Slack items** (`↳ thread: n/a`): confirm from the captured Slack signal, or re-read the
      Slack thread/channel with `slack_read_thread` / `slack_read_channel`. Never route a Slack
-     confirmation through Gmail `search_threads` / `get_thread`.
+     confirmation through the mail connector's search or thread tools.
    In every case confirm on the right channel before concluding, and if the action still can't be
    confirmed make it a Tier-B "couldn't confirm; did this happen?" question — never "not sent."
 
@@ -150,7 +151,7 @@ meeting happened but its prep/follow-up Task is still open.
 
 1. Find open Tasks (`status` not in `[done, canceled]`) carrying a `calendar_event_id:`.
 2. Determine whether the linked event's end-time has passed. Prefer a live lookup via
-   the Calendar MCP (`mcp__claude_ai_Google_Calendar__get_event`) so you also see if
+   the calendar connector (`streams.calendar.mcp`; Google: `mcp__claude_ai_Google_Calendar__get_event`) so you also see if
    the event was **canceled/declined**; if the MCP is unavailable, fall back to the
    Task's `scheduled_end` / `calendar_event_title` and the current time.
 3. For an event that **occurred** and is past: propose a **Tier-B** close —
