@@ -496,9 +496,12 @@ function appleScriptString(s: string): string {
 }
 
 // Launch a terminal running `claude` in dirPath. The permission dialog (this
-// tool is never auto-allowed) is the user's confirmation step.
-async function launchClaudeCode(dirPath: string): Promise<{ ok: boolean; message: string }> {
-  const full = path.resolve(expandHome(String(dirPath || '')));
+// tool is never auto-allowed) is the user's confirmation step. A relative path
+// resolves against the vault, not the main-process cwd (which is unpredictable
+// for a packaged app), so a bare repo name lands somewhere meaningful.
+async function launchClaudeCode(dirPath: string, vault: string): Promise<{ ok: boolean; message: string }> {
+  const expanded = expandHome(String(dirPath || ''));
+  const full = path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(vault, expanded);
   let stat: fs.Stats;
   try { stat = fs.statSync(full); } catch (_) {
     return { ok: false, message: `Directory not found: ${full}` };
@@ -516,7 +519,9 @@ async function launchClaudeCode(dirPath: string): Promise<{ ok: boolean; message
   } catch (err) {
     return { ok: false, message: `Could not open a terminal: ${String((err as Error)?.message || err)}` };
   }
-  return { ok: true, message: `Opened a Claude Code session in ${full}. Tell the user it is running in their terminal.` };
+  // We spawned the terminal, but can't confirm `claude` resolves on its PATH —
+  // don't assert a running session, describe the action honestly instead.
+  return { ok: true, message: `Opening a terminal in ${full} to run Claude Code. Tell the user a terminal window is opening; if the \`claude\` command isn't found there, the Claude Code CLI needs to be installed.` };
 }
 
 async function startSession(vault: string): Promise<void> {
@@ -544,7 +549,7 @@ async function startSession(vault: string): Promise<void> {
     cwd: vault,
     onEvent: (evt: AgentEvent) => { chain = chain.then(() => handleEvent(evt)).catch(() => {}); },
     requestPermission: (request) => requestAgentPermission(vault, nextSession, request),
-    openInClaudeCode: launchClaudeCode,
+    openInClaudeCode: (dirPath: string) => launchClaudeCode(dirPath, vault),
   });
   session = nextSession;
   try {
