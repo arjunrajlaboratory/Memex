@@ -85,11 +85,27 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "extendInfo": {
+        "NSAppleEventsUsageDescription": "Memex needs permission to control Terminal so it can hand off to a Claude Code session in your project directory.",
         "CFBundleDocumentTypes": [
           {
             "CFBundleTypeRole": "Viewer",
@@ -105,7 +121,13 @@
     "win": {
       "icon": "build/icon.png",
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ]
     },
     "linux": {
@@ -115,6 +137,11 @@
         "AppImage",
         "deb"
       ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "arjunrajlaboratory",
+      "repo": "Memex"
     }
   }
 }
