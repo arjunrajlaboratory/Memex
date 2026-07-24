@@ -1005,11 +1005,20 @@ function displayArtifact(art: ArtifactView): void {   // no history push
   currentArtifact = art;
   state.hasArtifact = true;
   $('artifactTab').style.display = '';
-  $('artifactTab').textContent = 'Artifact';
   setActiveTab('artifact');
   renderArtifact();
 }
 function showArtifact(art: ArtifactView): void { navigate({ k: 'art', art }); }
+
+// Closing clears the pinned artifact and hides the tab. Panel back-history is
+// deliberately left intact: ‹ can restore a closed artifact, doubling as undo.
+function closeArtifact(): void {
+  currentArtifact = null;
+  state.hasArtifact = false;
+  $('artifactTab').style.display = 'none';
+  if (state.tab === 'artifact') switchTab('dashboard');
+}
+$('artifactClose').onclick = (e) => { e.stopPropagation(); closeArtifact(); };
 
 function renderArtifact(): void {
   const body = $('panelBody');

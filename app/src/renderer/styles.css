@@ -500,3 +500,7 @@ body {
 .sr-row mark { background: var(--accent-soft); color: var(--accent); border-radius: 3px; padding: 0 1px; }
 .sr-ask { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 10px; border-radius: 0 0 9px 9px; }
 .sr-ask .sr-ext { border-color: var(--accent-soft); color: var(--accent-2); }
+
+/* close control inside the artifact tab */
+.tab-artifact .tab-close { margin-left: 7px; opacity: .55; padding: 0 2px; font-size: 13px; }
+.tab-artifact .tab-close:hover { opacity: 1; }
