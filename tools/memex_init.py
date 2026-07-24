@@ -160,7 +160,8 @@ def ask_git_mode() -> str:
     """Privacy-aware version-control mode. local (default) | none | remote."""
     print("\nVersion-control mode for this vault:")
     print("  local  - git, local-only, no remote (recommended; default)")
-    print("  none   - no git (no history, no audit trail, no recovery)")
+    print("  none   - no git; pick this if the vault lives in Dropbox / iCloud Drive /")
+    print("           OneDrive (mixing git repos with sync folders invites corruption)")
     print("  remote - git + a remote (PRIVACY: reconciled facts leave your machine)")
     return normalize_git_mode(_prompt_input("  git mode [local]: ").strip().lower())
 
@@ -236,8 +237,10 @@ def print_post_init(streams: list[str], git_mode: str, provider: str = "google")
             print(f"  - {stream}: {stream_mcp(provider)[stream]}")
         print("Capture stays empty (never errors) until a stream is connected.")
     if git_mode == "none":
-        print("\ngit mode: none - no version history. You lose the audit trail,")
-        print("time-travel, and recovery from a bad edit. Run `git init` later to enable.")
+        print("\ngit mode: none - no git history. If this vault lives in Dropbox / iCloud /")
+        print("OneDrive, the sync service's version history is your recovery path; otherwise")
+        print("you lose the audit trail, time-travel, and recovery from a bad edit.")
+        print("Run `git init` later to enable (not recommended inside a sync folder).")
     elif git_mode == "remote":
         print("\ngit mode: remote - set up your remote (use a PRIVATE repo):")
         print("  git -C <vault> remote add origin <url>")
