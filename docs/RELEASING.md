@@ -230,6 +230,38 @@ the "Write App Store Connect API key" step).
 
 </details>
 
+## DMG notarization
+
+electron-builder notarizes the `.app` and *then* builds the DMG around it, so the
+disk image itself ships un-notarized. The app inside is fine — it's signed,
+notarized and stapled, and Gatekeeper accepts it once installed — but the DMG
+wrapper gets rejected:
+
+```
+$ spctl -a -t open --context context:primary-signature Memex-0.1.0-arm64.dmg
+rejected  (source=no usable signature)
+```
+
+Users hit that when they open the downloaded disk image. `app/scripts/notarize-dmg.js`
+closes the gap: it submits each DMG to the notary service and staples the ticket.
+
+Two non-obvious details are baked into that script:
+
+- **It runs on `artifactBuildCompleted`, not `afterAllArtifactBuild`.** Only the
+  former fires before the artifact's hash is recorded for `latest-mac.yml`.
+- **It re-hashes the DMG afterward.** Stapling rewrites the file, so the hash
+  electron-builder computed goes stale; the script patches `event.updateInfo` so
+  the update manifest matches the shipped bytes. Without this, `latest-mac.yml`
+  records the pre-staple size and sha512.
+
+Do **not** set `dmg.sign: true` to solve this. electron-builder's own schema
+warns that signing the DMG "is not required and will lead to unwanted errors in
+combination with notarization requirements."
+
+Known cosmetic gap: the `.dmg.blockmap` is generated before stapling, so it
+describes the pre-staple file. Nothing reads it on macOS — `electron-updater`
+updates from the `.zip` — but it is technically stale.
+
 ## Entitlements, and why the hand-off needs them
 
 `app/build/entitlements.mac.plist` carries the usual Electron entitlements (JIT,
