@@ -1,0 +1,114 @@
+name: Release Memex Desktop
+
+# Tag a release to build and publish installers:
+#   git tag app-v0.1.0 && git push origin app-v0.1.0
+# Artifacts land on a DRAFT GitHub Release (electron-builder creates it), so the
+# binaries can be checked before anyone can download them — publish the release
+# by hand when it looks right. Use the manual trigger (publish=false) to test the
+# build pipeline without uploading anything.
+#
+# Secrets and Apple setup: docs/RELEASING.md
+on:
+  push:
+    tags:
+      - 'app-v*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Upload artifacts to a draft GitHub Release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # electron-builder needs this to create the draft release
+
+env:
+  # Tag pushes always publish; manual runs only when asked.
+  PUBLISH_FLAG: ${{ (github.event_name == 'push' || inputs.publish) && '--publish always' || '--publish never' }}
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  macos:
+    # Signed + notarized when the Apple secrets are present. Without them
+    # electron-builder logs a warning and produces an unsigned build rather than
+    # failing, so forks and secret-less runs still exercise the pipeline.
+    runs-on: macos-latest
+    env:
+      # Exposed at job level so the `if:` below can test it — the `secrets`
+      # context is not available in step-level `if` expressions.
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      # notarytool wants the App Store Connect key as a FILE, and APPLE_API_KEY
+      # must hold its PATH — not the key material. Skipped when the secret is
+      # absent so credential-less runs still build (unsigned, un-notarized).
+      - name: Write App Store Connect API key
+        if: env.APPLE_API_KEY_P8 != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/private_keys"
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/private_keys/AuthKey.p8"
+          echo "APPLE_API_KEY=$RUNNER_TEMP/private_keys/AuthKey.p8" >> "$GITHUB_ENV"
+      # dist:mac runs `npm run build` (tsc + assets) before electron-builder, so
+      # the packaged dist/ is never stale.
+      - name: Build, sign, notarize, publish
+        run: npm run dist:mac -- ${{ env.PUBLISH_FLAG }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Developer ID Application certificate, base64-encoded .p12
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          # Notarization credentials. electron-builder reads these from the
+          # environment only — there is no package.json equivalent — and skips
+          # notarization with a warning if they are absent. APPLE_API_KEY is set
+          # by the step above. Do NOT also set APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD:
+          # the implementation checks those FIRST and would ignore the API key.
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+  windows:
+    # Unsigned for now — users get a SmartScreen warning on first run. To sign,
+    # follow the Azure Trusted Signing section of docs/RELEASING.md and add the
+    # AZURE_* secrets below.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Build and publish
+        run: npm run dist:win -- ${{ env.PUBLISH_FLAG }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          # AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          # AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      # The unit tests are plain Node (no Electron), so one platform is enough.
+      # Kept on Linux because the `test/*.test.cjs` glob needs a POSIX shell.
+      - run: npm test
+      - name: Build and publish
+        run: npm run dist:linux -- ${{ env.PUBLISH_FLAG }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

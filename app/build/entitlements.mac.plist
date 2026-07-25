@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Electron/V8 needs JIT and writable-executable pages under the hardened runtime. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- Electron loads framework dylibs that are not signed by this team. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- The Claude Code hand-off drives Terminal.app through osascript, which is an
+         Apple Event send attributed to this app. Without this (plus
+         NSAppleEventsUsageDescription in Info.plist) a hardened-runtime build is
+         denied automation and the hand-off silently fails. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+  </dict>
+</plist>
