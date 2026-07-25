@@ -324,6 +324,85 @@ Two constraints worth knowing before that work starts:
   have to embed one, which is why the usual workaround is a separate public
   releases repo as the feed.)
 
+## Verifying a release before you publish it
+
+CI logs are not proof. electron-builder *skips* signing with a warning rather
+than failing, so a green run can still produce an unsigned app. Check the log for
+the real evidence:
+
+```
+• signing   identityName=Developer ID Application: CytoPixel Software LLC (632L8D99KB)
+• notarization successful
+• DMG notarized and stapled
+```
+
+Then test an actual downloaded artifact on a Mac — this is the only check that
+reflects what a user experiences:
+
+```bash
+# grab the DMG from the draft release (drafts need the asset API, not `gh release download`)
+ID=$(gh api repos/arjunrajlaboratory/Memex/releases \
+      --jq '.[] | select(.draft==true) | .assets[] | select(.name=="Memex-<version>-arm64.dmg") | .id')
+gh api "repos/arjunrajlaboratory/Memex/releases/assets/$ID" \
+      -H "Accept: application/octet-stream" > /tmp/Memex.dmg
+
+spctl -a -t open --context context:primary-signature -vv /tmp/Memex.dmg   # expect: accepted
+xcrun stapler validate /tmp/Memex.dmg                                     # expect: worked
+
+hdiutil attach /tmp/Memex.dmg -nobrowse -mountpoint /tmp/m
+spctl -a -vvv /tmp/m/Memex.app        # expect: accepted, source=Notarized Developer ID
+xcrun stapler validate /tmp/m/Memex.app
+codesign -dv --verbose=2 /tmp/m/Memex.app   # expect flags=0x10000(runtime), TeamIdentifier
+hdiutil detach /tmp/m
+```
+
+`flags=0x10000(runtime)` confirms the hardened runtime, which is what makes the
+entitlements meaningful.
+
+## Release naming: the git tag and the release tag differ
+
+Pushing `app-v0.1.0` produces a GitHub Release tagged **`v0.1.0`**. electron-builder
+names the release from `package.json`'s `version` and ignores the tag that
+triggered the build. That's what `electron-updater` expects, so leave it alone —
+just don't be surprised that the two differ, and remember to bump
+`app/package.json` `version` before tagging a new release. Tagging without
+bumping the version would try to reuse the existing release.
+
+## Troubleshooting
+
+**`security: SecKeychainItemImport: MAC verification failed during PKCS12 import (wrong password?)`**
+The password is almost certainly fine. OpenSSL 3 writes PKCS#12 with
+PBES2/AES-256-CBC, which Apple's `security` cannot read. Rebuild the `.p12` with
+`openssl pkcs12 -export -legacy` and update `MAC_CSC_LINK`.
+
+**`skipped macOS application code signing`**
+`CSC_LINK` / `CSC_KEY_PASSWORD` are missing or unreadable. This is a *warning* —
+the build still succeeds and silently produces an unsigned app.
+
+**`skipped macOS notarization`**
+The `APPLE_API_*` variables are absent. Also note that electron-builder checks
+`APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD` *first*: if those are set, your API key
+is ignored regardless of what the docs imply.
+
+**`⨯ Please specify project homepage`**
+The Linux `deb` target needs `homepage` and an `author` with an email in
+`app/package.json`.
+
+**`The syntax of the command is incorrect.` on Windows**
+A build script is using Unix shell syntax. `mkdir -p` and `cp` don't exist in
+cmd/pwsh — this is why asset copying goes through `scripts/copy-assets.js`
+instead of inline shell. Keep npm scripts cross-platform or Windows packaging
+breaks.
+
+**A notarization failure that reads like bad credentials**
+Check that the certificate and the API key belong to the *same* Apple team. A
+cross-team mismatch surfaces as an authentication error that never mentions
+teams.
+
+**How long it should take.** A failing run dies in about a minute. A real signed
+release takes roughly 7–8 minutes, since notarization adds ~2.5 minutes per
+architecture and the DMGs are notarized separately on top of that.
+
 ## Local builds
 
 ```bash
