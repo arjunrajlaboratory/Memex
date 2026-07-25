@@ -2,11 +2,15 @@
   "name": "memex-desktop",
   "version": "0.1.0",
   "description": "Desktop app for Memex — install, set up, and drive your second brain with a chat + dashboards UI on top of the Claude agent.",
-  "author": "Memex",
+  "author": {
+    "name": "Arjun Raj",
+    "email": "arjunrajlab@gmail.com"
+  },
   "license": "MIT",
+  "homepage": "https://github.com/arjunrajlaboratory/Memex",
   "main": "dist/main/main.js",
   "scripts": {
-    "assets": "mkdir -p dist/renderer && cp src/renderer/index.html src/renderer/styles.css dist/renderer/",
+    "assets": "node scripts/copy-assets.js",
     "build": "tsc && npm run assets",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test test/*.test.cjs",
