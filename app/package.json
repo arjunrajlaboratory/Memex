@@ -38,6 +38,7 @@
   "build": {
     "appId": "app.memex.desktop",
     "productName": "Memex",
+    "artifactBuildCompleted": "./scripts/notarize-dmg.js",
     "directories": {
       "buildResources": "build",
       "output": "release"
