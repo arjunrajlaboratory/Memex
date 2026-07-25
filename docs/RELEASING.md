@@ -37,21 +37,57 @@ You need the Apple Developer Program ($99/yr). Signing and notarization are two
 separate credentials: this section covers the certificate that signs the app, the
 next one covers the key that submits it to Apple's notary service. You need both.
 
-**1. Create the certificate.** In the Apple Developer portal → Certificates → `+`
-→ **Developer ID Application** (not "Mac App Distribution" — that's for the App
-Store). Follow the CSR flow, download the `.cer`, and double-click to install it
-into your login keychain.
+This produces two secrets — `MAC_CSC_LINK` (the certificate and its private key)
+and `MAC_CSC_KEY_PASSWORD` (the password protecting them).
 
-**2. Export it as a `.p12`.** In Keychain Access, find
-"Developer ID Application: <your name> (<team id>)", right-click → Export →
-`.p12`, and set a strong password. This file contains your private key — treat it
-like one.
+**1. Generate a certificate signing request (CSR).** Open **Keychain Access**
+(Applications → Utilities) → menu **Certificate Assistant** → **Request a
+Certificate From a Certificate Authority**. Enter your email and name, choose
+**Saved to disk**, and save the `.certSigningRequest` file. This also creates the
+private key in your keychain — the certificate is useless without it.
 
-**3. Base64-encode it** for the GitHub secret:
+**2. Create the certificate.** Apple Developer portal → **Certificates, IDs &
+Profiles** → Certificates → `+` → **Developer ID Application**.
+
+Not "Mac App Distribution" or "Apple Development" — those are App Store and
+local-development certificates and neither one lets you distribute a downloadable
+app. Creating a Developer ID certificate requires the **Account Holder** role
+(automatic if this is an individual account).
+
+Upload the CSR from step 1, then download the resulting `.cer`.
+
+**3. Install it.** Double-click the `.cer`. Confirm it landed:
+
+```bash
+security find-identity -v -p codesigning | grep "Developer ID Application"
+```
+
+One line should come back. If nothing does, the certificate didn't import or its
+private key is missing — recheck step 1.
+
+**4. Export as `.p12`.** In Keychain Access, select the **My Certificates**
+category, find "Developer ID Application: &lt;your name&gt; (&lt;team id&gt;)", and
+confirm it has a disclosure triangle revealing a private key underneath. Right-click
+the certificate → **Export** → `.p12`, and set a strong password.
+
+Exporting from *My Certificates* is what bundles the private key. If you export
+from the *Certificates* category instead you get a key-less file, and signing
+fails later with an unhelpful error.
+
+**5. Base64-encode it** for the GitHub secret:
 
 ```bash
 base64 -i DeveloperID.p12 | pbcopy
 ```
+
+`pbcopy` prints nothing — it copies silently. To confirm it worked:
+
+```bash
+pbpaste | wc -c        # should be a few thousand bytes
+```
+
+The `.p12` and the `.p8` both contain private keys. Keep them in a password
+manager and don't commit them.
 
 ## macOS: notarization credentials (App Store Connect API key)
 
@@ -60,7 +96,7 @@ separate credentials from the signing certificate. This project uses an **App
 Store Connect API key**: it belongs to the team rather than one person's Apple
 ID, survives password rotations and 2FA changes, and can be revoked on its own.
 
-**4. Create the key.** [App Store Connect](https://appstoreconnect.apple.com) →
+**6. Create the key.** [App Store Connect](https://appstoreconnect.apple.com) →
 **Users and Access** → **Integrations** tab → **App Store Connect API** →
 **Team Keys**.
 
@@ -71,17 +107,17 @@ Click `+`, name it something like `notarize-ci`, and give it the **Developer**
 role. Developer is sufficient for notarization; Admin also works but grants far
 more than this needs.
 
-**5. Download the `.p8` — you only get one chance.** Apple lets you download the
+**7. Download the `.p8` — you only get one chance.** Apple lets you download the
 private key exactly once. If you lose it, the key must be revoked and replaced.
 Download it and keep a copy in your password manager before going further.
 
-**6. Note the two identifiers** from that same page:
+**8. Note the two identifiers** from that same page:
 
 - **Key ID** — the 10-character string in the key's row.
 - **Issuer ID** — the UUID shown above the key list. It's per-team, not per-key,
   and it's easy to miss because it sits outside the table.
 
-**7. Base64-encode the key** for the GitHub secret:
+**9. Base64-encode the key** for the GitHub secret:
 
 ```bash
 base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy
@@ -96,11 +132,11 @@ Repo → Settings → Secrets and variables → Actions → New repository secre
 
 | Secret | Value |
 | --- | --- |
-| `MAC_CSC_LINK` | base64 of the `.p12` from step 3 |
-| `MAC_CSC_KEY_PASSWORD` | the `.p12` export password from step 2 |
-| `APPLE_API_KEY_P8` | base64 of the `.p8` from step 7 |
-| `APPLE_API_KEY_ID` | the 10-character Key ID from step 6 |
-| `APPLE_API_ISSUER` | the Issuer UUID from step 6 |
+| `MAC_CSC_LINK` | base64 of the `.p12` from step 5 |
+| `MAC_CSC_KEY_PASSWORD` | the `.p12` export password you set in step 4 |
+| `APPLE_API_KEY_P8` | base64 of the `.p8` from step 9 |
+| `APPLE_API_KEY_ID` | the 10-character Key ID from step 8 |
+| `APPLE_API_ISSUER` | the Issuer UUID from step 8 |
 
 No `APPLE_TEAM_ID` is needed on this route — that variable only applies to the
 Apple ID / app-specific-password alternative.
