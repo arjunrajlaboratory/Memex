@@ -40,11 +40,41 @@ next one covers the key that submits it to Apple's notary service. You need both
 This produces two secrets — `MAC_CSC_LINK` (the certificate and its private key)
 and `MAC_CSC_KEY_PASSWORD` (the password protecting them).
 
-**1. Generate a certificate signing request (CSR).** Open **Keychain Access**
-(Applications → Utilities) → menu **Certificate Assistant** → **Request a
-Certificate From a Certificate Authority**. Enter your email and name, choose
-**Saved to disk**, and save the `.certSigningRequest` file. This also creates the
-private key in your keychain — the certificate is useless without it.
+**1. Generate a certificate signing request (CSR).** For CI the certificate only
+ever needs to exist as a `.p12` file, so the whole thing can be done with
+`openssl` — no GUI, and every step is verifiable:
+
+```bash
+mkdir -p ~/memex-signing && chmod 700 ~/memex-signing && cd ~/memex-signing
+openssl req -new -newkey rsa:2048 -nodes \
+  -keyout DeveloperID.key \
+  -out DeveloperID.csr \
+  -subj "/emailAddress=you@example.com/CN=Your Name/C=US"
+chmod 600 DeveloperID.key
+openssl req -in DeveloperID.csr -noout -verify   # "verify OK"
+```
+
+Apple requires RSA 2048 for this CSR. Keep `DeveloperID.key` — the certificate
+Apple issues is useless without the matching private key.
+
+<details>
+<summary>GUI alternative via Keychain Access</summary>
+
+Worth knowing: on macOS 15+ **Keychain Access is no longer in Applications →
+Utilities** (Passwords.app took its slot) and Spotlight may not index it. It now
+lives at `/System/Library/CoreServices/Applications/Keychain Access.app`:
+
+```bash
+open "/System/Library/CoreServices/Applications/Keychain Access.app"
+```
+
+Then use the **Keychain Access** application menu (next to the Apple menu) →
+**Certificate Assistant** → **Request a Certificate From a Certificate
+Authority**. Enter your email and name, choose **Saved to disk**. This route puts
+the private key in your login keychain rather than a file, which is what you want
+if you also intend to sign builds locally.
+
+</details>
 
 **2. Create the certificate.** Apple Developer portal → **Certificates, IDs &
 Profiles** → Certificates → `+` → **Developer ID Application**.
@@ -54,27 +84,44 @@ local-development certificates and neither one lets you distribute a downloadabl
 app. Creating a Developer ID certificate requires the **Account Holder** role
 (automatic if this is an individual account).
 
-Upload the CSR from step 1, then download the resulting `.cer`.
+Upload `DeveloperID.csr`, then download the resulting `.cer` (it'll land in
+`~/Downloads` as something like `developerID_application.cer`).
 
-**3. Install it.** Double-click the `.cer`. Confirm it landed:
+**3. Build the `.p12`.** Combine Apple's certificate with the private key from
+step 1. Apple ships the `.cer` in DER form, so convert it first:
 
 ```bash
-security find-identity -v -p codesigning | grep "Developer ID Application"
+cd ~/memex-signing
+mv ~/Downloads/developerID_application.cer .        # adjust to the real filename
+openssl x509 -inform DER -in developerID_application.cer -out DeveloperID.pem
+openssl pkcs12 -export \
+  -inkey DeveloperID.key \
+  -in DeveloperID.pem \
+  -out DeveloperID.p12          # prompts for an export password — save it
 ```
 
-One line should come back. If nothing does, the certificate didn't import or its
-private key is missing — recheck step 1.
+Verify the bundle actually contains both halves:
 
-**4. Export as `.p12`.** In Keychain Access, select the **My Certificates**
-category, find "Developer ID Application: &lt;your name&gt; (&lt;team id&gt;)", and
-confirm it has a disclosure triangle revealing a private key underneath. Right-click
-the certificate → **Export** → `.p12`, and set a strong password.
+```bash
+openssl pkcs12 -in DeveloperID.p12 -nokeys -passin pass:YOUR_PASSWORD | grep subject
+openssl pkcs12 -in DeveloperID.p12 -nocerts -noout -passin pass:YOUR_PASSWORD && echo "private key present"
+```
 
-Exporting from *My Certificates* is what bundles the private key. If you export
-from the *Certificates* category instead you get a key-less file, and signing
-fails later with an unhelpful error.
+A `.p12` without the private key is the classic failure here — it imports fine in
+CI and then fails at signing time with an unhelpful error.
 
-**5. Base64-encode it** for the GitHub secret:
+<details>
+<summary>If you used the Keychain Access route instead</summary>
+
+Double-click the `.cer` to install it, confirm with
+`security find-identity -v -p codesigning | grep "Developer ID Application"`,
+then in Keychain Access select the **My Certificates** category, right-click the
+certificate → **Export** → `.p12`. Exporting from *My Certificates* is what
+bundles the private key; exporting from plain *Certificates* silently omits it.
+
+</details>
+
+**4. Base64-encode it** for the GitHub secret:
 
 ```bash
 base64 -i DeveloperID.p12 | pbcopy
@@ -86,8 +133,8 @@ base64 -i DeveloperID.p12 | pbcopy
 pbpaste | wc -c        # should be a few thousand bytes
 ```
 
-The `.p12` and the `.p8` both contain private keys. Keep them in a password
-manager and don't commit them.
+The `.p12`, the `.key`, and the `.p8` all contain private keys. Keep them in a
+password manager, and don't commit them.
 
 ## macOS: notarization credentials (App Store Connect API key)
 
@@ -96,7 +143,7 @@ separate credentials from the signing certificate. This project uses an **App
 Store Connect API key**: it belongs to the team rather than one person's Apple
 ID, survives password rotations and 2FA changes, and can be revoked on its own.
 
-**6. Create the key.** [App Store Connect](https://appstoreconnect.apple.com) →
+**1. Create the key.** [App Store Connect](https://appstoreconnect.apple.com) →
 **Users and Access** → **Integrations** tab → **App Store Connect API** →
 **Team Keys**.
 
@@ -107,17 +154,17 @@ Click `+`, name it something like `notarize-ci`, and give it the **Developer**
 role. Developer is sufficient for notarization; Admin also works but grants far
 more than this needs.
 
-**7. Download the `.p8` — you only get one chance.** Apple lets you download the
+**2. Download the `.p8` — you only get one chance.** Apple lets you download the
 private key exactly once. If you lose it, the key must be revoked and replaced.
 Download it and keep a copy in your password manager before going further.
 
-**8. Note the two identifiers** from that same page:
+**3. Note the two identifiers** from that same page:
 
 - **Key ID** — the 10-character string in the key's row.
 - **Issuer ID** — the UUID shown above the key list. It's per-team, not per-key,
   and it's easy to miss because it sits outside the table.
 
-**9. Base64-encode the key** for the GitHub secret:
+**4. Base64-encode the key** for the GitHub secret:
 
 ```bash
 base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy
@@ -132,11 +179,11 @@ Repo → Settings → Secrets and variables → Actions → New repository secre
 
 | Secret | Value |
 | --- | --- |
-| `MAC_CSC_LINK` | base64 of the `.p12` from step 5 |
-| `MAC_CSC_KEY_PASSWORD` | the `.p12` export password you set in step 4 |
-| `APPLE_API_KEY_P8` | base64 of the `.p8` from step 9 |
-| `APPLE_API_KEY_ID` | the 10-character Key ID from step 8 |
-| `APPLE_API_ISSUER` | the Issuer UUID from step 8 |
+| `MAC_CSC_LINK` | base64 of `DeveloperID.p12` (certificate section, step 4) |
+| `MAC_CSC_KEY_PASSWORD` | the `.p12` export password you chose when running `openssl pkcs12 -export` |
+| `APPLE_API_KEY_P8` | base64 of the `.p8` (API key section, step 4) |
+| `APPLE_API_KEY_ID` | the 10-character Key ID (API key section, step 3) |
+| `APPLE_API_ISSUER` | the Issuer UUID (API key section, step 3) |
 
 No `APPLE_TEAM_ID` is needed on this route — that variable only applies to the
 Apple ID / app-specific-password alternative.
