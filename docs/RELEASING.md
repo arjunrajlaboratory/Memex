@@ -31,9 +31,11 @@ signing and notarization, and still produces a build. That keeps forks and
 credential-less runs working — but an unsigned macOS build is quarantined by
 Gatekeeper on other people's machines, so real distribution needs the secrets.
 
-## macOS: one-time Apple setup
+## macOS: signing certificate
 
-You need the Apple Developer Program ($99/yr).
+You need the Apple Developer Program ($99/yr). Signing and notarization are two
+separate credentials: this section covers the certificate that signs the app, the
+next one covers the key that submits it to Apple's notary service. You need both.
 
 **1. Create the certificate.** In the Apple Developer portal → Certificates → `+`
 → **Developer ID Application** (not "Mac App Distribution" — that's for the App
@@ -51,13 +53,42 @@ like one.
 base64 -i DeveloperID.p12 | pbcopy
 ```
 
-**4. Create an app-specific password** for notarization at
-[appleid.apple.com](https://appleid.apple.com) → Sign-In and Security →
-App-Specific Passwords. (Apple's notary service will not accept your normal
-password.)
+## macOS: notarization credentials (App Store Connect API key)
 
-**5. Find your Team ID** — the 10-character code in the Apple Developer portal
-under Membership details.
+Notarization proves to Gatekeeper that Apple has scanned the build. It needs
+separate credentials from the signing certificate. This project uses an **App
+Store Connect API key**: it belongs to the team rather than one person's Apple
+ID, survives password rotations and 2FA changes, and can be revoked on its own.
+
+**4. Create the key.** [App Store Connect](https://appstoreconnect.apple.com) →
+**Users and Access** → **Integrations** tab → **App Store Connect API** →
+**Team Keys**.
+
+Use *Team Keys*, not *Individual Keys* — an individual key is bound to your
+personal account and defeats the point of using an API key at all.
+
+Click `+`, name it something like `notarize-ci`, and give it the **Developer**
+role. Developer is sufficient for notarization; Admin also works but grants far
+more than this needs.
+
+**5. Download the `.p8` — you only get one chance.** Apple lets you download the
+private key exactly once. If you lose it, the key must be revoked and replaced.
+Download it and keep a copy in your password manager before going further.
+
+**6. Note the two identifiers** from that same page:
+
+- **Key ID** — the 10-character string in the key's row.
+- **Issuer ID** — the UUID shown above the key list. It's per-team, not per-key,
+  and it's easy to miss because it sits outside the table.
+
+**7. Base64-encode the key** for the GitHub secret:
+
+```bash
+base64 -i AuthKey_XXXXXXXXXX.p8 | pbcopy
+```
+
+Base64 rather than pasting the raw PEM: it survives any whitespace or
+line-ending mangling on the way into a secret.
 
 ### GitHub secrets to add
 
@@ -67,26 +98,39 @@ Repo → Settings → Secrets and variables → Actions → New repository secre
 | --- | --- |
 | `MAC_CSC_LINK` | base64 of the `.p12` from step 3 |
 | `MAC_CSC_KEY_PASSWORD` | the `.p12` export password from step 2 |
-| `APPLE_ID` | your Apple ID email |
-| `APPLE_APP_SPECIFIC_PASSWORD` | the app-specific password from step 4 |
-| `APPLE_TEAM_ID` | your 10-character Team ID |
+| `APPLE_API_KEY_P8` | base64 of the `.p8` from step 7 |
+| `APPLE_API_KEY_ID` | the 10-character Key ID from step 6 |
+| `APPLE_API_ISSUER` | the Issuer UUID from step 6 |
 
-**Alternative — App Store Connect API key.** More robust than an app-specific
-password (team-owned rather than tied to one person's Apple ID, and unaffected by
-password rotation). electron-builder reads `APPLE_API_KEY`, `APPLE_API_KEY_ID`,
-and `APPLE_API_ISSUER` instead of the three `APPLE_*` values above. Note that
-`APPLE_API_KEY` must be a **filesystem path to the `.p8` file**, not the key
-contents, so the workflow needs an extra step to materialize it:
+No `APPLE_TEAM_ID` is needed on this route — that variable only applies to the
+Apple ID / app-specific-password alternative.
 
-```yaml
-- name: Write App Store Connect key
-  run: |
-    mkdir -p ~/private_keys
-    echo "${{ secrets.APPLE_API_KEY_P8 }}" | base64 --decode > ~/private_keys/AuthKey.p8
-    echo "APPLE_API_KEY=$HOME/private_keys/AuthKey.p8" >> "$GITHUB_ENV"
-```
+### Two implementation details worth knowing
 
-### Entitlements, and why the hand-off needs them
+**`APPLE_API_KEY` is a file path, not key material.** `notarytool` reads the key
+from disk, so the workflow decodes `APPLE_API_KEY_P8` into `$RUNNER_TEMP` and
+points `APPLE_API_KEY` at that file. Setting `APPLE_API_KEY` to the key contents
+fails with a confusing "file not found"-shaped error.
+
+**Do not also set `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD`.** electron-builder's
+documentation lists the API key as the first-choice route, but the implementation
+checks the Apple ID variables *first* — so if both are present, your API key is
+silently ignored. Pick one; this repo is set up for the API key.
+
+<details>
+<summary>Alternative: Apple ID + app-specific password</summary>
+
+Quicker to set up, but tied to an individual and breaks on password rotation.
+Create an app-specific password at [appleid.apple.com](https://appleid.apple.com)
+→ Sign-In and Security → App-Specific Passwords, find your 10-character Team ID
+under Membership details in the developer portal, then set `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` as secrets and swap those into
+the macOS job's `env:` block in place of the `APPLE_API_*` values (also removing
+the "Write App Store Connect API key" step).
+
+</details>
+
+## Entitlements, and why the hand-off needs them
 
 `app/build/entitlements.mac.plist` carries the usual Electron entitlements (JIT,
 unsigned executable memory, library validation) plus
