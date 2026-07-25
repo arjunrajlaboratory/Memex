@@ -94,10 +94,27 @@ step 1. Apple ships the `.cer` in DER form, so convert it first:
 cd ~/memex-signing
 mv ~/Downloads/developerID_application.cer .        # adjust to the real filename
 openssl x509 -inform DER -in developerID_application.cer -out DeveloperID.pem
-openssl pkcs12 -export \
+openssl pkcs12 -export -legacy \
   -inkey DeveloperID.key \
   -in DeveloperID.pem \
   -out DeveloperID.p12          # prompts for an export password — save it
+```
+
+**`-legacy` is required, not optional.** OpenSSL 3 defaults to PBES2 / AES-256-CBC
+with a SHA-256 MAC, which Apple's `security` tool cannot read. Without the flag
+the CI build fails at certificate import with:
+
+```
+security: SecKeychainItemImport: MAC verification failed during PKCS12 import (wrong password?)
+```
+
+The password is fine — it's the encryption scheme. `-legacy` emits the
+SHA1/3DES form macOS expects. You can confirm before pushing the secret:
+
+```bash
+security create-keychain -p testpw /tmp/t.keychain
+security import DeveloperID.p12 -k /tmp/t.keychain -P "$(cat p12-password.txt)" -T /usr/bin/codesign
+security delete-keychain /tmp/t.keychain
 ```
 
 Verify the bundle actually contains both halves:
