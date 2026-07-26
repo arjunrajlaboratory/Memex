@@ -123,6 +123,9 @@
         ]
       }
     },
+    "dmg": {
+      "sign": true
+    },
     "win": {
       "icon": "build/icon.png",
       "target": [
