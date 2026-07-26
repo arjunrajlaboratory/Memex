@@ -250,6 +250,48 @@ bundled proprietary Anthropic components are addressed by the third-party compon
 (A1 §5) rather than by changing this field. Deciding whether the shipped artifact needs a
 composite license notice is folded into the counsel review (open item 3).
 
+## Part C — first-run folder-creation clarity (addendum)
+
+Bundled in because it lands on the same first-run surface, but independent of the gate.
+
+**Reported friction:** a user was advised to run `mkdir ~/code/my-vault` in Terminal before
+they could get started, and doing so unblocked them.
+
+**That step is not required, and must not be documented.** `tools/memex_init.py:318` calls
+`target.mkdir(parents=True, exist_ok=True)`, and `expandHome` (`app/src/main/main.ts:42`)
+expands a leading `~`, so typing `~/code/my-vault` into **Location** already works when
+`~/code` does not exist. Adding the instruction would bake an unnecessary step into
+onboarding. This is a discoverability failure, not a functional one.
+
+**Why the user concluded otherwise** — three UI signals all point at a pre-existing folder:
+
+1. `~/code/my-vault` is a `placeholder` attribute, not a value
+   (`app/src/renderer/index.html:162`), so it reads as a format example rather than a
+   promise to create anything. Nothing in the UI states the folder will be created.
+2. Both routes into that field are existing-folder pickers: the Location `…` button
+   (`app/src/renderer/renderer.ts:87`) and `Browse…` (line 80) both call
+   `dialog.showOpenDialog`. `createDirectory` is set (`app/src/main/main.ts:698`) so macOS
+   does offer "New Folder", but it is a small control in the dialog's bottom-left corner.
+3. `app/src/renderer/renderer.ts:84` — handed a non-vault folder, `Browse…` drops the path
+   into `f_path` and flashes *"That folder isn't a vault yet — create one here, or pick a
+   vault folder."* That is exactly the flow the reporter reached *after* their Terminal
+   step, so the app confirmed their theory that the folder had to exist first.
+
+**Fix — copy only, no behavior change:**
+
+1. A hint line under Location in the create form: "Doesn't exist yet? Memex creates it for
+   you, including parent folders."
+2. Reword the `renderer.ts:84` flash so it stops implying the folder had to pre-exist —
+   e.g. "That folder isn't a Memex vault yet. The form below can set one up there, or pick
+   another folder."
+
+**Related gap, out of scope, recorded so it isn't lost:** the reporter had Cowork rather
+than the Claude Code CLI. Vault creation still succeeds in that state (it needs only
+Python 3), but `startSession` fails and surfaces the "Agent session failed to start"
+warning — data panels work, chat does not. The CLI prerequisite currently appears only in
+small print in `.onboard-note` (`app/src/renderer/index.html:178`). Worth its own
+onboarding pass.
+
 ## Testing
 
 - **Unit** (`app/test/legal.test.cjs`, existing `node --test` suite): `needsAcceptance`
@@ -259,6 +301,10 @@ composite license notice is folded into the counsel review (open item 3).
 - **Main-process enforcement:** `vault:open` and `vault:create` refuse while unaccepted.
 - **Driven run:** first launch gates → accept → relaunch is clean → bump the manifest
   version → gate returns → decline quits.
+- **Part C regression:** in the same driven run, create a vault at a path whose parent does
+  not exist (e.g. `~/tmp-memex-parent/v1`) and confirm it succeeds without any prior
+  `mkdir`. Part C is copy-only, so this guards the behavior the copy now promises rather
+  than the copy itself.
 - **Packaged build:** required. `app/README.md` and `docs/RELEASING.md` are emphatic that
   `npm start` does not exercise packaged asset paths, and this change adds new bundled
   files that must land correctly in the built app.
@@ -267,7 +313,8 @@ composite license notice is folded into the counsel review (open item 3).
 
 Two repositories, two pull requests:
 
-1. `Memex` — bundled documents, `legal.ts`, gate UI, IPC, tests, `package.json` email.
+1. `Memex` — bundled documents, `legal.ts`, gate UI, IPC, tests, `package.json` email, and
+   the Part C copy fix.
 2. `cytopixel_website` — the two new per-product sections, transcribed from
    `app/legal/*.md`.
 
