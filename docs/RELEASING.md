@@ -325,10 +325,14 @@ Until then the Windows installer is unsigned and users see a SmartScreen
 
 ## Auto-update
 
-Wired up as of 0.1.1. `electron-updater` reads the `latest-*.yml` feed published
-alongside the installers, downloads a newer version in the background, and
-applies it when the app next quits. `initAutoUpdater()` in `src/main/main.ts` is
-the whole of it.
+**Working as of 0.1.3**, and verified end to end on a signed install (0.1.3
+auto-updated itself to 0.1.4). `electron-updater` reads the `latest-*.yml` feed
+published alongside the installers, downloads a newer version in the background,
+and applies it when the app next quits. `initAutoUpdater()` in
+`src/main/main.ts` is the whole of it.
+
+It was *added* in 0.1.1 but crashed on the first line in both 0.1.1 and 0.1.2 —
+see the CJS default-import trap below. Neither of those builds can self-update.
 
 Behaviour worth knowing:
 
@@ -353,9 +357,14 @@ Behaviour worth knowing:
   anonymously. A private repo would have to ship a credential in the app, which
   is why the usual workaround there is a separate public releases repo.
 
-A release can only update users who already have an updater-capable build:
-0.1.0 shipped without one, so those installs must be replaced by hand. Every
-release from 0.1.1 onward can carry users forward.
+A release can only carry forward users who already have a *working* updater.
+0.1.0 shipped without one at all; 0.1.1 and 0.1.2 shipped a broken one. Those
+three have to be replaced by hand. Every release from **0.1.3** onward updates
+itself.
+
+Confirming an update applied: the vault switcher shows the running version at
+the bottom (`app:version` IPC). That exists precisely because there was no way
+to tell otherwise without inspecting `Info.plist`.
 
 ## Packaged-build gotchas, and how to test for them
 
