@@ -205,6 +205,10 @@ $('resetApprovals').onclick = async () => {
 };
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOnboard(); });
 
+// Fetched once at startup: the version cannot change while the window is open
+// (an update is applied on quit).
+void M.appVersion().then((v) => { $('appVersion').textContent = v ? `Memex ${v}` : ''; }).catch(() => {});
+
 function applySummary(s: VaultSummary): void {
   const c = s.counts;
   $('cntTasks').textContent = c.openTasks ? String(c.openTasks) : '';

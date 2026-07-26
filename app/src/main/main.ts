@@ -727,6 +727,11 @@ function registerIpc(): void {
     return searchVault(vault, String(q ?? ''));
   });
 
+  // Surfaced in the vault switcher so the running version is visible without
+  // digging through Info.plist — which is also how you confirm an auto-update
+  // actually applied.
+  handle('app:version', async () => app.getVersion());
+
   handle('permissions:reset', async () => {
     const vault = activeVaultPath();
     if (!vault) return { ok: false };
