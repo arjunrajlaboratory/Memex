@@ -148,6 +148,7 @@ interface MemexApi {
   recentVaults(): Promise<{ recent: string[]; last: string | null }>;
   currentVault(): Promise<VaultSummary | null>;
   resetToolApprovals(): Promise<{ ok: boolean }>;
+  appVersion(): Promise<string>;
 
   data(kind: 'summary'): Promise<VaultSummary | null>;
   data(kind: 'briefing'): Promise<BriefingInfo | null>;

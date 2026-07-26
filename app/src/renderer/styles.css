@@ -504,3 +504,6 @@ body {
 /* close control inside the artifact tab */
 .tab-artifact .tab-close { margin-left: 7px; opacity: .55; padding: 0 2px; font-size: 13px; }
 .tab-artifact .tab-close:hover { opacity: 1; }
+
+/* running version, shown in the vault switcher — also how you confirm an update applied */
+.app-version { margin-top: 10px; text-align: center; color: var(--ink-faint); font: 11px var(--font-ui); letter-spacing: .04em; }
