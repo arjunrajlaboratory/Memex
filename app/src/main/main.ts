@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, protocol } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
+import electronUpdater from 'electron-updater';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -524,6 +525,25 @@ async function launchClaudeCode(dirPath: string, vault: string): Promise<{ ok: b
   return { ok: true, message: `Opening a terminal in ${full} to run Claude Code. Tell the user a terminal window is opening; if the \`claude\` command isn't found there, the Claude Code CLI needs to be installed.` };
 }
 
+// ---------- auto-update ----------
+// Updates come from the `latest-*.yml` feed the release workflow publishes
+// alongside the installers on GitHub Releases. The update is downloaded in the
+// background and applied when the app next quits.
+function initAutoUpdater(): void {
+  // Dev builds have no feed to read: electron-updater throws looking for
+  // dev-app-update.yml. Only packaged apps can update.
+  if (!app.isPackaged) return;
+  const { autoUpdater } = electronUpdater;
+  // A failed update check must stay invisible — it is not something the user
+  // asked for or can act on. An unhandled 'error' event would otherwise be
+  // thrown. Linux .deb installs land here too: electron-updater only supports
+  // AppImage on Linux.
+  autoUpdater.on('error', (err: Error) => {
+    console.error('auto-update check failed:', err?.message || err);
+  });
+  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+}
+
 async function startSession(vault: string): Promise<void> {
   if (session) { try { await session.stop(); } catch (_) {} session = null; }
   let nextSession: AgentSession;
@@ -930,6 +950,7 @@ if (!gotLock) {
     });
     registerIpc();
     createWindow();
+    initAutoUpdater();
     handleIconDrop(argvFiles(process.argv));
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
