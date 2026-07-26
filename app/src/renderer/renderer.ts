@@ -81,7 +81,7 @@ $('browseVault').onclick = async () => {
   if (!p) return;
   const det = await M.detectVault(p);
   if (det.isVault) openVault(p);
-  else { ($('f_path') as HTMLInputElement).value = p; flash('That folder isn\'t a vault yet — create one here, or pick a vault folder.'); }
+  else { ($('f_path') as HTMLInputElement).value = p; flash('That folder isn\'t a Memex vault yet. The form on the right can set one up there, or pick another folder.'); }
 };
 
 $('pickPath').onclick = async () => { const p = await M.pickDirectory(); if (p) ($('f_path') as HTMLInputElement).value = p; };
