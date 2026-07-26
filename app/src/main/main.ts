@@ -1,6 +1,10 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, protocol } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
-import electronUpdater from 'electron-updater';
+// Named import, not default: electron-updater is CJS with `__esModule: true`
+// and no `default` export, so a default import compiles to an undefined value.
+// `autoUpdater` is a lazy getter that constructs on first access, so it must
+// stay a property read that happens after app.whenReady.
+import { autoUpdater } from 'electron-updater';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -534,7 +538,6 @@ function initAutoUpdater(): void {
   // Dev builds have no feed to read: electron-updater throws looking for
   // dev-app-update.yml. Only packaged apps can update.
   if (!app.isPackaged) return;
-  const { autoUpdater } = electronUpdater;
   // A failed update check must stay invisible — it is not something the user
   // asked for or can act on. An unhandled 'error' event would otherwise be
   // thrown. Linux .deb installs land here too: electron-updater only supports

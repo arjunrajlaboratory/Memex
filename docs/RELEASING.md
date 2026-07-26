@@ -357,6 +357,82 @@ A release can only update users who already have an updater-capable build:
 0.1.0 shipped without one, so those installs must be replaced by hand. Every
 release from 0.1.1 onward can carry users forward.
 
+## Packaged-build gotchas, and how to test for them
+
+Three releases in a row shipped bugs that **could not occur in dev**. They share
+one shape: code that only runs in a packaged app, verified only in dev.
+
+> **The rule: anything behind `app.isPackaged`, anything that spawns a
+> subprocess, and anything that imports a CommonJS dependency must be exercised
+> in a real packaged build before release.** `npm start` proves nothing about
+> these.
+
+### Trap 1: paths through `app.asar` can't be spawned
+
+`app.asar` is a file, not a directory. Electron's shim redirects file *reads*
+into `app.asar.unpacked`, but **not** the executable path handed to
+`child_process.spawn`. So a bundled binary fails with `ENOTDIR` even when
+electron-builder has correctly unpacked it — unpacking is necessary but not
+sufficient, and the consumer has to be pointed at the unpacked path explicitly
+(see `src/main/claude-binary.ts`).
+
+Symptom: works in dev, `spawn ENOTDIR` when packaged.
+
+### Trap 2: default-importing a CommonJS dependency
+
+`electron-updater` sets `__esModule: true` but exports no `default`. TypeScript's
+`__importDefault` therefore passes the module through unwrapped, and
+`import x from 'electron-updater'` yields an object whose `.default` is
+`undefined`. Use a **named import**.
+
+Symptom: `TypeError: Cannot destructure property 'autoUpdater' of '..._1.default'
+as it is undefined` — and only at runtime, in packaged builds, because the call
+site sits behind an `isPackaged` guard. Check before trusting a default import:
+
+```bash
+node -e "const m=require('<dep>'); console.log(m.__esModule, m.default!==undefined)"
+```
+
+### How to actually test a packaged build
+
+```bash
+npm run pack                       # builds release/mac-arm64/Memex.app
+
+# Run it from a terminal so main-process console output is visible — launching
+# from Finder hides exactly the errors you are looking for. The separate
+# user-data-dir avoids the single-instance lock stealing your launch when a
+# copy is already installed and running.
+MEMEX_DEV=1 MEMEX_OPEN=~/some-vault \
+  ./release/mac-arm64/Memex.app/Contents/MacOS/Memex \
+  --user-data-dir=/tmp/memex-test-profile 2>&1 | tee /tmp/memex.log
+```
+
+Then **drive the feature**, don't just check that the app launched. A clean
+startup log is not evidence that guarded code works: the ENOTDIR bug and the
+updater crash both sat in an app that started perfectly.
+
+### Testing auto-update specifically
+
+`npm run pack` does not generate `app-update.yml`, so the updater fails with
+`ENOENT` on it. Build a real target instead, with the version temporarily set
+*below* the published release so there is something to find:
+
+```bash
+# temporarily set package.json version to the previous release, then:
+npx electron-builder --mac dmg --arm64 --publish never
+MEMEX_DEV=1 ./release/mac-arm64/Memex.app/Contents/MacOS/Memex \
+  --user-data-dir=/tmp/upd-test 2>&1 | grep -iE "checking|found version|download"
+```
+
+Expect `Checking for update` → `Found version X` → `New version X has been
+downloaded`. An **unsigned** local build then fails at
+`Code signature ... did not pass validation` — that is correct and expected:
+Squirrel.Mac requires the update to carry the same identity as the running app.
+Reaching that line means everything upstream works. Afterwards, clear
+`~/Library/Caches/memex-desktop-updater` and
+`~/Library/Caches/app.memex.desktop.ShipIt` so a stale pending update doesn't
+confuse the next run.
+
 ## Verifying a release before you publish it
 
 CI logs are not proof. electron-builder *skips* signing with a warning rather

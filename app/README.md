@@ -61,6 +61,22 @@ iterate on the UI. Two optional env vars:
 - `MEMEX_DEVCTL=/path/to/ctlfile` — a JSON control file the app polls; write
   `{"js":"…","shot":"/path/out.png"}` to run code in the window and/or capture a screenshot.
 
+### Dev does not exercise everything
+
+Some code paths only exist in a packaged app, and shipping them unverified has
+bitten this project three times. Anything behind `app.isPackaged`, anything that
+spawns a subprocess, and anything importing a CommonJS dependency needs a real
+packaged run before release — `npm start` cannot catch those failures:
+
+- Paths that traverse `app.asar` cannot be `spawn`ed (Electron redirects file
+  reads into `app.asar.unpacked`, but not the executable given to spawn). See
+  `src/main/claude-binary.ts`.
+- Default-importing a CJS module that sets `__esModule: true` without a
+  `default` export yields `undefined` at runtime (hit with `electron-updater`).
+
+`docs/RELEASING.md` → "Packaged-build gotchas" has the recipe for running and
+driving a packaged build, including how to test auto-update.
+
 ## Customizing tabs & quick-actions
 
 The right panel's tabs *and* the quick-action chips are user-customizable, the Memex way — as a plain
