@@ -18,6 +18,16 @@ pipeline without uploading anything, use the workflow's manual trigger
 App tags are prefixed `app-v` so desktop releases stay distinguishable from
 engine versioning (`VERSION`).
 
+## Before you tag: legal documents
+
+- **Legal documents:** if `app/legal/terms.md` or `app/legal/privacy.md` changed, bump
+  `version` and set `summary` in `app/legal/manifest.json` (this triggers the in-app
+  re-consent gate), and transcribe the same text into the matching per-product sections
+  on cytopixel.com. `version` and `effective` are the tell if the two drift.
+
+The terms version is deliberately independent of the app version — bump it only for
+substantive changes, since every bump re-prompts every existing user.
+
 ## What each platform needs
 
 | Platform | Signing | Status |
