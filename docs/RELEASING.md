@@ -245,6 +245,18 @@ rejected  (source=no usable signature)
 Users hit that when they open the downloaded disk image. `app/scripts/notarize-dmg.js`
 closes the gap: it submits each DMG to the notary service and staples the ticket.
 
+A DMG needs **both** halves, in this order: signed first, then notarized and
+stapled. Notarizing alone is not enough — a stapled but unsigned disk image still
+fails Gatekeeper with `no usable signature`, which we confirmed the hard way on a
+published build.
+
+So the fix is two settings working together:
+
+1. **`"dmg": { "sign": true }`** in `package.json`. electron-builder's own
+   `signDmg` resolves the Developer ID identity and the temporary keychain it
+   created, so nothing has to be plumbed through by hand.
+2. **`scripts/notarize-dmg.js`** submits the signed DMG and staples the ticket.
+
 Two non-obvious details are baked into that script:
 
 - **It runs on `artifactBuildCompleted`, not `afterAllArtifactBuild`.** Only the
@@ -254,9 +266,13 @@ Two non-obvious details are baked into that script:
   the update manifest matches the shipped bytes. Without this, `latest-mac.yml`
   records the pre-staple size and sha512.
 
-Do **not** set `dmg.sign: true` to solve this. electron-builder's own schema
-warns that signing the DMG "is not required and will lead to unwanted errors in
-combination with notarization requirements."
+The ordering works because `dmg-builder` signs, *then* computes the blockmap and
+hash, *then* emits the event our hook listens to.
+
+electron-builder's schema describes `dmg.sign` as "not required" and warns it
+"will lead to unwanted errors in combination with notarization requirements".
+That is misleading for this workflow: it applies to signing a DMG *without*
+notarizing it. Signing before notarization is what Apple prescribes.
 
 Known cosmetic gap: the `.dmg.blockmap` is generated before stapling, so it
 describes the pre-staple file. Nothing reads it on macOS — `electron-updater`
@@ -346,6 +362,7 @@ ID=$(gh api repos/arjunrajlaboratory/Memex/releases \
 gh api "repos/arjunrajlaboratory/Memex/releases/assets/$ID" \
       -H "Accept: application/octet-stream" > /tmp/Memex.dmg
 
+codesign -dv /tmp/Memex.dmg                                # expect: a Developer ID authority
 spctl -a -t open --context context:primary-signature -vv /tmp/Memex.dmg   # expect: accepted
 xcrun stapler validate /tmp/Memex.dmg                                     # expect: worked
 
@@ -393,6 +410,17 @@ A build script is using Unix shell syntax. `mkdir -p` and `cp` don't exist in
 cmd/pwsh — this is why asset copying goes through `scripts/copy-assets.js`
 instead of inline shell. Keep npm scripts cross-platform or Windows packaging
 breaks.
+
+**DMG rejected with `no usable signature` even though `stapler validate` passes**
+The disk image has a notarization ticket but no code signature. Notarizing is not
+sufficient on its own — set `"dmg": { "sign": true }` so it is signed before it is
+submitted. `codesign -dv <dmg>` reporting "code object is not signed at all"
+confirms this case.
+
+**`syspolicy_check distribution` reports "Adhoc Signed App" for a `.dmg`**
+Ignore it. That tool expects an `.app` bundle; its verdict on a disk image is
+meaningless. Mount the DMG and run it against the `.app` inside, where
+"App passed all pre-distribution checks" is the answer you want.
 
 **A notarization failure that reads like bad credentials**
 Check that the certificate and the API key belong to the *same* Apple team. A
