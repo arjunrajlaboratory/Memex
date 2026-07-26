@@ -57,16 +57,17 @@ Established by reading the code, not assumed:
 - **Anthropic covers PHI only under a BAA with Zero Data Retention enabled**
   (Anthropic legal-and-compliance page), which gives the PHI prohibition a precise reason.
 
-## Open items — launch-gating, not resolved by this design
+## Anthropic-relationship risks — accepted, not launch-gating
 
-These are business/legal questions this document cannot settle. They are recorded here so
-they don't get lost, and they do not block implementation of the gate.
+Two questions surfaced while verifying the facts above. Neither is resolved by this design,
+and both are **accepted risks** by explicit decision rather than open action items. They are
+recorded because the reasoning matters if the situation changes.
 
 1. **Redistribution of the bundled Claude CLI.** Anthropic's legal-and-compliance page is
    silent on redistribution, embedding, or bundling; `LICENSE.md` says "All rights
    reserved", so no redistribution right is granted by default. Shipping the `claude`
-   binary inside a third-party DMG/installer needs express permission or a different
-   packaging approach.
+   binary inside a third-party DMG/installer would need express permission to be clearly
+   in bounds.
 2. **The OAuth credential model.** Anthropic's page states that OAuth auth "is intended
    exclusively for purchasers of Claude Free, Pro, Max, Team, and Enterprise subscription
    plans and is designed to support ordinary use of Claude Code and other native Anthropic
@@ -78,13 +79,46 @@ they don't get lost, and they do not block implementation of the gate.
    territory. Arguments that Memex is on the right side: it routes nothing through
    CytoPixel servers, does not implement Claude.ai login itself, and each user's
    credentials are used on their own machine for their own benefit — close to "ordinary,
-   individual usage". **Action: raise with Anthropic (sales/support) in parallel with
-   launch.** An EULA cannot resolve this; CytoPixel's own terms grant CytoPixel no rights
-   against Anthropic.
-3. **Counsel review** of both drafted documents before publication.
+   individual usage".
 
-Decision on record: proceed with the gate as designed, disclose the auth relationship in
-the terms, and pursue (1) and (2) with Anthropic in parallel.
+**Decision (2026-07-26):** proceed to launch without resolving either. Expected audience is
+small, enforcement against a local single-user app is unlikely, and if Anthropic does object
+there are direct contacts available to navigate it. If enforcement happens, the fallback is
+API-key auth as a documented path (see the option evaluated during design) and/or requiring
+the user's own installed CLI instead of bundling one. An EULA cannot resolve either question
+in any case — CytoPixel's own terms grant CytoPixel no rights against Anthropic — so the
+terms simply disclose the relationship accurately (A1 §4, §5).
+
+## Remaining open item
+
+**Counsel review** of both drafted documents before publication. Two specific questions
+worth their attention: whether MIT-licensed source undercuts the prohibited-use clauses
+(§7), and whether the shipped artifact needs a composite license notice given the bundled
+proprietary components.
+
+### License choice: MIT retained
+
+Considered and rejected switching the source to a more restrictive license to give the
+prohibited-use clauses copyright teeth:
+
+- **It cannot cover what is already published.** Existing releases stay MIT permanently and
+  anyone holding a copy retains those rights to it; relicensing binds only future code, so
+  it would not close the gap it was meant to close.
+- **It requires the outside contributor's consent.** Commit `4399161` (PR #15) touched
+  `tools/derive.py` and `tools/memex_bake.py`, and `memex_bake.py` ships inside the packaged
+  app via `extraResources` — so that contribution is in the distributed artifact, not merely
+  in the repo.
+- **The goal does not need it.** The prohibited-data clause exists to establish that the
+  user was told and agreed, which is contractual and evidentiary work that clickwrap
+  performs. Copyright-condition status would matter only for injunctive enforcement, which
+  is not the concern.
+- **It conflicts with CytoPixel's positioning** ("Open source, cloud-accessible, no forced
+  vendor lock-in"; NimbusImage is Apache 2.0).
+
+MIT also *strengthens* the part that matters most: it disclaims warranty and liability
+itself, so the terms restate rather than create that shield. The restriction that does hold
+cleanly without relicensing is the trademark reservation (A1 §3), which covers the realistic
+abuse case — someone shipping a modified build under the "Memex" name.
 
 ## Part A — the documents
 
@@ -248,7 +282,7 @@ Close). No new settings panel.
 author name stay as they are — MIT accurately describes CytoPixel's own code, and the
 bundled proprietary Anthropic components are addressed by the third-party components clause
 (A1 §5) rather than by changing this field. Deciding whether the shipped artifact needs a
-composite license notice is folded into the counsel review (open item 3).
+composite license notice is folded into the counsel review (see "Remaining open item").
 
 ## Part C — first-run folder-creation clarity (addendum)
 
