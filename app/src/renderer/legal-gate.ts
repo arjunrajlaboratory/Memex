@@ -21,6 +21,36 @@
 
   let rendered = { terms: '', privacy: '' };
 
+  // Everything outside the gate. The title bar is included: it is not part of
+  // #workspace, so leaving it live let you switch vaults and toggle the theme
+  // from behind a supposedly blocking dialog, and let Tab wrap out of the gate.
+  const chrome = (): Element[] => [
+    id('workspace'),
+    id('onboard'),
+    ...Array.from(document.querySelectorAll('.titlebar')),
+  ];
+  const setChromeInert = (on: boolean): void => {
+    for (const el of chrome()) (el as HTMLElement).inert = on;
+  };
+
+  const isOpen = (): boolean => gate.style.display !== 'none';
+
+  // renderer.ts binds Cmd/Ctrl-K (search), Cmd/Ctrl-[ and -] (history), and
+  // Escape (close the vault switcher) on window in the bubble phase. Search in
+  // particular would open its own overlay and pull focus out of the gate. A
+  // capture-phase listener runs before those, so the gate can swallow exactly
+  // those chords while it is up — and nothing else, so Tab still moves within
+  // the gate and Cmd-C still copies the terms.
+  window.addEventListener('keydown', (e) => {
+    if (!isOpen()) return;
+    const chord = (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey
+      && (e.key === 'k' || e.key === 'K' || e.key === '[' || e.key === ']');
+    if (chord || e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+
   // The documents are HTML rendered by the main process through the hardened
   // marked renderer, which strips raw HTML and admits only vetted links.
   const showDoc = (which: 'terms' | 'privacy'): void => {
@@ -50,16 +80,13 @@
 
     showDoc('terms');
     gate.style.display = 'grid';
-    // Keep focus and screen readers inside the gate while it is up.
-    id('workspace').inert = true;
-    id('onboard').inert = true;
+    setChromeInert(true);
     (mode === 'gate' ? agree : closeBtn).focus();
   };
 
   const close = (): void => {
     gate.style.display = 'none';
-    id('workspace').inert = false;
-    id('onboard').inert = false;
+    setChromeInert(false);
   };
 
   tabTerms.onclick = () => showDoc('terms');
@@ -70,12 +97,13 @@
     acceptBtn.disabled = true;
     const res = await api.legalAccept();
     if (res.ok) { close(); return; }
-    // Recording failed, which means the documents are unreadable. Do not let the
-    // user through — the main process would refuse to open a vault anyway — and
-    // say why instead of leaving a dead button.
+    // The main process confirmed the record did not reach disk, so it will keep
+    // refusing to open a vault. Do not close the gate — say why, and leave the
+    // checkbox re-tickable so this is retryable once the cause is fixed.
     agree.checked = false;
     const changed = id('legalChanged');
-    changed.textContent = 'Memex could not record your acceptance. Please reinstall the app.';
+    changed.textContent = 'Memex could not save your acceptance. Check that your disk is not full '
+      + 'and that Memex can write to its application-data folder, then try again.';
     changed.style.display = '';
   };
 

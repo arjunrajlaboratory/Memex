@@ -754,7 +754,12 @@ function registerIpc(): void {
     const cfg = loadConfig();
     cfg.terms = acceptanceRecord(docs.manifest, app.getVersion(), new Date());
     saveConfig(cfg);
-    return { ok: true };
+    // saveConfig swallows write errors, so re-read from disk and ask the same
+    // question the vault guards ask. Claiming success on an unwritable config
+    // would close the gate while vault:open and vault:create keep refusing,
+    // and review mode hides the consent controls — the user would be stuck
+    // until they restarted.
+    return { ok: termsAccepted() };
   });
 
   handle('app:quit', async () => { app.quit(); });

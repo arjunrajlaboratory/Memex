@@ -509,8 +509,10 @@ body {
 .app-version { margin-top: 10px; text-align: center; color: var(--ink-faint); font: 11px var(--font-ui); letter-spacing: .04em; }
 
 /* ======================= TERMS GATE ======================= */
-/* Above .onboard (z-index 20): the gate must cover the vault switcher too. */
-.legal { position: fixed; inset: 0; z-index: 40; background: radial-gradient(ellipse at 30% 0%, var(--bg-2), var(--bg)); display: grid; place-items: center; overflow: auto; }
+/* Topmost on purpose. It has to sit above .onboard (20), .search-overlay (60),
+   and .drop-overlay (9999): anything that can render over the gate is a way to
+   interact with the app without having accepted the terms. */
+.legal { position: fixed; inset: 0; z-index: 10000; background: radial-gradient(ellipse at 30% 0%, var(--bg-2), var(--bg)); display: grid; place-items: center; overflow: auto; }
 .legal-inner { width: min(760px, 92vw); padding: 34px 0; }
 .legal-head { text-align: center; margin-bottom: 20px; }
 /* .wordmark is a flex container, so text-align on the parent does not center it. */
