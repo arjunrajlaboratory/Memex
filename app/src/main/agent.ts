@@ -62,6 +62,7 @@ export class AgentSession {
   private onEvent: (evt: AgentEvent) => void;
   private requestPermission: (request: AgentPermissionRequest) => Promise<boolean>;
   private openInClaudeCode: (dirPath: string) => Promise<{ ok: boolean; message: string }>;
+  private claudeExecutable: string | undefined;
   private queue = new MessageQueue();
   private query: Query | null = null;
   running = false;
@@ -72,11 +73,15 @@ export class AgentSession {
     onEvent,
     requestPermission,
     openInClaudeCode,
+    claudeExecutable,
   }: {
     cwd: string;
     onEvent: (evt: AgentEvent) => void;
     requestPermission?: (request: AgentPermissionRequest) => Promise<boolean>;
     openInClaudeCode?: (dirPath: string) => Promise<{ ok: boolean; message: string }>;
+    // Absolute path to the bundled `claude` binary. The host supplies this in
+    // packaged builds, where the SDK's own resolution points into app.asar.
+    claudeExecutable?: string;
   }) {
     this.cwd = cwd;
     this.onEvent = onEvent || (() => {});
@@ -84,6 +89,7 @@ export class AgentSession {
     this.requestPermission = requestPermission || (async () => false);
     // Fail closed if a host does not supply a launcher.
     this.openInClaudeCode = openInClaudeCode || (async () => ({ ok: false, message: 'Claude Code hand-off is not available in this host.' }));
+    this.claudeExecutable = claudeExecutable;
   }
 
   async start(): Promise<void> {
@@ -126,6 +132,7 @@ export class AgentSession {
       prompt: this.queue,
       options: {
         cwd: this.cwd,
+        ...(this.claudeExecutable ? { pathToClaudeCodeExecutable: this.claudeExecutable } : {}),
         settingSources: ['user', 'project'],
         systemPrompt: { type: 'preset', preset: 'claude_code', append: APPEND_PROMPT },
         permissionMode: 'acceptEdits',

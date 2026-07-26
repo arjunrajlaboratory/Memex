@@ -20,6 +20,7 @@ import { VaultTransitionGate } from './vault-transition';
 import { classifyVaultChange } from './watch-policy';
 import { buildWikiIndex } from './wiki-index';
 import { SerialQueue } from './serial-queue';
+import { unpackedClaudeBinaryPath } from './claude-binary';
 
 const fsp = fs.promises;
 // Development runs inside the engine checkout; packaged builds carry the exact
@@ -544,6 +545,18 @@ function initAutoUpdater(): void {
   autoUpdater.checkForUpdatesAndNotify().catch(() => {});
 }
 
+// Returns undefined in dev, where the SDK resolves its own binary correctly.
+// See claude-binary.ts for why packaged builds need this.
+function bundledClaudeExecutable(): string | undefined {
+  if (!app.isPackaged) return undefined;
+  const unpacked = unpackedClaudeBinaryPath(process.resourcesPath, process.platform, process.arch);
+  if (fs.existsSync(unpacked)) return unpacked;
+  // Fall through to the SDK's own resolution rather than forcing a bad path:
+  // its error message names the platform it looked for, which is more useful.
+  console.error('bundled claude binary not found at', unpacked);
+  return undefined;
+}
+
 async function startSession(vault: string): Promise<void> {
   if (session) { try { await session.stop(); } catch (_) {} session = null; }
   let nextSession: AgentSession;
@@ -570,6 +583,7 @@ async function startSession(vault: string): Promise<void> {
     onEvent: (evt: AgentEvent) => { chain = chain.then(() => handleEvent(evt)).catch(() => {}); },
     requestPermission: (request) => requestAgentPermission(vault, nextSession, request),
     openInClaudeCode: (dirPath: string) => launchClaudeCode(dirPath, vault),
+    claudeExecutable: bundledClaudeExecutable(),
   });
   session = nextSession;
   try {
