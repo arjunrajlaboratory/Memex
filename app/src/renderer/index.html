@@ -162,6 +162,7 @@
                 <input id="f_path" placeholder="~/code/my-vault" required />
                 <button type="button" class="btn tiny" id="pickPath">…</button>
               </div>
+              <span class="field-hint">Doesn't exist yet? Memex creates it for you, including parent folders.</span>
             </label>
             <label class="pack-row">Packs
               <span class="pack-opts">
@@ -177,12 +178,53 @@
       <pre class="setup-log" id="setupLog" style="display:none"></pre>
       <div class="onboard-note">Requires the Memex engine and a logged-in Claude Code CLI. This window drives the same agent you'd get from the terminal.</div>
       <button class="approval-reset" id="resetApprovals" type="button">Reset tool approvals for this vault</button>
+      <button class="legal-link" id="legalReview" type="button">Terms of Use · Privacy</button>
       <div class="app-version" id="appVersion"></div>
+    </div>
+  </div>
+
+  <!-- ======================= TERMS GATE ======================= -->
+  <div class="legal" id="legalGate" style="display:none">
+    <div class="legal-inner">
+      <div class="legal-head">
+        <div class="wordmark big"><span class="mark">Memex</span></div>
+        <h2 class="legal-title">Before you start</h2>
+        <p class="legal-eff" id="legalEffective"></p>
+        <p class="legal-changed" id="legalChanged" style="display:none"></p>
+      </div>
+
+      <div class="legal-tabs">
+        <button class="legal-tab active" id="legalTabTerms" type="button">Terms of Use</button>
+        <button class="legal-tab" id="legalTabPrivacy" type="button">Privacy Notice</button>
+      </div>
+
+      <div class="legal-doc" id="legalDoc"></div>
+
+      <p class="legal-online">
+        Also published at
+        <a href="https://cytopixel.com/terms-of-service/">cytopixel.com/terms-of-service</a> and
+        <a href="https://cytopixel.com/privacy-policy/">cytopixel.com/privacy-policy</a>.
+      </p>
+
+      <div class="legal-foot">
+        <div id="legalConsent">
+          <label class="legal-agree">
+            <input type="checkbox" id="legalAgree" />
+            <span>I have read and agree to the Memex Terms of Use and Privacy Notice.</span>
+          </label>
+          <div class="legal-actions">
+            <button class="btn ghost" id="legalDecline" type="button">Decline and quit</button>
+            <button class="btn primary" id="legalAcceptBtn" type="button" disabled>Agree and continue</button>
+          </div>
+        </div>
+        <button class="btn ghost legal-close" id="legalClose" type="button" style="display:none">Close</button>
+      </div>
     </div>
   </div>
 
   <script src="../shared/area-batch.js"></script>
   <script src="../shared/vault-ui-state.js"></script>
   <script src="renderer.js"></script>
+  <script src="legal-gate.js"></script>
 </body>
 </html>
