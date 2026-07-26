@@ -323,22 +323,39 @@ practical options:
 Until then the Windows installer is unsigned and users see a SmartScreen
 "unrecognized app" warning — worth calling out in the release notes.
 
-## Auto-update (not wired up yet)
+## Auto-update
 
-The `build.publish` block already points at GitHub Releases, which is the feed
-format `electron-updater` expects (`latest-mac.yml` / `latest.yml` alongside the
-`zip` and `nsis` artifacts — this is why `zip` is a macOS target and not just
-`dmg`). Turning it on is a follow-up: add `electron-updater` and call
-`autoUpdater.checkForUpdatesAndNotify()` from the main process.
+Wired up as of 0.1.1. `electron-updater` reads the `latest-*.yml` feed published
+alongside the installers, downloads a newer version in the background, and
+applies it when the app next quits. `initAutoUpdater()` in `src/main/main.ts` is
+the whole of it.
 
-Two constraints worth knowing before that work starts:
+Behaviour worth knowing:
 
-- macOS auto-update only functions on **signed** builds — Squirrel.Mac silently
-  refuses unsigned or mismatched-identity updates. Signing is a prerequisite, not
-  a nice-to-have.
-- Because this repo is public, the updater needs no token. (A private repo would
-  have to embed one, which is why the usual workaround is a separate public
-  releases repo as the feed.)
+- **Packaged builds only.** Dev builds return early — electron-updater looks for
+  a `dev-app-update.yml` that doesn't exist and throws.
+- **Failures are silent by design.** A failed check is not something the user
+  asked for or can act on, so the error handler logs and stops. That handler is
+  also load-bearing: an unhandled `error` event from the updater would throw.
+- **Checks once, at startup.** Fine for an app that gets restarted; if Memex
+  turns out to be something people leave open for days, add a periodic check.
+- **macOS updates come from the `.zip`, not the `.dmg`** — Squirrel.Mac installs
+  from a zip, which is why `zip` is a macOS target.
+- **Signing is a hard prerequisite on macOS.** Squirrel.Mac silently refuses
+  updates that aren't signed with the same identity, so an unsigned build simply
+  never updates rather than failing loudly.
+- **Linux: AppImage only.** `.deb` installs are not supported by
+  electron-updater; those errors land in the handler above and are ignored.
+  Debian users update through their package manager.
+- **Windows works but is unsigned**, so the downloaded updater triggers the same
+  SmartScreen warning as the initial install until Windows signing is set up.
+- **No token is embedded.** The repo is public, so the updater reads the feed
+  anonymously. A private repo would have to ship a credential in the app, which
+  is why the usual workaround there is a separate public releases repo.
+
+A release can only update users who already have an updater-capable build:
+0.1.0 shipped without one, so those installs must be replaced by hand. Every
+release from 0.1.1 onward can carry users forward.
 
 ## Verifying a release before you publish it
 
