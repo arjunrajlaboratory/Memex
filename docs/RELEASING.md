@@ -439,6 +439,15 @@ Ignore it. That tool expects an `.app` bundle; its verdict on a disk image is
 meaningless. Mount the DMG and run it against the `.app` inside, where
 "App passed all pre-distribution checks" is the answer you want.
 
+**`Agent session failed to start: spawn ENOTDIR` in a packaged build (works in dev)**
+The agent SDK resolves its bundled `claude` binary relative to its own module
+path, which in a packaged app runs through `app.asar` — a file, not a directory.
+Electron redirects file *reads* into `app.asar.unpacked` but not the executable
+handed to `spawn`, so electron-builder unpacking the binary is not sufficient on
+its own. `src/main/claude-binary.ts` computes the unpacked path and the host
+passes it to the SDK as `pathToClaudeCodeExecutable`. Any future bundled
+subprocess needs the same treatment — unpacking alone will not fix it.
+
 **A notarization failure that reads like bad credentials**
 Check that the certificate and the API key belong to the *same* Apple team. A
 cross-team mismatch surfaces as an authentication error that never mentions
