@@ -25,6 +25,7 @@ import { classifyVaultChange } from './watch-policy';
 import { buildWikiIndex } from './wiki-index';
 import { SerialQueue } from './serial-queue';
 import { unpackedClaudeBinaryPath } from './claude-binary';
+import { acceptanceRecord, loadLegal, needsAcceptance, type LegalDocs, type TermsAcceptance } from './legal';
 
 const fsp = fs.promises;
 // Development runs inside the engine checkout; packaged builds carry the exact
@@ -34,8 +35,9 @@ const ENGINE_ROOT = app.isPackaged
   : path.resolve(__dirname, '..', '..', '..');
 const RENDERER_PATH = path.join(__dirname, '..', 'renderer', 'index.html');
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
+const LEGAL_DIR = path.join(__dirname, '..', 'legal');
 
-interface PersistedConfig extends ToolGrantState { recent?: string[]; last?: string; }
+interface PersistedConfig extends ToolGrantState { recent?: string[]; last?: string; terms?: TermsAcceptance; }
 
 // Node's fs does not expand a leading ~, but the user's placeholder path is ~/…,
 // so expand it wherever a user-supplied path enters the main process.
@@ -54,6 +56,18 @@ let watchers: fs.FSWatcher[] = [];
 let watcherRestartTimer: ReturnType<typeof setTimeout> | null = null;
 let shuttingDown = false;
 let mdRenderer: ((md: string) => string) | null = null;
+// `undefined` = not yet read, `null` = read and unusable. Cached because the
+// documents cannot change without a new build.
+let legalDocs: LegalDocs | null | undefined;
+function legal(): LegalDocs | null {
+  if (legalDocs === undefined) legalDocs = loadLegal(LEGAL_DIR);
+  return legalDocs;
+}
+// The gate is enforced here, not in the renderer: MEMEX_OPEN and any UI bug
+// would otherwise sail straight past a purely visual overlay.
+function termsAccepted(): boolean {
+  return !needsAcceptance(loadConfig().terms, legal()?.manifest || null);
+}
 // Files dropped on the Dock icon (mac) or taskbar/exe (Windows) before any vault is open;
 // flushed into the Inbox once vault:open succeeds.
 let pendingDrops: string[] = [];
@@ -157,7 +171,7 @@ function filterRows<T extends FilterableRow>(rows: T[], where: QueryWhere | null
 }
 
 // ---------- markdown -> safe html ----------
-async function renderMarkdown(md: string): Promise<string> {
+async function ensureMarkdownRenderer(): Promise<(md: string) => string> {
   if (!mdRenderer) {
     const { marked, Renderer } = await import('marked');
     const renderer = new Renderer();
@@ -165,7 +179,19 @@ async function renderMarkdown(md: string): Promise<string> {
     marked.setOptions({ breaks: true, gfm: true, renderer });
     mdRenderer = (s: string) => marked.parse(s) as string;
   }
-  return mdRenderer(await linkifyWikilinks(md || ''));
+  return mdRenderer;
+}
+
+async function renderMarkdown(md: string): Promise<string> {
+  const render = await ensureMarkdownRenderer();
+  return render(await linkifyWikilinks(md || ''));
+}
+
+// Legal documents contain no wikilinks and are shown before any vault is open,
+// so they skip the vault-scoped wikilink pass entirely.
+async function renderPlainMarkdown(md: string): Promise<string> {
+  const render = await ensureMarkdownRenderer();
+  return render(md || '');
 }
 
 // ---------- window ----------
@@ -699,6 +725,45 @@ function registerIpc(): void {
     return r.canceled ? null : r.filePaths[0];
   });
 
+  handle('legal:state', async (): Promise<LegalState> => {
+    const docs = legal();
+    if (!docs) {
+      // Fail closed and say so, rather than silently letting the user through.
+      return {
+        needsAcceptance: true, version: '', effective: '', summary: '',
+        terms: '<p>The Terms of Use could not be loaded, so Memex cannot continue. Please reinstall the app.</p>',
+        privacy: '<p>The Privacy Notice could not be loaded, so Memex cannot continue. Please reinstall the app.</p>',
+      };
+    }
+    const cfg = loadConfig();
+    return {
+      needsAcceptance: needsAcceptance(cfg.terms, docs.manifest),
+      version: docs.manifest.version,
+      effective: docs.manifest.effective,
+      // "What changed" is meaningless on a first run — only show it to someone
+      // who accepted an earlier version.
+      summary: cfg.terms ? docs.manifest.summary : '',
+      terms: await renderPlainMarkdown(docs.terms),
+      privacy: await renderPlainMarkdown(docs.privacy),
+    };
+  });
+
+  handle('legal:accept', async () => {
+    const docs = legal();
+    if (!docs) return { ok: false };
+    const cfg = loadConfig();
+    cfg.terms = acceptanceRecord(docs.manifest, app.getVersion(), new Date());
+    saveConfig(cfg);
+    // saveConfig swallows write errors, so re-read from disk and ask the same
+    // question the vault guards ask. Claiming success on an unwritable config
+    // would close the gate while vault:open and vault:create keep refusing,
+    // and review mode hides the consent controls — the user would be stuck
+    // until they restarted.
+    return { ok: termsAccepted() };
+  });
+
+  handle('app:quit', async () => { app.quit(); });
+
   handle('vault:detect', async (_e, p: string) => {
     const full = expandHome(p);
     return { path: full, isVault: vaultLib.isVault(full) };
@@ -740,11 +805,13 @@ function registerIpc(): void {
   });
 
   handle('vault:create', async (_e, opts: { target: string; answers: Record<string, string>; packs: string }) => {
+    if (!termsAccepted()) return { ok: false, code: -1, output: 'Please accept the Terms of Use to continue.' };
     const res = await createVault({ ...opts, target: expandHome(opts.target) });
     return res;
   });
 
   handle('vault:open', async (_e, p: string) => {
+    if (!termsAccepted()) return { ok: false, error: 'Please accept the Terms of Use to continue' };
     const full = expandHome(p);
     if (!vaultLib.isVault(full)) return { ok: false, error: 'Not a Memex vault' };
     let summary: VaultSummary;

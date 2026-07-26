@@ -132,6 +132,17 @@ interface OpenVaultResult {
   pendingDrop?: DropResult;
 }
 interface CreateVaultResult { ok: boolean; code: number; output: string; }
+
+// Terms/privacy state for the acceptance gate. `terms` and `privacy` are HTML
+// rendered by the main process, not markdown.
+interface LegalState {
+  needsAcceptance: boolean;
+  version: string;
+  effective: string;
+  summary: string;
+  terms: string;
+  privacy: string;
+}
 interface DropResult { ok: boolean; copied?: string[]; error?: string; }
 interface SendResult { ok: boolean; error?: string; }
 
@@ -149,6 +160,9 @@ interface MemexApi {
   currentVault(): Promise<VaultSummary | null>;
   resetToolApprovals(): Promise<{ ok: boolean }>;
   appVersion(): Promise<string>;
+  legalState(): Promise<LegalState>;
+  legalAccept(): Promise<{ ok: boolean }>;
+  legalQuit(): Promise<void>;
 
   data(kind: 'summary'): Promise<VaultSummary | null>;
   data(kind: 'briefing'): Promise<BriefingInfo | null>;
