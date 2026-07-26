@@ -22,6 +22,9 @@ const api: MemexApi = {
   currentVault: () => invoke('vault:current'),
   resetToolApprovals: () => invoke('permissions:reset'),
   appVersion: () => invoke('app:version'),
+  legalState: () => invoke('legal:state'),
+  legalAccept: () => invoke('legal:accept'),
+  legalQuit: () => invoke('app:quit'),
 
   // data panels
   data: (kind: DataKind) => invoke('data:get', kind),
