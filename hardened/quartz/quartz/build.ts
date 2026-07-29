@@ -120,7 +120,25 @@ async function startWatching(
     })
   }
 
-  const gitIgnoredMatcher = await isGitIgnored()
+  // Root the gitignore matcher at the CONTENT directory, not process.cwd().
+  // `site:serve` runs from <vault>/quartz with `-d ..`, so an unrooted
+  // isGitIgnored() reads quartz/.gitignore and never sees the VAULT-root
+  // .gitignore. Every path the vault ignores there then looks un-ignored to the
+  // watcher, so the dev server watches files it should skip — and if anything
+  // writes to one during a build (a log, a generated artifact), each write
+  // retriggers a rebuild whose own output retriggers the next one: an infinite
+  // rebuild loop that live-reloads the browser forever.
+  //
+  // `ignorePatterns` currently masks the known instance of this (it lists
+  // `outputs/**`, where the serve log goes), so this is a latent defect here
+  // rather than a live one. It stops being latent the moment a vault gitignores
+  // a written-to path that ignorePatterns does not also list. That is not
+  // hypothetical: it is exactly what happened in the source vault, whose config
+  // lacks the `outputs/**` entry — ~80 rebuilds/sec for 1.5 days.
+  //
+  // Paths handed to `ignored` below are content-root-relative, so the matcher
+  // must be too.
+  const gitIgnoredMatcher = await isGitIgnored({ cwd: path.resolve(argv.directory) })
   const buildData: BuildData = {
     ctx,
     mut,
