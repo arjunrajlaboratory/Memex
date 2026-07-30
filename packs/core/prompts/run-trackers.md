@@ -59,7 +59,14 @@ For each selected tracker, follow _workflows/run-tracker.md exactly:
    - miss_count: 0 if material, else miss_count + 1
    - If miss_count >= 5 after update, set status: needs_review.
 
-7. Append to log.md:
+7. Append ONE bullet to the tracker's # History (required by _schemas/tracker.md;
+   separate from the frontmatter above — last_digest is state, # History is provenance).
+   One line per run, INCLUDING material=false runs:
+   - <today> — <First run|Nth run|Run>. material=<bool>, <items_found> items
+     (<items_material> material). <headline, or "nothing material">.
+     <applied, or propose-only>. → [[Tracker Digest - <slug> - <today>]]
+
+8. Append to log.md:
    <datetime> — agent:tracker — <brief> — [[<subject>]] — material=<bool> items=<n>
 
 Honor forbidden_actions strictly throughout.

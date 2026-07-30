@@ -21,7 +21,10 @@
    - `last_digest: [[<digest note>]]`
    - `miss_count: <0 if material else miss_count + 1>`
    - If `miss_count >= 5`, set `status: needs_review` (the auditor will propose lengthening cadence).
-9. Append to `log.md`:
+9. **Append one bullet to the tracker's `# History`** — required by `_schemas/tracker.md`, and separate from the frontmatter above (`last_digest` is state; `# History` is provenance). One line per run, **including `material: false` runs**:
+   `- <today> — <First run|Nth run|Run>. material=<bool>, <items_found> items (<items_material> material). <headline, or "nothing material">. <applied or propose-only>. → [[<digest note>]].`
+   Omitting this is invisible — scheduling keeps working because `last_checked`/`next_check` are right — so the tracker under-reports its run count indefinitely and the `miss_count >= 5` cadence-retune signal loses its evidence.
+10. Append to `log.md`:
    `<datetime> — agent:tracker — brief — [[<subject>]] — material=<bool> items=<n>`
 
 ## Cadence arithmetic

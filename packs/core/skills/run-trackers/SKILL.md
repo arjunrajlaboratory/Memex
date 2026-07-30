@@ -120,7 +120,25 @@ Edit the tracker note:
 - If `miss_count >= 5` after the update, `status: needs_review` — let the auditor and the user decide whether to retune or retire.
 - `updated: <today>`
 
-### 2.7 Per-tracker log line
+### 2.7 Append to the tracker's `# History`
+
+**Do not skip this because 2.6 already set `last_digest`.** Those are different records: 2.6 stores *state* (the latest run), `# History` stores *provenance* (every run). `# History` is a required body section in `_schemas/tracker.md` — "bullet list of dated entries, each linking to a digest" — and it is the only place the tracker note itself shows its own arc.
+
+Append one bullet at the end of `# History`:
+
+```
+- <today> — <First run|Nth run|Run>. material=<true|false>, <items_found> items (<items_material> material). <one-sentence headline of what was material, or "nothing material">. <what was applied or proposed>. → [[Tracker Digest - <slug> - <today>]].
+```
+
+Rules:
+
+- **One line per run, always — including `material: false` runs.** A no-material run is a real observation, and it is what makes a climbing `miss_count` legible later. Silence in `# History` is indistinguishable from "never ran."
+- **Say what happened to `update_targets`:** "Applied a `# Changelog` line to [[X]]" when `auto_update_wiki: true`, or "Propose-only (`auto_update_wiki: false`) — nothing applied, no Tasks created" when false.
+- **One line.** The digest holds the detail; `# History` is the index.
+
+Why this step is called out explicitly: an omitted `# History` append is invisible — scheduling still works because `last_checked`/`next_check` are correct — so the tracker silently under-reports its run count for months. That destroys the evidence needed for the `miss_count >= 5` cadence-retune judgment, which is the one self-correcting mechanism trackers have.
+
+### 2.8 Per-tracker log line
 
 Append one line to `log.md`:
 
