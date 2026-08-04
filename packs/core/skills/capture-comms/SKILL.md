@@ -172,6 +172,36 @@ received. Received comms more often *open* loops (someone asks you for something
    - For a loop-relevant hit, `slack_read_thread` / `slack_read_channel` to read enough context
      to classify — then summarize; never paste the raw thread.
 
+   > ### ⚠️ Slack search is a DISCOVERY tool, not a COVERAGE tool
+   >
+   > The author-search above tells you *which conversations were active*. It is **not** evidence of
+   > what was said, and an absence in it is **never** evidence that nothing happened. Two
+   > independent defects make a search-only sweep silently under-report — both observed on a single
+   > run that returned **3 messages for a 22-hour window that actually held ~30**, and consequently
+   > reported a task's "tell the reporter" criterion as unmet when the message had in fact been sent:
+   >
+   > 1. **`after:YYYY-MM-DD` is EXCLUSIVE of the named date.** `after:<date>` returns only
+   >    `<date>+1` onward — it drops *all* of `<date>`. Verified by A/B on the same workspace:
+   >    `after:2026-08-03` → 3 hits; `after:2026-08-02` → 20+ hits spanning 08-03. **Always pass
+   >    `after:<window_start date − 1 day>`** and discard anything genuinely before `window_start`
+   >    yourself. Same trap for `before:`. Prefer the epoch `after:`/`before:` *parameters* (not the
+   >    query operators) when you need real precision.
+   > 2. **The result cap is per-request and one chatty thread saturates it.** `limit` maxes at 20.
+   >    On the corrective re-sweep, **17 of 20 results were a single DM debugging session** — every
+   >    other conversation was evicted. Short, high-value messages ("this should be fixed now!") are
+   >    exactly what gets pushed out. **Always paginate via `cursor` until exhausted**, and pass
+   >    `include_context: false` so context blocks don't eat the budget.
+   >
+   > **Required completeness step.** Treat the search only as a way to enumerate *conversation IDs*.
+   > Then, for **every distinct channel/DM ID it surfaced**, call `slack_read_channel` with explicit
+   > epoch `oldest`/`latest` bounds. `slack_read_channel` is exhaustive within its bounds; search is
+   > not. If a conversation's only activity fell on a date the buggy operator excluded, *no* amount
+   > of re-running the search will reveal it.
+   >
+   > **Non-negotiable:** never write "no DMs from anyone besides X", "→ quiet", or any other
+   > completeness claim on the strength of a search result alone. Those sentences require a
+   > `slack_read_channel` read.
+
 5. **Classify every surviving item into exactly one bucket:**
    - **Action item** — opens or closes a vault loop. Extract per the format above; do the
      best-effort match to an existing vault note (search `Ops/Tasks/`, `Atlas/People/`,
@@ -182,7 +212,19 @@ received. Received comms more often *open* loops (someone asks you for something
      correspondent, `create-task` for a concrete new action).
    - **Noise** — everything else. Count it; one line in `## Filtered as noise`.
 
-6. **Write the two files (idempotent).** `mkdir -p Inbox/comms/<date>` once. For each source: if
+6. **Write the two files (idempotent).** First, run the **completeness self-check** — answer all
+   four honestly; any "no" means go back before writing:
+   1. Did my author-search use `after:<window_start date − 1 day>` rather than the window's own
+      date? (`after:` is exclusive — see the Step 4 warning.) If not, re-run it → Step 4.
+   2. Did I **paginate** to exhaustion, and did I `slack_read_channel` every distinct conversation
+      ID the search surfaced? A capped single page is not coverage → Step 4.
+   3. Does the digest contain any completeness claim — "quiet", "no DMs besides X", "nothing from
+      Y" — resting on a search result rather than a `slack_read_channel` read? Verify it or delete it.
+   4. Sanity-check the magnitude: is the message count plausible for the window length and this
+      user's activity? **Three messages for a workday is a bug, not a quiet day.** Nothing inside a
+      truncated digest looks wrong — only the count does.
+
+   Then: `mkdir -p Inbox/comms/<date>` once. For each source: if
    the file already exists, **Read it first**; if it looks hand-edited or annotated below the
    generated sections, preserve that content and regenerate above a clear
    `<!-- regenerated <datetime> -->` marker rather than clobbering. Otherwise overwrite in place
