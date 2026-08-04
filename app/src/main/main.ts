@@ -558,8 +558,13 @@ async function launchClaudeCode(dirPath: string, vault: string): Promise<{ ok: b
 
 // ---------- auto-update ----------
 // Updates come from the `latest-*.yml` feed the release workflow publishes
-// alongside the installers on GitHub Releases. The update is downloaded in the
-// background and applied when the app next quits.
+// alongside the installers on GitHub Releases. The startup check downloads in
+// the background and applies on the next quit; `update:check` runs the same
+// flow on demand for the button in the vault switcher, which can then offer
+// "Restart to update" via `update:install`.
+let updateDownloadedVersion: string | null = null;
+let updateCheckInFlight: Promise<UpdateStatus> | null = null;
+
 function initAutoUpdater(): void {
   // Dev builds have no feed to read: electron-updater throws looking for
   // dev-app-update.yml. Only packaged apps can update.
@@ -567,11 +572,52 @@ function initAutoUpdater(): void {
   // A failed update check must stay invisible — it is not something the user
   // asked for or can act on. An unhandled 'error' event would otherwise be
   // thrown. Linux .deb installs land here too: electron-updater only supports
-  // AppImage on Linux.
+  // AppImage on Linux. (A *manual* check is different: the user asked, so
+  // checkForUpdatesNow reports its own errors through the invoke result.)
   autoUpdater.on('error', (err: Error) => {
     console.error('auto-update check failed:', err?.message || err);
   });
+  // Track what any check — startup or manual — has fetched, so the manual
+  // path can answer "ready" instantly instead of re-downloading, and the
+  // button lights up even when the silent startup check did the work.
+  autoUpdater.on('update-downloaded', (info) => {
+    updateDownloadedVersion = info?.version || '';
+    emit('update:status', { state: 'ready', version: updateDownloadedVersion });
+  });
+  autoUpdater.on('download-progress', (p) => {
+    emit('update:status', { state: 'downloading', percent: Math.round(p?.percent || 0) });
+  });
   autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+}
+
+// The user-initiated check. Resolves only once the answer is final: a found
+// update is downloaded before this returns, so a `ready` result always means
+// quitAndInstall can act on it. Interim progress goes out as update:status
+// pushes from the listeners above.
+async function checkForUpdatesNow(): Promise<UpdateStatus> {
+  if (!app.isPackaged) {
+    return { state: 'unsupported', message: 'Dev build — updates only apply to the packaged app.' };
+  }
+  if (updateDownloadedVersion !== null) return { state: 'ready', version: updateDownloadedVersion };
+  if (updateCheckInFlight) return updateCheckInFlight;
+  updateCheckInFlight = (async (): Promise<UpdateStatus> => {
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      if (!result || !result.isUpdateAvailable) return { state: 'uptodate', version: app.getVersion() };
+      const version = result.updateInfo?.version || '';
+      emit('update:status', { state: 'downloading', version });
+      if (result.downloadPromise) await result.downloadPromise;
+      updateDownloadedVersion = version;
+      return { state: 'ready', version };
+    } catch (err) {
+      // Reaches here for offline checks and for installs with no update
+      // channel (e.g. Linux .deb — electron-updater only supports AppImage).
+      return { state: 'error', message: String((err as Error)?.message || err) };
+    } finally {
+      updateCheckInFlight = null;
+    }
+  })();
+  return updateCheckInFlight;
 }
 
 // Returns undefined in dev, where the SDK resolves its own binary correctly.
@@ -796,6 +842,16 @@ function registerIpc(): void {
   // digging through Info.plist — which is also how you confirm an auto-update
   // actually applied.
   handle('app:version', async () => app.getVersion());
+
+  handle('update:check', async () => checkForUpdatesNow());
+
+  handle('update:install', async () => {
+    if (updateDownloadedVersion === null) return { ok: false };
+    // Quit after the invoke resolves, so the renderer isn't left awaiting a
+    // reply from a window that's already gone.
+    setImmediate(() => autoUpdater.quitAndInstall());
+    return { ok: true };
+  });
 
   handle('permissions:reset', async () => {
     const vault = activeVaultPath();

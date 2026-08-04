@@ -209,6 +209,58 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOnboard
 // (an update is applied on quit).
 void M.appVersion().then((v) => { $('appVersion').textContent = v ? `Memex ${v}` : ''; }).catch(() => {});
 
+// ---- app updates ----
+// The startup auto-check stays silent; this button is the loud path. The
+// check invoke resolves only once the answer is final (a found update is
+// downloaded first), with progress arriving as update:status pushes — which
+// also fire for the silent startup download, so the button flips to "Restart
+// to update" even when the user never clicked.
+const updateBtn = $('checkUpdates') as HTMLButtonElement;
+let updateReady = false;
+let updateResetTimer = 0;
+function showUpdateStatus(s: UpdateStatus): void {
+  window.clearTimeout(updateResetTimer);
+  if (s.state === 'downloading') {
+    updateBtn.disabled = true;
+    updateBtn.textContent = typeof s.percent === 'number'
+      ? `Downloading update… ${s.percent}%`
+      : `Downloading update${s.version ? ` ${s.version}` : ''}…`;
+  } else if (s.state === 'ready') {
+    updateReady = true;
+    updateBtn.disabled = false;
+    updateBtn.classList.add('ready');
+    updateBtn.textContent = s.version ? `Restart to update to ${s.version}` : 'Restart to update';
+  }
+}
+M.onUpdateStatus(showUpdateStatus);
+updateBtn.onclick = async () => {
+  if (updateReady) {
+    updateBtn.disabled = true;
+    updateBtn.textContent = 'Restarting…';
+    const r = await M.installUpdate().catch(() => ({ ok: false }));
+    // The app quits on success; reaching here with !ok means main lost the
+    // downloaded update state (shouldn't happen) — fall back to a fresh check.
+    if (!r.ok) { updateReady = false; updateBtn.classList.remove('ready'); updateBtn.disabled = false; updateBtn.textContent = 'Check for updates'; }
+    return;
+  }
+  updateBtn.disabled = true;
+  updateBtn.title = '';
+  updateBtn.textContent = 'Checking for updates…';
+  const s: UpdateStatus = await M.checkForUpdates()
+    .catch((e) => ({ state: 'error' as const, message: String(e) }));
+  showUpdateStatus(s);
+  if (s.state === 'ready' || s.state === 'downloading') return;
+  updateBtn.disabled = false;
+  if (s.state === 'uptodate') {
+    updateBtn.textContent = `Up to date${s.version ? ` — Memex ${s.version}` : ''}`;
+  } else {
+    // unsupported / error: keep the button short, park the detail in a tooltip.
+    updateBtn.textContent = s.state === 'unsupported' ? (s.message || 'Updates unavailable in this build') : 'Couldn’t check for updates';
+    if (s.message) updateBtn.title = s.message;
+  }
+  updateResetTimer = window.setTimeout(() => { if (!updateReady) updateBtn.textContent = 'Check for updates'; }, 6000);
+};
+
 function applySummary(s: VaultSummary): void {
   const c = s.counts;
   $('cntTasks').textContent = c.openTasks ? String(c.openTasks) : '';
