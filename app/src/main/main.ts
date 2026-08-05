@@ -580,8 +580,13 @@ function initAutoUpdater(): void {
   // thrown. Linux .deb installs land here too: electron-updater only supports
   // AppImage on Linux. (A *manual* check is different: the user asked, so
   // checkForUpdatesNow reports its own errors through the invoke result.)
+  // The push below is not a visibility change: the renderer ignores it unless
+  // the button is already showing download progress — its one job is to
+  // un-stick a button that a failed background download would otherwise leave
+  // disabled at "Downloading…" forever.
   autoUpdater.on('error', (err: Error) => {
     console.error('auto-update check failed:', err?.message || err);
+    emit('update:status', { state: 'error', message: String(err?.message || err) });
   });
   // Track what any check — startup or manual — has fetched, so the manual
   // path can answer "ready" instantly instead of re-downloading, and the

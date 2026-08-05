@@ -91,8 +91,11 @@ async function refreshVaultUpdate(): Promise<void> {
   row.style.display = 'none';
   btn.style.display = 'none';
   if (!state.vault) return;
+  const epoch = vaultEpoch;
   const s = await M.checkVaultUpdate().catch((): VaultUpdateStatus => ({ state: 'error' }));
-  if (!state.vault) return;
+  // A vault switch while the check was in flight would otherwise pin the old
+  // vault's versions (and upgrade prompt) on the new vault's switcher.
+  if (!state.vault || epoch !== vaultEpoch) return;
   if (s.state === 'current') {
     text.textContent = `Vault engine ${s.vaultVersion} — up to date`;
     row.style.display = 'flex';
@@ -257,19 +260,32 @@ void M.appVersion().then((v) => { $('appVersion').textContent = v ? `Memex ${v}`
 // to update" even when the user never clicked.
 const updateBtn = $('checkUpdates') as HTMLButtonElement;
 let updateReady = false;
+let updateDownloading = false;
 let updateResetTimer = 0;
 function showUpdateStatus(s: UpdateStatus): void {
   window.clearTimeout(updateResetTimer);
   if (s.state === 'downloading') {
+    updateDownloading = true;
     updateBtn.disabled = true;
     updateBtn.textContent = typeof s.percent === 'number'
       ? `Downloading update… ${s.percent}%`
       : `Downloading update${s.version ? ` ${s.version}` : ''}…`;
   } else if (s.state === 'ready') {
+    updateDownloading = false;
     updateReady = true;
     updateBtn.disabled = false;
+    updateBtn.title = '';
     updateBtn.classList.add('ready');
     updateBtn.textContent = s.version ? `Restart to update to ${s.version}` : 'Restart to update';
+  } else if (s.state === 'error' && updateDownloading && !updateReady) {
+    // A background download died after its progress pushes disabled the
+    // button; re-enable it. Errors outside a visible download stay silent —
+    // the user didn't ask, and the manual path reports through its invoke.
+    updateDownloading = false;
+    updateBtn.disabled = false;
+    updateBtn.textContent = 'Couldn’t download the update';
+    if (s.message) updateBtn.title = s.message;
+    updateResetTimer = window.setTimeout(() => { if (!updateReady) updateBtn.textContent = 'Check for app updates'; }, 6000);
   }
 }
 M.onUpdateStatus(showUpdateStatus);
@@ -290,12 +306,13 @@ updateBtn.onclick = async () => {
     .catch((e) => ({ state: 'error' as const, message: String(e) }));
   showUpdateStatus(s);
   if (s.state === 'ready' || s.state === 'downloading') return;
+  updateDownloading = false;
   updateBtn.disabled = false;
   if (s.state === 'uptodate') {
     updateBtn.textContent = `Up to date${s.version ? ` — Memex ${s.version}` : ''}`;
   } else {
     // unsupported / error: keep the button short, park the detail in a tooltip.
-    updateBtn.textContent = s.state === 'unsupported' ? (s.message || 'Updates unavailable in this build') : 'Couldn’t check for updates';
+    updateBtn.textContent = s.state === 'unsupported' ? (s.message || 'Updates unavailable in this build') : 'Couldn’t check for app updates';
     if (s.message) updateBtn.title = s.message;
   }
   updateResetTimer = window.setTimeout(() => { if (!updateReady) updateBtn.textContent = 'Check for app updates'; }, 6000);
