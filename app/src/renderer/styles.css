@@ -384,6 +384,9 @@ body {
   background: #000; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; max-height: 220px; overflow: auto; white-space: pre-wrap;
 }
 .onboard-note { text-align: center; font-size: 12px; color: var(--ink-faint); margin-top: 28px; }
+/* vault engine update row — shown when the open vault trails the app's bundled engine */
+.vault-update { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 24px; font: 12px var(--font-ui); color: var(--ink-dim); }
+.vault-update .btn.tiny { width: auto; }
 .approval-reset { display: none; margin: 9px auto 0; padding: 2px 4px; border: 0; background: transparent; color: var(--ink-faint); font: 11px var(--font-ui); text-decoration: underline; cursor: pointer; }
 .approval-reset:hover { color: var(--ink-dim); }
 .approval-reset:disabled { cursor: default; opacity: .7; }

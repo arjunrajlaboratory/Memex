@@ -156,6 +156,18 @@ interface UpdateStatus {
   message?: string;   // unsupported/error only
 }
 
+// Vault-engine update state — distinct from UpdateStatus (the app updater).
+// The app bundles an engine tree; each vault records the engine version it
+// was baked from. 'available' means the bundled engine is newer than the
+// vault's, and the upgrade runs as the vault's /update skill through the agent.
+interface VaultUpdateStatus {
+  state: 'no-vault' | 'untracked' | 'current' | 'available' | 'error';
+  vaultVersion?: string;
+  engineVersion?: string;
+  enginePath?: string;  // set when 'available': named in the /update prompt
+  message?: string;
+}
+
 type DataKind = 'summary' | 'tasks' | 'projects' | 'ideas' | 'people' | 'sources'
   | 'inbox' | 'outputs' | 'briefing';
 
@@ -172,6 +184,7 @@ interface MemexApi {
   appVersion(): Promise<string>;
   checkForUpdates(): Promise<UpdateStatus>;
   installUpdate(): Promise<{ ok: boolean }>;
+  checkVaultUpdate(): Promise<VaultUpdateStatus>;
   legalState(): Promise<LegalState>;
   legalAccept(): Promise<{ ok: boolean }>;
   legalQuit(): Promise<void>;

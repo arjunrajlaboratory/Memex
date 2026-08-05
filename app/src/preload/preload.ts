@@ -24,6 +24,7 @@ const api: MemexApi = {
   appVersion: () => invoke('app:version'),
   checkForUpdates: () => invoke('update:check'),
   installUpdate: () => invoke('update:install'),
+  checkVaultUpdate: () => invoke('vault:updateCheck'),
   legalState: () => invoke('legal:state'),
   legalAccept: () => invoke('legal:accept'),
   legalQuit: () => invoke('app:quit'),

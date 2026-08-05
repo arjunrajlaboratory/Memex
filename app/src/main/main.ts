@@ -34,6 +34,12 @@ const ENGINE_ROOT = app.isPackaged
   ? path.join(process.resourcesPath, 'engine')
   : path.resolve(__dirname, '..', '..', '..');
 const RENDERER_PATH = path.join(__dirname, '..', 'renderer', 'index.html');
+// The vault's /update skill resolves its engine via MEMEX_ENGINE_DIR when the
+// user doesn't name one. The agent child process inherits this environment, so
+// exporting the bundled engine here makes a typed "update memex" work without
+// the user knowing where the app keeps its engine. A pre-set value wins — a
+// developer pointing at a different engine tree knows better than we do.
+if (!process.env.MEMEX_ENGINE_DIR) process.env.MEMEX_ENGINE_DIR = ENGINE_ROOT;
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 const LEGAL_DIR = path.join(__dirname, '..', 'legal');
 
@@ -620,6 +626,54 @@ async function checkForUpdatesNow(): Promise<UpdateStatus> {
   return updateCheckInFlight;
 }
 
+// ---------- vault engine updates ----------
+// Distinct from the app auto-update above. The app bundles an engine tree
+// (ENGINE_ROOT), and each vault records the engine version it was baked from
+// in .memex/manifest.json — so an app update routinely leaves an open vault
+// trailing the engine it ships. This check surfaces that gap. The upgrade
+// itself is NOT a blind script run: it's the vault's own /update skill driven
+// through the agent, which performs the deterministic memex-update prepare
+// step and then resolves the judgement calls (3-way merges, collisions,
+// renames) with the user in chat.
+function checkVaultUpdate(): VaultUpdateStatus {
+  const vault = activeVaultPath();
+  if (!vault) return { state: 'no-vault' };
+  let engineVersion = '';
+  try { engineVersion = fs.readFileSync(path.join(ENGINE_ROOT, 'VERSION'), 'utf8').trim(); } catch (_) {}
+  if (!engineVersion) return { state: 'error', message: 'The bundled engine has no readable VERSION file.' };
+  let vaultVersion = '';
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(vault, '.memex', 'manifest.json'), 'utf8')) as { engine_version?: unknown };
+    if (typeof manifest.engine_version === 'string') vaultVersion = manifest.engine_version.trim();
+  } catch (_) {
+    // Missing/unreadable manifest: the vault predates update tracking; the
+    // normal update path would refuse it, so don't offer a button that fails.
+    return { state: 'untracked', engineVersion };
+  }
+  if (!vaultVersion) return { state: 'untracked', engineVersion };
+  return {
+    state: compareDottedVersions(engineVersion, vaultVersion) > 0 ? 'available' : 'current',
+    vaultVersion,
+    engineVersion,
+    enginePath: ENGINE_ROOT,
+  };
+}
+
+// Plain dotted-integer compare (engine VERSION is n.n.n). Anything unparseable
+// falls back to string equality — an exotic version only ever reads "current",
+// never a spurious upgrade offer.
+function compareDottedVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10));
+  const pb = b.split('.').map((n) => parseInt(n, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (Number.isNaN(x) || Number.isNaN(y)) return 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
 // Returns undefined in dev, where the SDK resolves its own binary correctly.
 // See claude-binary.ts for why packaged builds need this.
 function bundledClaudeExecutable(): string | undefined {
@@ -844,6 +898,8 @@ function registerIpc(): void {
   handle('app:version', async () => app.getVersion());
 
   handle('update:check', async () => checkForUpdatesNow());
+
+  handle('vault:updateCheck', async () => checkVaultUpdate());
 
   handle('update:install', async () => {
     if (updateDownloadedVersion === null) return { ok: false };

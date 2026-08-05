@@ -59,6 +59,7 @@ let deferredIconDrops: Array<{ copied: string[]; error?: string }> = [];
 // ============================================================ ONBOARDING
 async function initOnboarding(): Promise<void> {
   $('resetApprovals').style.display = state.vault ? 'block' : 'none';
+  void refreshVaultUpdate();
   const { recent } = await M.recentVaults();
   const list = $('recentList');
   list.innerHTML = '';
@@ -74,6 +75,40 @@ async function initOnboarding(): Promise<void> {
     r.onclick = () => openVault(p);
     list.appendChild(r);
   }
+}
+
+// ---- vault engine updates ----
+// Not the app updater (that's the button further down): the app ships an
+// engine tree, and the open vault records the engine version it was last
+// baked from. When the app — and so its bundled engine — moves ahead, the
+// vault needs an /update run to adopt it. That run is driven through the
+// agent, which handles merges and asks on conflicts, so the upgrade button
+// hands the chat a prompt rather than running a script blind.
+async function refreshVaultUpdate(): Promise<void> {
+  const row = $('vaultUpdate');
+  const btn = $('vaultUpdateBtn') as HTMLButtonElement;
+  const text = $('vaultUpdateText');
+  row.style.display = 'none';
+  btn.style.display = 'none';
+  if (!state.vault) return;
+  const s = await M.checkVaultUpdate().catch((): VaultUpdateStatus => ({ state: 'error' }));
+  if (!state.vault) return;
+  if (s.state === 'current') {
+    text.textContent = `Vault engine ${s.vaultVersion} — up to date`;
+    row.style.display = 'flex';
+  } else if (s.state === 'available') {
+    text.textContent = `Vault engine ${s.vaultVersion} — engine ${s.engineVersion} available`;
+    btn.style.display = '';
+    row.style.display = 'flex';
+    btn.onclick = () => {
+      closeOnboard();
+      void sendMessage(`Run the /update skill to update this vault from the newer Memex engine at ${s.enginePath} (the vault is on engine ${s.vaultVersion}; the engine is ${s.engineVersion}). Walk me through anything that needs a decision.`);
+    };
+  } else if (s.state === 'untracked') {
+    text.textContent = 'This vault predates engine-update tracking — ask the agent about one-time reconciliation.';
+    row.style.display = 'flex';
+  }
+  // 'error' / 'no-vault': leave the row hidden.
 }
 
 $('browseVault').onclick = async () => {
@@ -145,6 +180,11 @@ async function openVault(p: string): Promise<void> {
     switchTab('dashboard');
     if (res.warning) flashChat('⚠ ' + res.warning);
     if (res.pendingDrop) reportIconDrop(res.pendingDrop.copied || [], res.pendingDrop.error);
+    // Surface a stale vault engine without making the user open the switcher.
+    void M.checkVaultUpdate().then((s) => {
+      if (epoch !== vaultEpoch || s.state !== 'available') return;
+      flashChat(`⚙ This vault runs engine ${s.vaultVersion}; the app bundles ${s.engineVersion}. Open the vault menu (top left) to upgrade, or just ask me to update the vault.`);
+    }).catch(() => {});
   } catch (error) {
     if (request === vaultOpenEpochs.request) flash('Could not open vault: ' + String((error as Error)?.message || error));
   } finally {
@@ -240,12 +280,12 @@ updateBtn.onclick = async () => {
     const r = await M.installUpdate().catch(() => ({ ok: false }));
     // The app quits on success; reaching here with !ok means main lost the
     // downloaded update state (shouldn't happen) — fall back to a fresh check.
-    if (!r.ok) { updateReady = false; updateBtn.classList.remove('ready'); updateBtn.disabled = false; updateBtn.textContent = 'Check for updates'; }
+    if (!r.ok) { updateReady = false; updateBtn.classList.remove('ready'); updateBtn.disabled = false; updateBtn.textContent = 'Check for app updates'; }
     return;
   }
   updateBtn.disabled = true;
   updateBtn.title = '';
-  updateBtn.textContent = 'Checking for updates…';
+  updateBtn.textContent = 'Checking for app updates…';
   const s: UpdateStatus = await M.checkForUpdates()
     .catch((e) => ({ state: 'error' as const, message: String(e) }));
   showUpdateStatus(s);
@@ -258,7 +298,7 @@ updateBtn.onclick = async () => {
     updateBtn.textContent = s.state === 'unsupported' ? (s.message || 'Updates unavailable in this build') : 'Couldn’t check for updates';
     if (s.message) updateBtn.title = s.message;
   }
-  updateResetTimer = window.setTimeout(() => { if (!updateReady) updateBtn.textContent = 'Check for updates'; }, 6000);
+  updateResetTimer = window.setTimeout(() => { if (!updateReady) updateBtn.textContent = 'Check for app updates'; }, 6000);
 };
 
 function applySummary(s: VaultSummary): void {

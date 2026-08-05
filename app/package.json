@@ -54,7 +54,8 @@
         "to": "engine/tools",
         "filter": [
           "memex_init.py",
-          "memex_bake.py"
+          "memex_bake.py",
+          "memex_update.py"
         ]
       },
       {
