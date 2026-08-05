@@ -31,6 +31,11 @@ Resolve the command in this order:
 3. Else if `memex-update` is on `PATH`: `memex-update --vault <vault> --non-interactive`
 4. Else ask for the engine directory.
 
+Wherever a command in this skill says `python3` (prepare here, finalize and abort below), use
+the first interpreter that actually resolves: on Windows try `py -3`, then `python`, then
+`python3`; elsewhere try `python3`, then `python`. Desktop installs in particular may have
+Python only as `py`/`python` — the same fallback order the initializer uses.
+
 The tool will:
 
 - refuse a dirty git worktree when git mode is enabled,
