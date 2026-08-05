@@ -34,6 +34,12 @@ const ENGINE_ROOT = app.isPackaged
   ? path.join(process.resourcesPath, 'engine')
   : path.resolve(__dirname, '..', '..', '..');
 const RENDERER_PATH = path.join(__dirname, '..', 'renderer', 'index.html');
+// The vault's /update skill resolves its engine via MEMEX_ENGINE_DIR when the
+// user doesn't name one. The agent child process inherits this environment, so
+// exporting the bundled engine here makes a typed "update memex" work without
+// the user knowing where the app keeps its engine. A pre-set value wins — a
+// developer pointing at a different engine tree knows better than we do.
+if (!process.env.MEMEX_ENGINE_DIR) process.env.MEMEX_ENGINE_DIR = ENGINE_ROOT;
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 const LEGAL_DIR = path.join(__dirname, '..', 'legal');
 
@@ -558,8 +564,13 @@ async function launchClaudeCode(dirPath: string, vault: string): Promise<{ ok: b
 
 // ---------- auto-update ----------
 // Updates come from the `latest-*.yml` feed the release workflow publishes
-// alongside the installers on GitHub Releases. The update is downloaded in the
-// background and applied when the app next quits.
+// alongside the installers on GitHub Releases. The startup check downloads in
+// the background and applies on the next quit; `update:check` runs the same
+// flow on demand for the button in the vault switcher, which can then offer
+// "Restart to update" via `update:install`.
+let updateDownloadedVersion: string | null = null;
+let updateCheckInFlight: Promise<UpdateStatus> | null = null;
+
 function initAutoUpdater(): void {
   // Dev builds have no feed to read: electron-updater throws looking for
   // dev-app-update.yml. Only packaged apps can update.
@@ -567,11 +578,105 @@ function initAutoUpdater(): void {
   // A failed update check must stay invisible — it is not something the user
   // asked for or can act on. An unhandled 'error' event would otherwise be
   // thrown. Linux .deb installs land here too: electron-updater only supports
-  // AppImage on Linux.
+  // AppImage on Linux. (A *manual* check is different: the user asked, so
+  // checkForUpdatesNow reports its own errors through the invoke result.)
+  // The push below is not a visibility change: the renderer ignores it unless
+  // the button is already showing download progress — its one job is to
+  // un-stick a button that a failed background download would otherwise leave
+  // disabled at "Downloading…" forever.
   autoUpdater.on('error', (err: Error) => {
     console.error('auto-update check failed:', err?.message || err);
+    emit('update:status', { state: 'error', message: String(err?.message || err) });
+  });
+  // Track what any check — startup or manual — has fetched, so the manual
+  // path can answer "ready" instantly instead of re-downloading, and the
+  // button lights up even when the silent startup check did the work.
+  autoUpdater.on('update-downloaded', (info) => {
+    updateDownloadedVersion = info?.version || '';
+    emit('update:status', { state: 'ready', version: updateDownloadedVersion });
+  });
+  autoUpdater.on('download-progress', (p) => {
+    emit('update:status', { state: 'downloading', percent: Math.round(p?.percent || 0) });
   });
   autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+}
+
+// The user-initiated check. Resolves only once the answer is final: a found
+// update is downloaded before this returns, so a `ready` result always means
+// quitAndInstall can act on it. Interim progress goes out as update:status
+// pushes from the listeners above.
+async function checkForUpdatesNow(): Promise<UpdateStatus> {
+  if (!app.isPackaged) {
+    return { state: 'unsupported', message: 'Dev build — updates only apply to the packaged app.' };
+  }
+  if (updateDownloadedVersion !== null) return { state: 'ready', version: updateDownloadedVersion };
+  if (updateCheckInFlight) return updateCheckInFlight;
+  updateCheckInFlight = (async (): Promise<UpdateStatus> => {
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      if (!result || !result.isUpdateAvailable) return { state: 'uptodate', version: app.getVersion() };
+      const version = result.updateInfo?.version || '';
+      emit('update:status', { state: 'downloading', version });
+      if (result.downloadPromise) await result.downloadPromise;
+      updateDownloadedVersion = version;
+      return { state: 'ready', version };
+    } catch (err) {
+      // Reaches here for offline checks and for installs with no update
+      // channel (e.g. Linux .deb — electron-updater only supports AppImage).
+      return { state: 'error', message: String((err as Error)?.message || err) };
+    } finally {
+      updateCheckInFlight = null;
+    }
+  })();
+  return updateCheckInFlight;
+}
+
+// ---------- vault engine updates ----------
+// Distinct from the app auto-update above. The app bundles an engine tree
+// (ENGINE_ROOT), and each vault records the engine version it was baked from
+// in .memex/manifest.json — so an app update routinely leaves an open vault
+// trailing the engine it ships. This check surfaces that gap. The upgrade
+// itself is NOT a blind script run: it's the vault's own /update skill driven
+// through the agent, which performs the deterministic memex-update prepare
+// step and then resolves the judgement calls (3-way merges, collisions,
+// renames) with the user in chat.
+function checkVaultUpdate(): VaultUpdateStatus {
+  const vault = activeVaultPath();
+  if (!vault) return { state: 'no-vault' };
+  let engineVersion = '';
+  try { engineVersion = fs.readFileSync(path.join(ENGINE_ROOT, 'VERSION'), 'utf8').trim(); } catch (_) {}
+  if (!engineVersion) return { state: 'error', message: 'The bundled engine has no readable VERSION file.' };
+  let vaultVersion = '';
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(vault, '.memex', 'manifest.json'), 'utf8')) as { engine_version?: unknown };
+    if (typeof manifest.engine_version === 'string') vaultVersion = manifest.engine_version.trim();
+  } catch (_) {
+    // Missing/unreadable manifest: the vault predates update tracking; the
+    // normal update path would refuse it, so don't offer a button that fails.
+    return { state: 'untracked', engineVersion };
+  }
+  if (!vaultVersion) return { state: 'untracked', engineVersion };
+  return {
+    state: compareDottedVersions(engineVersion, vaultVersion) > 0 ? 'available' : 'current',
+    vaultVersion,
+    engineVersion,
+    enginePath: ENGINE_ROOT,
+  };
+}
+
+// Plain dotted-integer compare (engine VERSION is n.n.n). Anything unparseable
+// falls back to string equality — an exotic version only ever reads "current",
+// never a spurious upgrade offer.
+function compareDottedVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10));
+  const pb = b.split('.').map((n) => parseInt(n, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (Number.isNaN(x) || Number.isNaN(y)) return 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
 }
 
 // Returns undefined in dev, where the SDK resolves its own binary correctly.
@@ -796,6 +901,18 @@ function registerIpc(): void {
   // digging through Info.plist — which is also how you confirm an auto-update
   // actually applied.
   handle('app:version', async () => app.getVersion());
+
+  handle('update:check', async () => checkForUpdatesNow());
+
+  handle('vault:updateCheck', async () => checkVaultUpdate());
+
+  handle('update:install', async () => {
+    if (updateDownloadedVersion === null) return { ok: false };
+    // Quit after the invoke resolves, so the renderer isn't left awaiting a
+    // reply from a window that's already gone.
+    setImmediate(() => autoUpdater.quitAndInstall());
+    return { ok: true };
+  });
 
   handle('permissions:reset', async () => {
     const vault = activeVaultPath();

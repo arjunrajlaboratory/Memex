@@ -146,6 +146,28 @@ interface LegalState {
 interface DropResult { ok: boolean; copied?: string[]; error?: string; }
 interface SendResult { ok: boolean; error?: string; }
 
+// App-update state for the vault switcher's "Check for updates" button. The
+// update:check invoke resolves with a *final* state (a found update downloads
+// before it returns); `downloading` only ever arrives as an update:status push.
+interface UpdateStatus {
+  state: 'unsupported' | 'uptodate' | 'downloading' | 'ready' | 'error';
+  version?: string;   // update's version for downloading/ready; the running version for uptodate
+  percent?: number;   // downloading pushes only
+  message?: string;   // unsupported/error only
+}
+
+// Vault-engine update state — distinct from UpdateStatus (the app updater).
+// The app bundles an engine tree; each vault records the engine version it
+// was baked from. 'available' means the bundled engine is newer than the
+// vault's, and the upgrade runs as the vault's /update skill through the agent.
+interface VaultUpdateStatus {
+  state: 'no-vault' | 'untracked' | 'current' | 'available' | 'error';
+  vaultVersion?: string;
+  engineVersion?: string;
+  enginePath?: string;  // set when 'available': named in the /update prompt
+  message?: string;
+}
+
 type DataKind = 'summary' | 'tasks' | 'projects' | 'ideas' | 'people' | 'sources'
   | 'inbox' | 'outputs' | 'briefing';
 
@@ -160,6 +182,9 @@ interface MemexApi {
   currentVault(): Promise<VaultSummary | null>;
   resetToolApprovals(): Promise<{ ok: boolean }>;
   appVersion(): Promise<string>;
+  checkForUpdates(): Promise<UpdateStatus>;
+  installUpdate(): Promise<{ ok: boolean }>;
+  checkVaultUpdate(): Promise<VaultUpdateStatus>;
   legalState(): Promise<LegalState>;
   legalAccept(): Promise<{ ok: boolean }>;
   legalQuit(): Promise<void>;
@@ -188,6 +213,7 @@ interface MemexApi {
   onFsChanged(cb: (evt: { area: string }) => void): () => void;
   onSetupProgress(cb: (evt: { line: string }) => void): () => void;
   onIconDrop(cb: (evt: { copied: string[]; error?: string }) => void): () => void;
+  onUpdateStatus(cb: (s: UpdateStatus) => void): () => void;
 }
 
 // Electron's <webview> from the renderer's point of view (just what we use).
