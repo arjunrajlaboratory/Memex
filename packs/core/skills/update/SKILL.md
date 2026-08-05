@@ -26,15 +26,19 @@ If `.memex/manifest.json` is missing, stop. This vault predates update tracking;
 
 Resolve the command in this order:
 
-1. If the user gave an engine path: `python3 <engine>/tools/memex_update.py --eng <engine> --vault <vault> --non-interactive`
-2. Else if `MEMEX_ENGINE_DIR` is set: `python3 "$MEMEX_ENGINE_DIR/tools/memex_update.py" --eng "$MEMEX_ENGINE_DIR" --vault <vault> --non-interactive`
-3. Else if `memex-update` is on `PATH`: `memex-update --vault <vault> --non-interactive`
+1. If the user gave an engine path: `python3 "<engine>/tools/memex_update.py" --eng "<engine>" --vault "<vault>" --non-interactive`
+2. Else if `MEMEX_ENGINE_DIR` is set: `python3 "$MEMEX_ENGINE_DIR/tools/memex_update.py" --eng "$MEMEX_ENGINE_DIR" --vault "<vault>" --non-interactive`
+3. Else if `memex-update` is on `PATH`: `memex-update --vault "<vault>" --non-interactive`
 4. Else ask for the engine directory.
 
 Wherever a command in this skill says `python3` (prepare here, finalize and abort below), use
 the first interpreter that actually resolves: on Windows try `py -3`, then `python`, then
 `python3`; elsewhere try `python3`, then `python`. Desktop installs in particular may have
 Python only as `py`/`python` — the same fallback order the initializer uses.
+
+Always quote the substituted `<engine>`, `<vault>`, and `<plan.json>` paths, exactly as the
+templates show — desktop installs commonly live under paths with spaces (`C:\Program Files\…`,
+`~/Library/Application Support/…`), and an unquoted path splits the command.
 
 The tool will:
 
@@ -128,7 +132,7 @@ If a resolution created or removed any auxiliary path outside `path` / `new_path
 After all pending entries are resolved, run:
 
 ```bash
-python3 <engine>/tools/memex_update.py finalize --eng <engine> --vault <vault> --plan <plan.json>
+python3 "<engine>/tools/memex_update.py" finalize --eng "<engine>" --vault "<vault>" --plan "<plan.json>"
 ```
 
 This refreshes `.memex/manifest.json` and `.memex/baseline/`. When git mode is enabled, it commits the update branch.
@@ -138,7 +142,7 @@ This refreshes `.memex/manifest.json` and `.memex/baseline/`. When git mode is e
 If the user decides to abandon the update mid-merge (git mode enabled), return the vault to its pre-update state:
 
 ```bash
-python3 <engine>/tools/memex_update.py abort --vault <vault> --plan <plan.json>
+python3 "<engine>/tools/memex_update.py" abort --vault "<vault>" --plan "<plan.json>"
 ```
 
 This reverts the deterministic-safe changes (scoped to the plan's paths, so unrelated work is untouched), removes the staging work dir, and switches back to the branch the update started from — deleting the empty `engine-update-<version>` branch.
