@@ -27,7 +27,9 @@ If `.memex/manifest.json` is missing, stop. This vault predates update tracking;
 Resolve the command in this order:
 
 1. If the user gave an engine path: `python3 "<engine>/tools/memex_update.py" --eng "<engine>" --vault "<vault>" --non-interactive`
-2. Else if `MEMEX_ENGINE_DIR` is set: `python3 "$MEMEX_ENGINE_DIR/tools/memex_update.py" --eng "$MEMEX_ENGINE_DIR" --vault "<vault>" --non-interactive`
+2. Else if `MEMEX_ENGINE_DIR` is set: read its value and substitute it as `<engine>` in the
+   option-1 command. Substitute the real path — do not rely on `$MEMEX_ENGINE_DIR` shell
+   expansion, which cmd/PowerShell on Windows does not perform.
 3. Else if `memex-update` is on `PATH`: `memex-update --vault "<vault>" --non-interactive`
 4. Else ask for the engine directory.
 
