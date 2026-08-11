@@ -94,3 +94,14 @@ protections while leaving the engine contract tests behind.
 | `packs/core/prompts/run-trackers.md` | `Agents/Prompts/run-trackers.md` | Keep the pasteable prompt aligned with the canonical history contract. |
 | `packs/core/schemas/tracker.md` | `_schemas/tracker.md` | Require a digest-linked history entry after every run. |
 | `packs/pi/skills/cv-scan/SKILL.md` | `.claude/skills/cv-scan/SKILL.md` | Bring the specialized `[[cv-items]]` runner under the canonical digest/history contract and expand its allowed writes accordingly. |
+
+# Backport checklist — 2026-08-11 single-dollar math
+
+These Quartz files are derive-managed. Mirror every row into the source vault before the next
+`tools/derive.py` run so derivation does not restore remark-math's unsafe single-dollar default.
+
+| Engine file changed here | Source-vault location | What to mirror |
+| --- | --- | --- |
+| `hardened/quartz/quartz.config.ts` | `quartz/quartz.config.ts` | Configure `Plugin.Latex` with `remarkMathOptions.singleDollarTextMath: false` so ordinary dollar amounts remain text while `$$...$$` display math continues to work. |
+| `hardened/quartz/quartz/plugins/transformers/latex.ts` | `quartz/quartz/plugins/transformers/latex.ts` | Add the typed `remarkMathOptions` passthrough and preserve remark-math's existing defaults when the option is omitted. |
+| `hardened/quartz/quartz/plugins/transformers/latex.test.ts` | `quartz/quartz/plugins/transformers/latex.test.ts` | Add parser-level regression coverage for default behavior, the option passthrough, the shipped config, and display math. |

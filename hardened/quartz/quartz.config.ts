@@ -128,7 +128,14 @@ const config: QuartzConfig = {
       Plugin.TableOfContents(),
       Plugin.CrawlLinks({ markdownLinkResolution: "shortest" }),
       Plugin.Description(),
-      Plugin.Latex({ renderEngine: "katex" }),
+      // singleDollarTextMath: false — a research vault writes plain dollar
+      // amounts (grant budgets, per-record costs) far more often than inline
+      // math. Left on, any two unescaped `$` on a page pair up as inline math
+      // and swallow the prose between them. `$$…$$` display math still works.
+      Plugin.Latex({
+        renderEngine: "katex",
+        remarkMathOptions: { singleDollarTextMath: false },
+      }),
     ],
     // Filters:
     //  - RemoveDrafts: strips `draft: true` notes.
