@@ -120,7 +120,23 @@ Edit the tracker note:
 - If `miss_count >= 5` after the update, `status: needs_review` — let the auditor and the user decide whether to retune or retire.
 - `updated: <today>`
 
-### 2.7 Per-tracker log line
+### 2.7 Append to the tracker's `# History`
+
+**Do not skip this: `last_digest` is state; `# History` is provenance.** The frontmatter identifies the latest run, while the history indexes every run and is required by `_schemas/tracker.md`.
+
+Append one bullet at the end of `# History`, linking to the digest:
+
+```
+- <today> — <First run|Nth run|Run>. material=<true|false>, <items_found> items (<items_material> material). <one-sentence headline, or "nothing material">. <what was applied or proposed>. → [[Tracker Digest - <slug> - <today>]].
+```
+
+Rules:
+
+- **One line per run, always — including `material: false` runs.** A no-material run is still an observation and makes a climbing `miss_count` understandable. Without the bullet, "nothing material" is indistinguishable from "never ran."
+- State what happened to `update_targets`: name the page updated when `auto_update_wiki: true`; when false, name the needs-review Task created for the proposed edit.
+- Keep it to one line. The digest holds the detail; `# History` is only the index.
+
+### 2.8 Per-tracker log line
 
 Append one line to `log.md`:
 

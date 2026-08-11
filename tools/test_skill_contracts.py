@@ -16,6 +16,18 @@ def numbered_step(skill: str, number: int) -> str:
     return match.group(0)
 
 
+def numbered_list_step(document: str, number: int, indent: str = "") -> str:
+    """Return one plain numbered-list step, preserving its continuation lines."""
+    prefix = re.escape(indent)
+    match = re.search(
+        rf"(?ms)^{prefix}{number}\. .*?(?=^{prefix}{number + 1}\. |\Z)",
+        document,
+    )
+    if match is None:
+        raise AssertionError(f"list step {number} not found")
+    return match.group(0)
+
+
 def frontmatter_keys(document: str) -> set[str]:
     """Return field names from the first YAML frontmatter example or document."""
     match = re.search(r"(?ms)^---\n(.*?)^---$", document)
@@ -157,6 +169,48 @@ class TestCommsCoverageConsumers(unittest.TestCase):
             r"(?is)no (?:enabled )?capture streams?.{0,240}"
             r"(?:skip|do not require).{0,160}(?:digest|folder).{0,240}calendar",
         )
+
+
+class TestTrackerHistoryContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        core = ROOT / "packs/core"
+        skill = (core / "skills/run-trackers/SKILL.md").read_text()
+        skill_history = re.search(
+            r"(?ms)^### 2\.7 .*?(?=^### 2\.8 )",
+            skill,
+        )
+        if skill_history is None:
+            raise AssertionError("run-trackers history step not found")
+
+        cls.run_surfaces = {
+            "skill": skill_history.group(0),
+            "workflow": numbered_list_step(
+                (core / "workflows/run-tracker.md").read_text(), 9
+            ),
+            "prompt": numbered_list_step(
+                (core / "prompts/run-trackers.md").read_text(), 7
+            ),
+            "schema": numbered_list_step(
+                (core / "schemas/tracker.md").read_text(), 4, indent="  "
+            ),
+        }
+
+    def test_every_run_surface_requires_a_history_entry(self):
+        for name, artifact in self.run_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertIn("# History", artifact)
+                self.assertRegex(artifact, r"(?i)(?:one bullet|one line) per run")
+                self.assertRegex(artifact, r"(?i)(?:including|even)[^\n]*material.{0,12}false")
+                self.assertRegex(artifact, r"(?i)# History[^\n]*digest")
+
+    def test_history_is_distinct_from_latest_digest_state(self):
+        for name, artifact in self.run_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertRegex(
+                    artifact,
+                    r"(?is)last_digest.{0,160}state.{0,160}# History.{0,160}provenance",
+                )
 
 
 if __name__ == "__main__":
