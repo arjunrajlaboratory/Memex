@@ -14,6 +14,13 @@ closes (plus passed calendar-event closes if the `calendar` stream is enabled) b
 numbered `## 0. State confirmation needed` section, confirmed in one batch. Skip this pass
 for backfilled briefings more than ~2 days old.
 
+Read every capture file's `## Coverage` before reconciliation. If any says `status: partial`,
+preserve the exact `coverage gap`, set briefing frontmatter `comms_coverage: partial`, and surface
+the warning at the top of §0 and the chat report-back. Positive captured signals remain usable;
+absence in an un-scanned source/direction/time range is inconclusive and must never become "not
+sent," "no reply," or "quiet." Use `comms_coverage: complete` only when every enabled comms source
+finished, and `skipped` when the pass did not run.
+
 When reading `_config/sources.md`, also respect `mailboxes.*`: the mail connector searches only
 `mailboxes.connected` (legacy vaults: `mailboxes.gmail_connected`). Forwarding-in addresses can make received mail visible, but sent
 mail from that address, or from `mailboxes.other_sending_accounts`, is invisible unless those

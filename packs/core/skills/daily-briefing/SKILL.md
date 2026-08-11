@@ -48,9 +48,9 @@ This is the default multi-source pass that keeps vault state from lagging realit
 
 2. **Backfill guard.** If `<date>` is more than ~2 days in the past (a backfilled briefing), **skip the comms refresh** — a comms scan only makes sense near today — and note `(comms refresh skipped — backfilled briefing for a past date)` in §0. Generate from vault state alone.
 
-3. **Run [[capture-comms]]** for `<date>`, enabled streams only. It is read-only against mail/Slack and handles a per-source MCP outage gracefully (writes a gap note, continues), so a missing connector never fails the briefing. This refreshes `Inbox/comms/<date>/`.
+3. **Run [[capture-comms]]** for `<date>`, enabled streams only. It is read-only against mail/Slack and handles a per-source MCP outage gracefully (writes a gap note, continues), so a missing connector never fails the briefing. This refreshes `Inbox/comms/<date>/`. Read every generated `## Coverage` block immediately: retain each `status: partial` / `coverage gap` with its source, direction, un-scanned time range, and reason. A partial scan's positive hits are usable, but absence inside its gap is inconclusive.
 
-4. **Run [[reconcile-from-comms]]** for `<date>` in its **briefing sub-mode** (see that skill's "When invoked by daily-briefing"): it auto-applies Tier-A reversible bookkeeping (bump `last_contact`, mark Followups `acted_on`) and **returns the Tier-B proposals** — task closes, Letter→submitted, and (if the `calendar` stream is enabled) passed-event closes — **without prompting**. Hold those proposals for §0 and the batched report-back (Step 6).
+4. **Run [[reconcile-from-comms]]** for `<date>` in its **briefing sub-mode** (see that skill's "When invoked by daily-briefing"): it auto-applies Tier-A reversible bookkeeping (bump `last_contact`, mark Followups `acted_on`) and **returns the Tier-B proposals plus any coverage gaps** — task closes, Letter→submitted, and (if the `calendar` stream is enabled) passed-event closes — **without prompting**. Hold those proposals and gaps for §0 and the batched report-back (Step 6).
 
 Tasks that Tier-A already advanced will read correctly through the rest of the briefing. Tier-B proposals are **not** applied here — the user confirms them in one batch in Step 6, preserving the "agents never self-close" guardrail.
 
@@ -84,6 +84,13 @@ Also pull yesterday's briefing's "## Shutdown notes" section if present — it c
 
 When (a) and (b) point at the same note, keep the reconcile proposal (it carries the signal) and drop the duplicate. If Step 1b was skipped (no streams enabled, or the backfill guard fired), § 0 is just (b).
 
+**Coverage gaps are warnings, not state proposals.** If any capture file says `status: partial`,
+render `## 0. State confirmation needed` even when there are no numbered closes. Put this warning
+first: `> ⚠️ Comms coverage is partial — <source/direction>: <un-scanned range> (<reason>). Absence
+in that range is inconclusive.` Do not create an "awaiting send," "no reply," or "quiet" item from
+the uncovered range. Set frontmatter `comms_coverage: partial`; otherwise use `complete` when every
+enabled comms source completed and `skipped` when Step 1b did not run.
+
 For outbound-contact tasks (reply/send/email/follow-up tasks), do **not** infer "awaiting send" from stale note state alone when email is enabled. Step 1b's live comms capture (or a same-day `Inbox/comms/<date>/` digest) is the prerequisite. If the connected-mailbox search missed the send but the task/person uses a non-connected sending account, render the item as "couldn't confirm from the connected mailbox — may have gone from <account>" and ask the user, rather than asserting it remains open. The connected-mailbox search can also be **stale** (the search index lags reality and a repeat search won't refresh it), so a send that search can't see is "couldn't confirm" even without a second account — verify the specific thread with a full-thread read (Gmail: `get_thread(threadId)`) before asserting anything, and never emit "awaiting send" / "unsent" off an empty search.
 
 Four pre-flight queries (run in parallel):
@@ -98,6 +105,10 @@ For each item (from either source), render a line in a new **`## 0. State confir
 ```markdown
 ## 0. State confirmation needed
 
+<IF CAPTURE PARTIAL:>
+> ⚠️ Comms coverage is partial — <source/direction>: <un-scanned range> (<reason>). Absence in that range is inconclusive.
+
+<IF THERE ARE STATE PROPOSALS:>
 The vault thinks the following are still in progress. Were any of them already done?
 
 1. [[<Task or Letter wikilink>]] — `status: <current>` (due <date>).
@@ -107,7 +118,9 @@ The vault thinks the following are still in progress. Were any of them already d
 Reply with the numbers that are done (e.g. "yes to 1,3") and the planner will close them via [[close-task]].
 ```
 
-Number the items so the Step 6 batched confirm ("yes to 1,3,4") maps cleanly. If § 0 is empty (no reconcile proposals and no query hits), omit the section entirely — its absence is the signal of a healthy vault.
+Number the items so the Step 6 batched confirm ("yes to 1,3,4") maps cleanly. Omit §0 only when
+there are no reconcile proposals, no query hits, **and no coverage gaps** — its absence then means
+the pass completed without surfacing stale state or partial capture.
 
 **In the chat report-back (Step 6),** also surface this list above the Top 3 — see Step 6.
 
@@ -130,6 +143,7 @@ period_end: <date>
 includes_calendar: true
 includes_agent_queue: true
 includes_comms: <true if Step 1b ran; false if skipped>
+comms_coverage: <complete | partial | skipped>
 open_tasks_count: <count>
 projects_reviewed: <count>
 sensitivity: private
@@ -217,6 +231,9 @@ Skip this step only if the user explicitly says "don't open it" or "just write t
 ```
 Briefing generated: Ops/Briefings/<date>.md (opened in browser at http://localhost:{{QUARTZ_PORT}}/Ops/Briefings/<date>).
 
+<IF COMMS COVERAGE IS PARTIAL:>
+**Comms coverage is partial:** <source/direction> did not scan <range> (<reason>). Absence in that range is inconclusive.
+
 <IF § 0 has items:>
 **Confirm these closes** (vault may be lagging reality — from your comms/calendar + a vault scan):
 1. [[<item 1>]] — still <status>. <signal, if reconcile-sourced>
@@ -231,7 +248,12 @@ Top 3 outcomes:
 Notable: <one bullet for the most consequential at-risk project or surfaced followup, or "nothing surprising">.
 ```
 
-Surface the § 0 items at the top of the chat report-back if present — the user reads the chat before opening the briefing file, and closing stale state in the same session is the whole point. This is the **single batched confirmation** for everything Step 1b proposed. When the user confirms ("yes to 1,3"):
+Surface any coverage gap at the top of the chat report-back, before §0 confirmations and the Top
+3. The user must see when the comms capture is partial; never let a successfully written briefing
+make an un-scanned range look complete. Then surface the § 0 items if present — the user reads the
+chat before opening the briefing file, and closing stale state in the same session is the whole
+point. This is the **single batched confirmation** for everything Step 1b proposed. When the user
+confirms ("yes to 1,3"):
 
 - **Task closes → route through [[close-task]]** (never hand-edit `status: done` — close-task enforces the final `# Work log` entry and the `unblocks:` cascade, and the "agents never self-close" guardrail means this confirmation is what authorizes it).
 - **Letter `drafting → submitted`** → the clean two-field edit (`status:` + `submitted:`), per [[reconcile-from-comms]].
