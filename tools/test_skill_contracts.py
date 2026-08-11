@@ -229,19 +229,22 @@ class TestTrackerHistoryContract(unittest.TestCase):
 
     def test_propose_only_history_names_the_required_review_task(self):
         history_step = self.run_surfaces["skill"]
-        self.assertRegex(
-            history_step,
-            r"(?is)auto_update_wiki.{0,160}false.{0,160}"
+        affirmative_task_creation = (
+            r"(?is)auto_update_wiki.{0,80}\bfalse\b[)`]*\s*"
+            r"(?:[,;:—-]\s*)?"
             r"(?:(?:create|write) a needs-review Task|"
-            r"name the needs-review Task (?:that was )?created)",
+            r"name the needs-review Task (?:that was )?created)"
         )
-        self.assertNotRegex(
-            history_step,
-            r"(?is)auto_update_wiki.{0,160}false.{0,160}"
-            r"(?:(?:do not|don't|never|without|skip|omit).{0,80}"
-            r"(?:create|write|name).{0,80}(?:needs-review )?Tasks?|"
-            r"no (?:needs-review )?Tasks?(?: (?:created|written|named))?)",
+        self.assertRegex(history_step, affirmative_task_creation)
+
+        contradictory_guidance = (
+            "auto_update_wiki: false — do not create a needs-review Task",
+            "auto_update_wiki: false — must not create a needs-review Task",
+            "auto_update_wiki: false — no need to create a needs-review Task",
         )
+        for guidance in contradictory_guidance:
+            with self.subTest(guidance=guidance):
+                self.assertNotRegex(guidance, affirmative_task_creation)
 
     def test_specialized_runner_allows_digest_and_history_outputs(self):
         self.assertIn("Tracker Digest", self.cv_output_contract)
