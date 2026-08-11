@@ -16,6 +16,27 @@ def numbered_step(skill: str, number: int) -> str:
     return match.group(0)
 
 
+def numbered_list_step(document: str, number: int, indent: str = "") -> str:
+    """Return one plain numbered-list step, preserving its continuation lines."""
+    prefix = re.escape(indent)
+    match = re.search(
+        rf"(?ms)^{prefix}{number}\. .*?(?=^{prefix}{number + 1}\. |\Z)",
+        document,
+    )
+    if match is None:
+        raise AssertionError(f"list step {number} not found")
+    return match.group(0)
+
+
+def markdown_section(document: str, heading: str, next_heading=None) -> str:
+    """Return a Markdown section by exact heading text."""
+    end = rf"(?=^{re.escape(next_heading)}$)" if next_heading else r"\Z"
+    match = re.search(rf"(?ms)^{re.escape(heading)}$.*?{end}", document)
+    if match is None:
+        raise AssertionError(f"section {heading!r} not found")
+    return match.group(0)
+
+
 def frontmatter_keys(document: str) -> set[str]:
     """Return field names from the first YAML frontmatter example or document."""
     match = re.search(r"(?ms)^---\n(.*?)^---$", document)
@@ -157,6 +178,74 @@ class TestCommsCoverageConsumers(unittest.TestCase):
             r"(?is)no (?:enabled )?capture streams?.{0,240}"
             r"(?:skip|do not require).{0,160}(?:digest|folder).{0,240}calendar",
         )
+
+
+class TestTrackerHistoryContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        core = ROOT / "packs/core"
+        pi = ROOT / "packs/pi"
+        skill = (core / "skills/run-trackers/SKILL.md").read_text()
+        workflow = (core / "workflows/run-tracker.md").read_text()
+        prompt = (core / "prompts/run-trackers.md").read_text()
+        tracker_schema = (core / "schemas/tracker.md").read_text()
+        cv_skill = (pi / "skills/cv-scan/SKILL.md").read_text()
+        backport = (ROOT / "docs/BACKPORT.md").read_text()
+        skill_history = re.search(
+            r"(?ms)^### 2\.7 .*?(?=^### 2\.8 )",
+            skill,
+        )
+        if skill_history is None:
+            raise AssertionError("run-trackers history step not found")
+
+        cls.run_surfaces = {
+            "skill": skill_history.group(0),
+            "workflow": numbered_list_step(workflow, 9),
+            "prompt": numbered_list_step(prompt, 7),
+            "schema": numbered_list_step(tracker_schema, 4, indent="  "),
+            "cv-scan": numbered_list_step(cv_skill, 11),
+        }
+        cls.tracker_backport = markdown_section(
+            backport, "# Backport checklist — 2026-08-11 tracker history contract"
+        )
+        cls.cv_output_contract = cv_skill.split("## Steps", 1)[0]
+        cls.cv_digest_step = numbered_list_step(cv_skill, 10)
+
+    def test_every_run_surface_requires_a_history_entry(self):
+        for name, artifact in self.run_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertIn("# History", artifact)
+                self.assertRegex(artifact, r"(?i)(?:one bullet|one line) per run")
+                self.assertRegex(artifact, r"(?i)(?:including|even)[^\n]*material.{0,12}false")
+                self.assertRegex(artifact, r"(?is)# History.{0,120}digest")
+
+    def test_history_is_distinct_from_latest_digest_state(self):
+        for name, artifact in self.run_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertRegex(
+                    artifact,
+                    r"(?is)last_digest.{0,160}state.{0,160}# History.{0,160}provenance",
+                )
+
+    def test_specialized_runner_allows_digest_and_history_outputs(self):
+        self.assertIn("Tracker Digest", self.cv_output_contract)
+        self.assertIn("# History", self.cv_output_contract)
+
+    def test_specialized_runner_creates_the_canonical_digest(self):
+        self.assertIn("_schemas/tracker_digest.md", self.cv_digest_step)
+        self.assertRegex(self.cv_digest_step, r"(?i)including[^\n]*material.{0,12}false")
+
+    def test_backport_lists_every_derive_managed_tracker_surface(self):
+        expected = {
+            "packs/core/skills/run-trackers/SKILL.md",
+            "packs/core/workflows/run-tracker.md",
+            "packs/core/prompts/run-trackers.md",
+            "packs/core/schemas/tracker.md",
+            "packs/pi/skills/cv-scan/SKILL.md",
+        }
+        for path in expected:
+            with self.subTest(path=path):
+                self.assertIn(f"`{path}`", self.tracker_backport)
 
 
 if __name__ == "__main__":
