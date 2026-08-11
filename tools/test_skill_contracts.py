@@ -227,6 +227,14 @@ class TestTrackerHistoryContract(unittest.TestCase):
                     r"(?is)last_digest.{0,160}state.{0,160}# History.{0,160}provenance",
                 )
 
+    def test_propose_only_history_names_the_required_review_task(self):
+        history_step = self.run_surfaces["skill"]
+        self.assertRegex(
+            history_step,
+            r"(?is)auto_update_wiki.{0,160}false.{0,160}needs-review Task",
+        )
+        self.assertNotIn("no Tasks created", history_step)
+
     def test_specialized_runner_allows_digest_and_history_outputs(self):
         self.assertIn("Tracker Digest", self.cv_output_contract)
         self.assertIn("# History", self.cv_output_contract)
