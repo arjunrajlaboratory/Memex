@@ -189,7 +189,6 @@ class TestTrackerHistoryContract(unittest.TestCase):
         workflow = (core / "workflows/run-tracker.md").read_text()
         prompt = (core / "prompts/run-trackers.md").read_text()
         tracker_schema = (core / "schemas/tracker.md").read_text()
-        digest_schema = (core / "schemas/tracker_digest.md").read_text()
         cv_skill = (pi / "skills/cv-scan/SKILL.md").read_text()
         backport = (ROOT / "docs/BACKPORT.md").read_text()
         skill_history = re.search(
@@ -205,24 +204,6 @@ class TestTrackerHistoryContract(unittest.TestCase):
             "prompt": numbered_list_step(prompt, 7),
             "schema": numbered_list_step(tracker_schema, 4, indent="  "),
             "cv-scan": numbered_list_step(cv_skill, 11),
-        }
-        cls.same_day_guards = {
-            "skill": markdown_section(
-                skill,
-                "## Step 1 — Determine the run set",
-                "## Step 2 — For each selected tracker, follow the recipe",
-            ),
-            "workflow": numbered_list_step(workflow, 1),
-            "prompt": prompt.split("Determine which trackers to run:", 1)[1].split(
-                "For each selected tracker", 1
-            )[0],
-            "cv-scan": numbered_list_step(cv_skill, 3),
-        }
-        cls.same_day_contracts = {
-            "tracker schema": markdown_section(
-                tracker_schema, "## Rules", "## Examples of good tracker subjects"
-            ),
-            "digest schema": markdown_section(digest_schema, "## Rules"),
         }
         cls.tracker_backport = markdown_section(
             backport, "# Backport checklist — 2026-08-11 tracker history contract"
@@ -254,41 +235,12 @@ class TestTrackerHistoryContract(unittest.TestCase):
         self.assertIn("_schemas/tracker_digest.md", self.cv_digest_step)
         self.assertRegex(self.cv_digest_step, r"(?i)including[^\n]*material.{0,12}false")
 
-    def test_every_entry_point_blocks_completed_runs_and_resumes_incomplete_runs(self):
-        for name, guard in self.same_day_guards.items():
-            with self.subTest(surface=name):
-                self.assertRegex(guard, r"(?is)today.{0,120}digest|digest.{0,120}today")
-                self.assertIn("status: complete", guard)
-                self.assertIn("last_digest", guard)
-                self.assertIn("# History", guard)
-                self.assertRegex(guard, r"(?i)fresh")
-                self.assertRegex(guard, r"(?i)(?:stop|skip|do not run)")
-                self.assertRegex(guard, r"(?i)resume")
-                self.assertRegex(guard, r"(?i)partial|failed|missing")
-                self.assertRegex(guard, r"(?is)(?:explicit|force).{0,120}(?:not|never)")
-                self.assertRegex(
-                    guard,
-                    r"(?is)(?:do\s+not|never).{0,80}overwrite.{0,80}(?:complete|completed)",
-                )
-
-    def test_schemas_define_one_resumable_digest_per_day(self):
-        for name, contract in self.same_day_contracts.items():
-            with self.subTest(surface=name):
-                self.assertRegex(contract, r"(?i)at most one[^\n]*run[^\n]*(?:day|date)")
-                self.assertRegex(contract, r"(?i)resume")
-                self.assertRegex(contract, r"(?i)partial|failed|missing")
-                self.assertRegex(
-                    contract,
-                    r"(?is)(?:do\s+not|never).{0,80}overwrite.{0,80}(?:complete|completed)",
-                )
-
     def test_backport_lists_every_derive_managed_tracker_surface(self):
         expected = {
             "packs/core/skills/run-trackers/SKILL.md",
             "packs/core/workflows/run-tracker.md",
             "packs/core/prompts/run-trackers.md",
             "packs/core/schemas/tracker.md",
-            "packs/core/schemas/tracker_digest.md",
             "packs/pi/skills/cv-scan/SKILL.md",
         }
         for path in expected:

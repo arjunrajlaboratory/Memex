@@ -25,7 +25,7 @@ The thing that goes wrong without this skill: trackers get stale, miss-counts cl
 ## Inputs
 
 - **Tracker id** (optional) — e.g., `tracker-example-llm-wiki` or `[[ExampleProject releases]]`. If omitted, runs all active + due trackers.
-- **Force flag** (rare) — if the user says "run the tracker even though it isn't due," honor it only when that tracker has no digest for today, and note in the digest's `# What I looked at` that this was an off-cadence run. Force bypasses cadence, not the one-run-per-day guard.
+- **Force flag** (rare) — if the user says "run the tracker even though it isn't due," honor it but note in the digest's `# What I looked at` that this was an off-cadence run.
 
 ## Step 0 — Orient
 
@@ -47,8 +47,6 @@ Otherwise, list all files in `Atlas/Trackers/` (not `Digests/`) and select those
 If the set is empty, report "no trackers due — next due <date> for <tracker>" and exit. Don't invent work.
 
 If a tracker has `status: broken`, skip it (the auditor handles broken trackers; running them again won't fix them). If a tracker has `status: needs_review`, skip it and surface in the report — the user needs to decide whether to re-activate or retire.
-
-Before adding any tracker to the run set, resolve today's expected digest path: `Atlas/Trackers/Digests/Tracker Digest - <slug> - <today>.md`. If the file is absent and neither `last_digest` nor `# History` points to it, this is a fresh run. A same-day run is completed only when the digest has `status: complete`, `last_digest` points to it, and `# History` links to it. If all three are true, skip the tracker and report "already ran today"; for an explicitly named tracker, stop instead of silently succeeding. A force flag does not override this completed-run guard. If any same-day artifact or reference exists but the digest is `partial` or `failed`, the file is missing, or either tracker reference is missing, resume or repair that run from its first incomplete step and reuse the same digest path. Do not overwrite a completed digest or create a second same-day digest.
 
 ## Step 2 — For each selected tracker, follow the recipe
 
@@ -190,7 +188,7 @@ Don't recapitulate every digest in chat — the digests are the artifacts.
 - **Does not mark itself `done`.** `human_review_required: true` trackers leave open the question of whether the digest update is enough; the user is the closer. The skill's natural finishing state is "digest written, tracker bookkeeping updated, log line appended" — not `status: done` on the tracker.
 - **Does not edit `Raw/`.** Raw is immutable; the digest is the right place for raw paste-ins if needed.
 - **Does not silently widen `forbidden_actions:`.** If a tracker's restrictions feel wrong, surface the mismatch — the user updates the tracker, the skill doesn't.
-- **Does not run off-cadence without note.** A force-run is logged in the digest's `# What I looked at` so the audit trail is honest about cadence drift. Force never permits overwriting a same-day digest.
+- **Does not run off-cadence without note.** A force-run is logged in the digest's `# What I looked at` so the audit trail is honest about cadence drift.
 
 ## Model recommendation
 

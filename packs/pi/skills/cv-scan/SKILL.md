@@ -37,16 +37,9 @@ LaTeX snippets in [[CV candidates]] for the user to fold into the canonical LaTe
    citations** — far cleaner than email. Use it both to dedupe (skip papers already in
    `publications.tex`) and as a primary publications signal in its own right.
 
-3. **Determine the scan window.** Resolve today's expected digest. If the file is absent and
-   neither `[[cv-items]]` `last_digest` nor `# History` points to it, start a fresh run. A same-day
-   run is completed only when the digest has `status: complete`, `last_digest` points to it, and
-   `# History` links to it; then stop and report "already ran today." A force request does not
-   bypass this completed-run guard. If any same-day artifact or reference exists but the digest
-   is `partial` or `failed`, the file is missing, or either tracker reference is missing, resume
-   or repair the existing run at its first incomplete step using the same path. Do not overwrite
-   a completed digest or create a second same-day digest. Otherwise, read the last
-   `## <date> scan` block in `Ops/Followups/CV candidates.md`; the window is (that date → today). If none, use
-   the last 30 days. Also read `[[cv-items]]` `last_checked` as a cross-check.
+3. **Determine the scan window.** Read the last `## <date> scan` block in
+   `Ops/Followups/CV candidates.md`; the window is (that date → today). If none, use the last
+   30 days. Also read `[[cv-items]]` `last_checked` as a cross-check.
 
 4. **Scan Gmail** (broad-search technique — see memory `feedback_gmail_search_technique`; search
    both directions, `in:anywhere`, wide dates, then narrow). Per section:

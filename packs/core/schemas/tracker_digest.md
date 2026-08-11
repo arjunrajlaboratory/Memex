@@ -34,7 +34,3 @@ sensitivity: normal
 - `# What I changed` — which wiki pages were edited (or proposed for edit)
 - `# What needs review` — items the human should look at
 - `# Next-run recommendations` — adjust queries, adjust cadence, adjust update targets
-
-## Rules
-
-- At most one tracker run per tracker per calendar date may create a digest. The date-keyed digest becomes immutable only when it has `status: complete`, the tracker `last_digest` points to it, and `# History` links to it; do not overwrite the completed digest. If any same-day artifact or reference exists but the digest is `partial` or `failed`, the file is missing, or either tracker reference is missing, resume or repair the existing run and reuse this path. Force requests bypass cadence only, not the completed-run guard.

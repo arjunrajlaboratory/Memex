@@ -25,15 +25,6 @@ Determine which trackers to run:
 - If {{tracker_id}} is set, load only that tracker from Atlas/Trackers/.
 - Otherwise, list all files in Atlas/Trackers/ (not Digests/) and select those
   where status: active and next_check <= today.
-- Before adding a tracker, resolve today's expected digest. Treat the run as
-  fresh when the file is absent and neither last_digest nor # History points to
-  it. A same-day run is completed only when the digest has status: complete,
-  last_digest points to it, and # History links to it; then skip it and report
-  "already ran today" (or stop for an explicitly named tracker). A force request
-  does not bypass this guard. If any same-day artifact or reference exists but
-  the digest is partial or failed, the file is missing, or either tracker
-  reference is missing, resume or repair the existing run at its first incomplete
-  step. Do not overwrite a completed digest or create a second same-day digest.
 
 For each selected tracker, follow _workflows/run-tracker.md exactly:
 

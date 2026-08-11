@@ -84,14 +84,13 @@ header + `---` divider the log skills anchor on).
 # Backport checklist — 2026-08-11 tracker history contract
 
 These files are derive-managed. Mirror every row into the source vault before the next
-`tools/derive.py` run; otherwise derivation will remove the tracker-history, specialized-runner,
-and same-day resume protections while leaving the engine contract tests behind.
+`tools/derive.py` run; otherwise derivation will remove the tracker-history and specialized-runner
+protections while leaving the engine contract tests behind.
 
 | Engine file changed here | Source-vault location | What to mirror |
 | --- | --- | --- |
-| `packs/core/skills/run-trackers/SKILL.md` | `.claude/skills/run-trackers/SKILL.md` | Require one digest-linked `# History` entry per completed run, including no-material runs; distinguish latest state from per-run provenance; block completed same-day reruns while resuming incomplete ones. |
-| `packs/core/workflows/run-tracker.md` | `_workflows/run-tracker.md` | Add the history append and the completed-vs-resumable same-day digest guard to the canonical procedure. |
-| `packs/core/prompts/run-trackers.md` | `Agents/Prompts/run-trackers.md` | Keep the pasteable prompt aligned with the canonical history and resume contract. |
-| `packs/core/schemas/tracker.md` | `_schemas/tracker.md` | Require digest-linked history for every run and define one completed, resumable run per tracker per calendar date. |
-| `packs/core/schemas/tracker_digest.md` | `_schemas/tracker_digest.md` | Make date-keyed digests mutable while incomplete and immutable only after digest, `last_digest`, and `# History` agree. |
-| `packs/pi/skills/cv-scan/SKILL.md` | `.claude/skills/cv-scan/SKILL.md` | Bring the specialized `[[cv-items]]` runner under the canonical digest/history and same-day resume contract; expand its allowed writes accordingly. |
+| `packs/core/skills/run-trackers/SKILL.md` | `.claude/skills/run-trackers/SKILL.md` | Require one digest-linked `# History` entry per completed run, including no-material runs, and distinguish latest state from per-run provenance. |
+| `packs/core/workflows/run-tracker.md` | `_workflows/run-tracker.md` | Add the history append to the canonical procedure. |
+| `packs/core/prompts/run-trackers.md` | `Agents/Prompts/run-trackers.md` | Keep the pasteable prompt aligned with the canonical history contract. |
+| `packs/core/schemas/tracker.md` | `_schemas/tracker.md` | Require a digest-linked history entry after every run. |
+| `packs/pi/skills/cv-scan/SKILL.md` | `.claude/skills/cv-scan/SKILL.md` | Bring the specialized `[[cv-items]]` runner under the canonical digest/history contract and expand its allowed writes accordingly. |
