@@ -70,7 +70,12 @@ interface TabDef {
   empty: string;
 }
 interface ChipDef { label: string; prompt: string; }
-interface AppConfig { tabs: TabDef[]; chips: ChipDef[]; }
+interface TabPreferenceUpdate { hiddenTabs: string[]; folders: string[]; }
+interface AppConfig extends TabPreferenceUpdate {
+  tabs: TabDef[];
+  chips: ChipDef[];
+  availableFolders: string[];
+}
 
 // ---------- vault search ----------
 interface SearchHit { rel: string; title: string; ext: string; snippet?: string; }
@@ -194,6 +199,7 @@ interface MemexApi {
   data(kind: 'inbox' | 'outputs'): Promise<FileEntry[] | null>;
   data(kind: DataKind): Promise<unknown>;
   appConfig(): Promise<AppConfig | null>;
+  updateTabPreferences(preferences: TabPreferenceUpdate): Promise<AppConfig>;
   search(q: string): Promise<SearchResults>;
   tabContent(p: string): Promise<TabContentResult>;
   tabQuery(def: TabDef): Promise<TabQueryResult>;

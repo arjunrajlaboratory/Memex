@@ -35,7 +35,11 @@ interface UIState {
   history: HistoryEntry[];
   histPos: number;
   customTabs: TabDef[];
+  configuredTabs: TabDef[];
   customChips: ChipDef[];
+  hiddenTabs: string[];
+  selectedFolders: string[];
+  availableFolders: string[];
 }
 
 const state: UIState = {
@@ -48,8 +52,22 @@ const state: UIState = {
   history: [],
   histPos: -1,
   customTabs: [],
+  configuredTabs: [],
   customChips: [],
+  hiddenTabs: [],
+  selectedFolders: [],
+  availableFolders: [],
 };
+
+const BUILTIN_TABS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'tasks', label: 'Tasks' },
+  { id: 'projects', label: 'Projects' },
+  { id: 'ideas', label: 'Ideas' },
+  { id: 'people', label: 'People' },
+  { id: 'inbox', label: 'Inbox' },
+  { id: 'outbox', label: 'Outbox' },
+] as const;
 let vaultOpening = false;
 let vaultEpoch = 0;
 const vaultOpenEpochs: VaultOpenEpochState = { request: 0, epoch: 0 };
@@ -180,7 +198,7 @@ async function openVault(p: string): Promise<void> {
       flashChat('⚠ Could not load this vault\'s desktop tabs: ' + String((error as Error)?.message || error));
     }
     if (request !== vaultOpenEpochs.request) return;
-    switchTab('dashboard');
+    switchTab(firstVisibleTab() || 'dashboard');
     if (res.warning) flashChat('⚠ ' + res.warning);
     if (res.pendingDrop) reportIconDrop(res.pendingDrop.copied || [], res.pendingDrop.error);
     // Surface a stale vault engine without making the user open the switcher.
@@ -207,15 +225,34 @@ async function openVault(p: string): Promise<void> {
 }
 
 async function loadAppConfig(expectedEpoch = vaultEpoch): Promise<void> {
-  const cfg = (await M.appConfig()) || { tabs: [], chips: [] };
+  const cfg = (await M.appConfig()) || { tabs: [], chips: [], hiddenTabs: [], folders: [], availableFolders: [] };
   if (expectedEpoch !== vaultEpoch) return;
-  state.customTabs = cfg.tabs || [];
+  state.configuredTabs = cfg.tabs || [];
+  state.hiddenTabs = cfg.hiddenTabs || [];
+  state.selectedFolders = cfg.folders || [];
+  state.availableFolders = cfg.availableFolders || [];
+  const folderTabs: TabDef[] = state.selectedFolders.map((folder) => ({
+    id: `folder:${folder}`,
+    label: folder.split('/').filter(Boolean).pop() || folder,
+    kind: 'path',
+    path: folder,
+    url: '',
+    source: '',
+    where: null,
+    empty: '',
+  }));
+  state.customTabs = [...state.configuredTabs, ...folderTabs];
   state.customChips = cfg.chips || [];
+  document.querySelectorAll<HTMLElement>('.tab[data-builtin="1"]').forEach((button) => {
+    button.style.display = state.hiddenTabs.includes(button.dataset.tab || '') ? 'none' : '';
+  });
   // rebuild custom tab buttons
   document.querySelectorAll('.tab[data-custom="1"]').forEach((b) => b.remove());
   const artifactTab = $('artifactTab');
   for (const def of state.customTabs) {
-    const b = el('button', 'tab tab-custom');
+    if (state.hiddenTabs.includes(def.id)) continue;
+    const isFolder = def.id.startsWith('folder:');
+    const b = el('button', isFolder ? 'tab tab-folder' : 'tab tab-custom');
     b.textContent = def.label;
     b.dataset.tab = def.id;
     b.dataset.custom = '1';
@@ -230,7 +267,141 @@ async function loadAppConfig(expectedEpoch = vaultEpoch): Promise<void> {
     b.dataset.custom = '1';
     $('chips').appendChild(b);
   }
+  renderTabSettingsOptions();
 }
+
+function firstVisibleTab(): string | null {
+  return selectFirstVisibleTab(Array.from(document.querySelectorAll<HTMLElement>('.tab[data-tab]')).map((button) => ({
+    tab: button.dataset.tab || '',
+    visible: button.style.display !== 'none',
+    artifact: button.id === 'artifactTab',
+  })));
+}
+
+function visibleTab(tab: string): boolean {
+  const button = document.querySelector<HTMLElement>(`.tab[data-tab="${CSS.escape(tab)}"]`);
+  return !!button && button.style.display !== 'none';
+}
+
+interface TabSettingsOption {
+  kind: 'tab' | 'folder';
+  value: string;
+  label: string;
+  detail?: string;
+  checked: boolean;
+}
+
+function addTabSettingsGroup(title: string, options: TabSettingsOption[]): void {
+  if (!options.length) return;
+  const container = $('tabSettingsOptions');
+  container.appendChild(textEl('div', 'tab-settings-group-title', title));
+  for (const option of options) {
+    const row = el('label', 'tab-settings-option');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = option.checked;
+    input.dataset.kind = option.kind;
+    input.dataset.value = option.value;
+    row.appendChild(input);
+    const main = el('span', 'tab-settings-option-main');
+    main.appendChild(textEl('span', 'tab-settings-option-name', option.label));
+    if (option.detail) main.appendChild(textEl('span', 'tab-settings-option-path', option.detail));
+    row.appendChild(main);
+    container.appendChild(row);
+  }
+}
+
+function renderTabSettingsOptions(): void {
+  const container = $('tabSettingsOptions');
+  container.innerHTML = '';
+  addTabSettingsGroup('Essentials', BUILTIN_TABS.map((tab) => ({
+    kind: 'tab', value: tab.id, label: tab.label, checked: !state.hiddenTabs.includes(tab.id),
+  })));
+  addTabSettingsGroup('Custom tabs', state.configuredTabs.map((tab) => ({
+    kind: 'tab', value: tab.id, label: tab.label,
+    detail: tab.kind === 'path' ? tab.path : tab.kind === 'query' ? `${tab.source || 'tasks'} query` : tab.url,
+    checked: !state.hiddenTabs.includes(tab.id),
+  })));
+  const selected = new Set(state.selectedFolders);
+  addTabSettingsGroup('Vault folders', state.availableFolders.map((folder) => ({
+    kind: 'folder', value: folder,
+    label: folder.split('/').filter(Boolean).pop() || folder,
+    detail: folder,
+    checked: selected.has(folder),
+  })));
+  if (!state.availableFolders.length) {
+    container.appendChild(textEl('div', 'tab-settings-empty', 'No additional vault folders are available yet.'));
+  }
+}
+
+function closeTabSettings(): void {
+  const popover = $('tabSettingsPopover') as HTMLFormElement;
+  popover.hidden = true;
+  $('tabSettingsToggle').setAttribute('aria-expanded', 'false');
+  $('tabSettingsStatus').textContent = '';
+}
+
+function openTabSettings(): void {
+  renderTabSettingsOptions();
+  const popover = $('tabSettingsPopover') as HTMLFormElement;
+  popover.hidden = false;
+  $('tabSettingsToggle').setAttribute('aria-expanded', 'true');
+  $('tabSettingsStatus').textContent = '';
+  window.requestAnimationFrame(() => popover.querySelector<HTMLInputElement>('input')?.focus());
+}
+
+$('tabSettingsToggle').onclick = () => {
+  const popover = $('tabSettingsPopover') as HTMLFormElement;
+  if (popover.hidden) openTabSettings(); else closeTabSettings();
+};
+$('tabSettingsClose').onclick = closeTabSettings;
+$('tabSettingsReset').onclick = () => {
+  document.querySelectorAll<HTMLInputElement>('#tabSettingsOptions input').forEach((input) => {
+    input.checked = input.dataset.kind === 'tab';
+  });
+  $('tabSettingsStatus').textContent = '';
+};
+($('tabSettingsPopover') as HTMLFormElement).onsubmit = async (event: SubmitEvent) => {
+  event.preventDefault();
+  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('#tabSettingsOptions input'));
+  if (!inputs.some((input) => input.checked)) {
+    $('tabSettingsStatus').textContent = 'Choose at least one tab.';
+    return;
+  }
+  const hiddenTabs = inputs
+    .filter((input) => input.dataset.kind === 'tab' && !input.checked)
+    .map((input) => input.dataset.value || '').filter(Boolean);
+  const folders = inputs
+    .filter((input) => input.dataset.kind === 'folder' && input.checked)
+    .map((input) => input.dataset.value || '').filter(Boolean);
+  const save = $('tabSettingsSave') as HTMLButtonElement;
+  const expectedEpoch = vaultEpoch;
+  save.disabled = true;
+  save.textContent = 'Saving…';
+  $('tabSettingsStatus').textContent = '';
+  try {
+    await M.updateTabPreferences({ hiddenTabs, folders });
+    if (expectedEpoch !== vaultEpoch) return;
+    await loadAppConfig(expectedEpoch);
+    if (expectedEpoch !== vaultEpoch) return;
+    if (!visibleTab(state.tab)) switchTab(firstVisibleTab() || 'dashboard');
+    else setActiveTab(state.tab);
+    closeTabSettings();
+  } catch (error) {
+    $('tabSettingsStatus').textContent = String((error as Error)?.message || 'Could not save tabs');
+  } finally {
+    save.disabled = false;
+    save.textContent = 'Done';
+  }
+};
+document.addEventListener('click', (event) => {
+  const settings = $('tabSettings');
+  if (!(event.target instanceof Node) || settings.contains(event.target)) return;
+  closeTabSettings();
+});
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !($('tabSettingsPopover') as HTMLFormElement).hidden) closeTabSettings();
+});
 
 $('vaultSwitch').onclick = () => { $('onboard').classList.toggle('dismissible', !!state.vault); $('onboard').style.display = 'grid'; initOnboarding(); };
 // The switcher overlays a working vault — always let the user back out without re-opening.
@@ -341,10 +512,12 @@ const chatEmptyTemplate = document.getElementById('chatEmpty')?.cloneNode(true) 
 
 function resetVaultScopedUi(): void {
   resetVaultUiModel(state);
+  closeTabSettings();
   clearThinking();
   currentArtifact = null;
   liveQuickNote = null;
   document.querySelectorAll('.tab[data-custom="1"], .chip[data-custom="1"]').forEach((element) => element.remove());
+  document.querySelectorAll<HTMLElement>('.tab[data-builtin="1"]').forEach((button) => { button.style.display = ''; });
   $('artifactTab').style.display = 'none';
   $('panelBody').replaceChildren();
   chatScroll.replaceChildren(...(chatEmptyTemplate ? [chatEmptyTemplate.cloneNode(true)] : []));
@@ -1130,7 +1303,7 @@ function closeArtifact(): void {
   currentArtifact = null;
   state.hasArtifact = false;
   $('artifactTab').style.display = 'none';
-  if (state.tab === 'artifact') switchTab('dashboard');
+  if (state.tab === 'artifact') switchTab(firstVisibleTab() || 'dashboard');
 }
 $('artifactClose').onclick = (e) => { e.stopPropagation(); closeArtifact(); };
 
@@ -1242,7 +1415,7 @@ M.onFsChanged(({ area }) => {
       await loadAppConfig(epoch);
       if (epoch !== vaultEpoch || vaultOpening) return;
       // rebuilding the tab bar wipes the active class — and the active tab itself may be gone
-      if (!document.querySelector(`.tab[data-tab="${CSS.escape(state.tab)}"]`)) return switchTab('dashboard');
+      if (!visibleTab(state.tab)) return switchTab(firstVisibleTab() || 'dashboard');
       setActiveTab(state.tab);
     }
     const cdef = state.customTabs.find((t) => t.id === state.tab);

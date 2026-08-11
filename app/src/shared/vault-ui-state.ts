@@ -7,12 +7,27 @@ interface ResettableVaultUiState {
   history: unknown[];
   histPos: number;
   customTabs: unknown[];
+  configuredTabs: unknown[];
   customChips: unknown[];
+  hiddenTabs: string[];
+  selectedFolders: string[];
+  availableFolders: string[];
 }
 
 interface VaultOpenEpochState {
   request: number;
   epoch: number;
+}
+
+interface VisibleTabCandidate {
+  tab: string;
+  visible: boolean;
+  artifact: boolean;
+}
+
+/** Pick the first user-configured visible tab, never the transient artifact tab. */
+function selectFirstVisibleTab(candidates: readonly VisibleTabCandidate[]): string | null {
+  return candidates.find((candidate) => candidate.visible && !candidate.artifact)?.tab || null;
 }
 
 /** Start an open attempt without invalidating work belonging to the committed vault. */
@@ -38,5 +53,9 @@ function resetVaultUiModel(state: ResettableVaultUiState): void {
   state.history = [];
   state.histPos = -1;
   state.customTabs = [];
+  state.configuredTabs = [];
   state.customChips = [];
+  state.hiddenTabs = [];
+  state.selectedFolders = [];
+  state.availableFolders = [];
 }
