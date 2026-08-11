@@ -19,6 +19,17 @@ interface VaultOpenEpochState {
   epoch: number;
 }
 
+interface VisibleTabCandidate {
+  tab: string;
+  visible: boolean;
+  artifact: boolean;
+}
+
+/** Pick the first user-configured visible tab, never the transient artifact tab. */
+function selectFirstVisibleTab(candidates: readonly VisibleTabCandidate[]): string | null {
+  return candidates.find((candidate) => candidate.visible && !candidate.artifact)?.tab || null;
+}
+
 /** Start an open attempt without invalidating work belonging to the committed vault. */
 function beginVaultOpen(state: VaultOpenEpochState): number {
   state.request += 1;

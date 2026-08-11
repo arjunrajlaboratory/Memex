@@ -271,9 +271,11 @@ async function loadAppConfig(expectedEpoch = vaultEpoch): Promise<void> {
 }
 
 function firstVisibleTab(): string | null {
-  const button = Array.from(document.querySelectorAll<HTMLElement>('.tab[data-tab]'))
-    .find((candidate) => candidate.id !== 'artifactTab' && candidate.style.display !== 'none');
-  return button?.dataset.tab || null;
+  return selectFirstVisibleTab(Array.from(document.querySelectorAll<HTMLElement>('.tab[data-tab]')).map((button) => ({
+    tab: button.dataset.tab || '',
+    visible: button.style.display !== 'none',
+    artifact: button.id === 'artifactTab',
+  })));
 }
 
 function visibleTab(tab: string): boolean {
@@ -1301,7 +1303,7 @@ function closeArtifact(): void {
   currentArtifact = null;
   state.hasArtifact = false;
   $('artifactTab').style.display = 'none';
-  if (state.tab === 'artifact') switchTab('dashboard');
+  if (state.tab === 'artifact') switchTab(firstVisibleTab() || 'dashboard');
 }
 $('artifactClose').onclick = (e) => { e.stopPropagation(); closeArtifact(); };
 
