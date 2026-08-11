@@ -8,11 +8,26 @@
 
 Before gathering the inputs below, run the default multi-source loop-closing pass (the
 skill version automates this; pasting the prompt, do it by hand): read `_config/sources.md`
-for enabled streams, run `capture-comms` (sent + received email/Slack) then
-`reconcile-from-comms` for today. Tier-A reversible bookkeeping auto-applies; Tier-B task
+for enabled streams and split capture streams (email, Slack, and future capture providers) from
+calendar, which is reconciliation-only. When at least one capture stream is enabled, run
+`capture-comms` (sent + received email/Slack) with only those streams, then run
+`reconcile-from-comms` for all enabled streams. When no capture streams are enabled, skip capture
+and stale digest parsing but still reconcile an enabled calendar; set `includes_comms: false` and
+`comms_coverage: skipped`. Tier-A reversible bookkeeping auto-applies; Tier-B task
 closes (plus passed calendar-event closes if the `calendar` stream is enabled) become the
 numbered `## 0. State confirmation needed` section, confirmed in one batch. Skip this pass
 for backfilled briefings more than ~2 days old.
+
+**Ignore stale digests from disabled sources:** before reconciliation, exclude their whole files
+by `source:` frontmatter (filename stem for legacy files) from both `## Coverage` and `## Action
+items` parsing. Read `## Coverage` only from enabled-source files. If any says `status: partial`,
+preserve the exact `coverage gap`, set briefing frontmatter `comms_coverage: partial`, and surface
+the warning at the top of §0 and the chat report-back. Positive captured signals remain usable;
+absence in an un-scanned source/direction/time range is inconclusive and must never become "not
+sent," "no reply," or "quiet." Set `includes_comms: true` only if at least one capture stream
+actually ran. Use `comms_coverage: complete` only when every enabled capture source finished,
+`partial` when at least one ran but an enabled capture source was incomplete, and `skipped` when
+no capture stream ran. Calendar reconciliation never counts as capture coverage.
 
 When reading `_config/sources.md`, also respect `mailboxes.*`: the mail connector searches only
 `mailboxes.connected` (legacy vaults: `mailboxes.gmail_connected`). Forwarding-in addresses can make received mail visible, but sent

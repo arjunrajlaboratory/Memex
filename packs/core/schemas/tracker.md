@@ -84,8 +84,9 @@ miss_count: 0             # how many consecutive runs produced nothing material
   1. Creates a `tracker_digest` note under `Atlas/Trackers/Digests/`.
   2. Updates `last_checked`, `next_check` (computed from `cadence`), and `last_digest:` on the tracker.
   3. If `auto_update_wiki: true`, edits each `update_targets` page; otherwise creates a needs-review task to do so.
-  4. Appends a line to `log.md`.
-  5. If `notify_in_briefing: true`, the planner picks up the digest in the next daily briefing.
+  4. Appends one bullet to `# History` linking to the digest. `last_digest` is state; `# History` is provenance. Write one line per run, including `material: false` runs.
+  5. Appends a line to `log.md`.
+  6. If `notify_in_briefing: true`, the planner picks up the digest in the next daily briefing.
 - If a tracker produces no material change `miss_count >= 5` consecutive runs, the auditor proposes lengthening the cadence.
 - Trackers with `status: broken` (e.g. URL 404, feed dead) surface in the daily briefing for repair.
 - `sensitivity: sensitive` trackers must use only `search_strategy: manual_prompt` or vetted MCP tools — never raw external web search.

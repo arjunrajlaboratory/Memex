@@ -22,6 +22,9 @@ const api: MemexApi = {
   currentVault: () => invoke('vault:current'),
   resetToolApprovals: () => invoke('permissions:reset'),
   appVersion: () => invoke('app:version'),
+  checkForUpdates: () => invoke('update:check'),
+  installUpdate: () => invoke('update:install'),
+  checkVaultUpdate: () => invoke('vault:updateCheck'),
   legalState: () => invoke('legal:state'),
   legalAccept: () => invoke('legal:accept'),
   legalQuit: () => invoke('app:quit'),
@@ -29,6 +32,7 @@ const api: MemexApi = {
   // data panels
   data: (kind: DataKind) => invoke('data:get', kind),
   appConfig: () => invoke('data:appConfig'),
+  updateTabPreferences: (preferences) => invoke('tabs:updatePreferences', preferences),
   search: (q) => invoke('vault:search', q),
   tabContent: (p) => invoke('tab:content', p),
   tabQuery: (def) => invoke('tab:query', def),
@@ -51,6 +55,7 @@ const api: MemexApi = {
   onFsChanged: (cb) => on('fs:changed', cb),
   onSetupProgress: (cb) => on('setup:progress', cb),
   onIconDrop: (cb) => on('inbox:iconDrop', cb),
+  onUpdateStatus: (cb) => on('update:status', cb),
 };
 
 contextBridge.exposeInMainWorld('memex', api);

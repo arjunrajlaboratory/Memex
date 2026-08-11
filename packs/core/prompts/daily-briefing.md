@@ -32,10 +32,21 @@ immediately and tell the user. Do not overwrite it unless the user explicitly
 confirms regeneration.
 
 **Default loop-closing pass:** before gathering the inputs below, read `_config/sources.md`
-for enabled streams and `mailboxes.*`. Run `capture-comms` for {{date}}, then
-`reconcile-from-comms` in daily-briefing sub-mode, unless {{date}} is more than ~2 days
-old. Tier-A reversible bookkeeping auto-applies; Tier-B proposals become `## 0. State
-confirmation needed` and are confirmed in one batch after the briefing. The mail connector
+for enabled streams and `mailboxes.*`. Separate capture streams (email, Slack, and future capture
+providers) from calendar, which is reconciliation-only. If at least one capture stream is enabled,
+run `capture-comms` for {{date}} with only those streams; then run
+`reconcile-from-comms` in daily-briefing sub-mode for all enabled streams. If no capture streams
+are enabled, skip capture and stale digest parsing, but still reconcile an enabled calendar; set
+`includes_comms: false` and `comms_coverage: skipped`. Skip the whole pass when {{date}} is more
+than ~2 days old. Tier-A reversible bookkeeping auto-applies; Tier-B proposals become `## 0. State
+confirmation needed` and are confirmed in one batch after the briefing. The capture files also
+expose `## Coverage`: read it before reconciling. **Ignore stale digests from disabled sources:**
+exclude their whole files by `source:` frontmatter (filename stem for legacy files) before parsing
+either `## Coverage` or `## Action items`. If any enabled source says `status: partial`, retain its
+exact `coverage gap`, treat absence in its un-scanned range as inconclusive, set
+`comms_coverage: partial`, and put the warning at the top of §0 and the chat report-back even when
+there are no numbered state proposals. Never turn partial capture into "not sent," "no reply," or
+"quiet." The mail connector
 searches only `mailboxes.connected` (legacy vaults: `mailboxes.gmail_connected`): sent mail from `mailboxes.forwarding_in` or
 `mailboxes.other_sending_accounts` is invisible unless separately connected. Separately,
 `search_threads` can lag the connected mailbox itself (a stale cached view, days behind and
@@ -69,7 +80,8 @@ period_start: {{date}}
 period_end: {{date}}
 includes_calendar: true
 includes_agent_queue: true
-includes_comms: <true if the default loop-closing pass ran; false if skipped>
+includes_comms: <true if at least one capture stream ran; false otherwise>
+comms_coverage: <complete | partial when capture ran; skipped if no capture streams ran>
 open_tasks_count: <count>
 projects_reviewed: <count>
 sensitivity: private

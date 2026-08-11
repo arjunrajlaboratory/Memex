@@ -26,6 +26,15 @@ import { buildWikiIndex } from './wiki-index';
 import { SerialQueue } from './serial-queue';
 import { unpackedClaudeBinaryPath } from './claude-binary';
 import { acceptanceRecord, loadLegal, needsAcceptance, type LegalDocs, type TermsAcceptance } from './legal';
+import {
+  CONFIGURABLE_BUILTIN_TAB_IDS,
+  isReservedDesktopTabId,
+  parseDesktopTabsDocument,
+  tabPreferencesFromDocument,
+  withTabPreferences,
+  writeDesktopTabsDocument,
+  type DesktopTabsDocument,
+} from './tab-preferences';
 
 const fsp = fs.promises;
 // Development runs inside the engine checkout; packaged builds carry the exact
@@ -34,6 +43,12 @@ const ENGINE_ROOT = app.isPackaged
   ? path.join(process.resourcesPath, 'engine')
   : path.resolve(__dirname, '..', '..', '..');
 const RENDERER_PATH = path.join(__dirname, '..', 'renderer', 'index.html');
+// The vault's /update skill resolves its engine via MEMEX_ENGINE_DIR when the
+// user doesn't name one. The agent child process inherits this environment, so
+// exporting the bundled engine here makes a typed "update memex" work without
+// the user knowing where the app keeps its engine. A pre-set value wins — a
+// developer pointing at a different engine tree knows better than we do.
+if (!process.env.MEMEX_ENGINE_DIR) process.env.MEMEX_ENGINE_DIR = ENGINE_ROOT;
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 const LEGAL_DIR = path.join(__dirname, '..', 'legal');
 
@@ -168,6 +183,88 @@ function filterRows<T extends FilterableRow>(rows: T[], where: QueryWhere | null
     if (source === 'tasks' && w.exclude_done !== false && !w.status && done.has(r.status || '')) return false;
     return true;
   });
+}
+
+const BUILTIN_TAB_IDS = new Set<string>(CONFIGURABLE_BUILTIN_TAB_IDS);
+const BUILTIN_TAB_PATHS = new Set(['Ops/Tasks', 'Atlas/Projects', 'Atlas/Ideas', 'Atlas/People', 'Inbox', 'outputs']);
+
+// desktop-tabs.json is hand-editable: accept a scalar where the schema wants an
+// array (e.g. "status": "next"), else the filter silently matches nothing.
+function normalizeWhere(w: unknown): QueryWhere | null {
+  if (!w || typeof w !== 'object') return null;
+  const out = { ...(w as QueryWhere) } as Record<string, unknown>;
+  for (const k of ['status', 'priority']) {
+    if (out[k] != null && !Array.isArray(out[k])) out[k] = [String(out[k])];
+  }
+  return out as QueryWhere;
+}
+
+function readDesktopTabsDocument(vault: string, strict = false): DesktopTabsDocument {
+  const relative = path.join('_config', 'desktop-tabs.json');
+  const file = vaultLib.readFile(vault, relative);
+  if (!file || file.kind !== 'text') {
+    if (strict && fs.existsSync(path.join(vault, relative))) throw new Error('desktop-tabs.json is not a safe readable file');
+    return {};
+  }
+  try {
+    return parseDesktopTabsDocument(file.content || '');
+  } catch (error) {
+    if (strict) throw error;
+    return {};
+  }
+}
+
+function appConfigFromDocument(vault: string, document: DesktopTabsDocument): AppConfig {
+  const out: AppConfig = { tabs: [], chips: [], hiddenTabs: [], folders: [], availableFolders: [] };
+  const cfg = document as { tabs?: unknown[]; chips?: unknown[] };
+  if (Array.isArray(cfg.tabs)) {
+    const seen = new Set<string>();
+    out.tabs = cfg.tabs
+      .map((t) => {
+        const tab = t as Partial<TabDef> & { id?: unknown; label?: unknown };
+        if (!tab || !tab.label) return null;
+        // no id: derive one from the label rather than silently dropping the tab
+        const id = String(tab.id || String(tab.label).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, ''));
+        return id ? { ...tab, id } : null;
+      })
+      .filter((t): t is Partial<TabDef> & { id: string; label: string } =>
+        !!t && !isReservedDesktopTabId(t.id) && !seen.has(t.id) && !!seen.add(t.id))
+      .map((t) => {
+        const url = t.url ? String(t.url) : '';
+        return {
+          id: String(t.id),
+          label: String(t.label),
+          kind: (t.kind || (url ? 'web' : (t.source ? 'query' : 'path'))) as TabDef['kind'],
+          path: t.path ? String(t.path) : '',
+          url: url && isSafeExternalUrl(url) ? url : '',
+          source: t.source ? String(t.source) : '',
+          where: normalizeWhere(t.where),
+          empty: t.empty ? String(t.empty) : '',
+        };
+      })
+      .slice(0, 12);
+  }
+  if (Array.isArray(cfg.chips)) {
+    out.chips = (cfg.chips as Array<Partial<ChipDef>>)
+      .filter((c) => !!(c && c.label && c.prompt))
+      .map((c) => ({ label: String(c.label), prompt: String(c.prompt) }))
+      .slice(0, 12);
+  }
+
+  const representedPaths = new Set(BUILTIN_TAB_PATHS);
+  for (const tab of out.tabs) {
+    if (tab.kind === 'path' && tab.path) representedPaths.add(tab.path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''));
+  }
+  // Bound renderer work for pathological vaults; the preference format itself is capped lower.
+  out.availableFolders = vaultLib.listFolders(vault).filter((folder) => !representedPaths.has(folder)).slice(0, 1000);
+  const preferences = tabPreferencesFromDocument(document, [...BUILTIN_TAB_IDS, ...out.tabs.map((tab) => tab.id)], out.availableFolders);
+  out.hiddenTabs = preferences.hiddenTabs;
+  out.folders = preferences.folders;
+  return out;
+}
+
+function readAppConfig(vault: string): AppConfig {
+  return appConfigFromDocument(vault, readDesktopTabsDocument(vault));
 }
 
 // ---------- markdown -> safe html ----------
@@ -558,8 +655,13 @@ async function launchClaudeCode(dirPath: string, vault: string): Promise<{ ok: b
 
 // ---------- auto-update ----------
 // Updates come from the `latest-*.yml` feed the release workflow publishes
-// alongside the installers on GitHub Releases. The update is downloaded in the
-// background and applied when the app next quits.
+// alongside the installers on GitHub Releases. The startup check downloads in
+// the background and applies on the next quit; `update:check` runs the same
+// flow on demand for the button in the vault switcher, which can then offer
+// "Restart to update" via `update:install`.
+let updateDownloadedVersion: string | null = null;
+let updateCheckInFlight: Promise<UpdateStatus> | null = null;
+
 function initAutoUpdater(): void {
   // Dev builds have no feed to read: electron-updater throws looking for
   // dev-app-update.yml. Only packaged apps can update.
@@ -567,11 +669,105 @@ function initAutoUpdater(): void {
   // A failed update check must stay invisible — it is not something the user
   // asked for or can act on. An unhandled 'error' event would otherwise be
   // thrown. Linux .deb installs land here too: electron-updater only supports
-  // AppImage on Linux.
+  // AppImage on Linux. (A *manual* check is different: the user asked, so
+  // checkForUpdatesNow reports its own errors through the invoke result.)
+  // The push below is not a visibility change: the renderer ignores it unless
+  // the button is already showing download progress — its one job is to
+  // un-stick a button that a failed background download would otherwise leave
+  // disabled at "Downloading…" forever.
   autoUpdater.on('error', (err: Error) => {
     console.error('auto-update check failed:', err?.message || err);
+    emit('update:status', { state: 'error', message: String(err?.message || err) });
+  });
+  // Track what any check — startup or manual — has fetched, so the manual
+  // path can answer "ready" instantly instead of re-downloading, and the
+  // button lights up even when the silent startup check did the work.
+  autoUpdater.on('update-downloaded', (info) => {
+    updateDownloadedVersion = info?.version || '';
+    emit('update:status', { state: 'ready', version: updateDownloadedVersion });
+  });
+  autoUpdater.on('download-progress', (p) => {
+    emit('update:status', { state: 'downloading', percent: Math.round(p?.percent || 0) });
   });
   autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+}
+
+// The user-initiated check. Resolves only once the answer is final: a found
+// update is downloaded before this returns, so a `ready` result always means
+// quitAndInstall can act on it. Interim progress goes out as update:status
+// pushes from the listeners above.
+async function checkForUpdatesNow(): Promise<UpdateStatus> {
+  if (!app.isPackaged) {
+    return { state: 'unsupported', message: 'Dev build — updates only apply to the packaged app.' };
+  }
+  if (updateDownloadedVersion !== null) return { state: 'ready', version: updateDownloadedVersion };
+  if (updateCheckInFlight) return updateCheckInFlight;
+  updateCheckInFlight = (async (): Promise<UpdateStatus> => {
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      if (!result || !result.isUpdateAvailable) return { state: 'uptodate', version: app.getVersion() };
+      const version = result.updateInfo?.version || '';
+      emit('update:status', { state: 'downloading', version });
+      if (result.downloadPromise) await result.downloadPromise;
+      updateDownloadedVersion = version;
+      return { state: 'ready', version };
+    } catch (err) {
+      // Reaches here for offline checks and for installs with no update
+      // channel (e.g. Linux .deb — electron-updater only supports AppImage).
+      return { state: 'error', message: String((err as Error)?.message || err) };
+    } finally {
+      updateCheckInFlight = null;
+    }
+  })();
+  return updateCheckInFlight;
+}
+
+// ---------- vault engine updates ----------
+// Distinct from the app auto-update above. The app bundles an engine tree
+// (ENGINE_ROOT), and each vault records the engine version it was baked from
+// in .memex/manifest.json — so an app update routinely leaves an open vault
+// trailing the engine it ships. This check surfaces that gap. The upgrade
+// itself is NOT a blind script run: it's the vault's own /update skill driven
+// through the agent, which performs the deterministic memex-update prepare
+// step and then resolves the judgement calls (3-way merges, collisions,
+// renames) with the user in chat.
+function checkVaultUpdate(): VaultUpdateStatus {
+  const vault = activeVaultPath();
+  if (!vault) return { state: 'no-vault' };
+  let engineVersion = '';
+  try { engineVersion = fs.readFileSync(path.join(ENGINE_ROOT, 'VERSION'), 'utf8').trim(); } catch (_) {}
+  if (!engineVersion) return { state: 'error', message: 'The bundled engine has no readable VERSION file.' };
+  let vaultVersion = '';
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(vault, '.memex', 'manifest.json'), 'utf8')) as { engine_version?: unknown };
+    if (typeof manifest.engine_version === 'string') vaultVersion = manifest.engine_version.trim();
+  } catch (_) {
+    // Missing/unreadable manifest: the vault predates update tracking; the
+    // normal update path would refuse it, so don't offer a button that fails.
+    return { state: 'untracked', engineVersion };
+  }
+  if (!vaultVersion) return { state: 'untracked', engineVersion };
+  return {
+    state: compareDottedVersions(engineVersion, vaultVersion) > 0 ? 'available' : 'current',
+    vaultVersion,
+    engineVersion,
+    enginePath: ENGINE_ROOT,
+  };
+}
+
+// Plain dotted-integer compare (engine VERSION is n.n.n). Anything unparseable
+// falls back to string equality — an exotic version only ever reads "current",
+// never a spurious upgrade offer.
+function compareDottedVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10));
+  const pb = b.split('.').map((n) => parseInt(n, 10));
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (Number.isNaN(x) || Number.isNaN(y)) return 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
 }
 
 // Returns undefined in dev, where the SDK resolves its own binary correctly.
@@ -797,6 +993,18 @@ function registerIpc(): void {
   // actually applied.
   handle('app:version', async () => app.getVersion());
 
+  handle('update:check', async () => checkForUpdatesNow());
+
+  handle('vault:updateCheck', async () => checkVaultUpdate());
+
+  handle('update:install', async () => {
+    if (updateDownloadedVersion === null) return { ok: false };
+    // Quit after the invoke resolves, so the renderer isn't left awaiting a
+    // reply from a window that's already gone.
+    setImmediate(() => autoUpdater.quitAndInstall());
+    return { ok: true };
+  });
+
   handle('permissions:reset', async () => {
     const vault = activeVaultPath();
     if (!vault) return { ok: false };
@@ -854,62 +1062,28 @@ function registerIpc(): void {
     }
   });
 
-  // desktop-tabs.json is hand-editable: accept a scalar where the schema wants an
-  // array (e.g. "status": "next"), else the filter silently matches nothing.
-  function normalizeWhere(w: unknown): QueryWhere | null {
-    if (!w || typeof w !== 'object') return null;
-    const out = { ...(w as QueryWhere) } as Record<string, unknown>;
-    for (const k of ['status', 'priority']) {
-      if (out[k] != null && !Array.isArray(out[k])) out[k] = [String(out[k])];
-    }
-    return out as QueryWhere;
-  }
-
   handle('data:appConfig', async (): Promise<AppConfig> => {
-    const out: AppConfig = { tabs: [], chips: [] };
     const vault = activeVaultPath();
-    if (!vault) return out;
-    const builtins = new Set(['dashboard', 'tasks', 'projects', 'ideas', 'people', 'inbox', 'outbox', 'artifact']);
-    try {
-      const file = vaultLib.readFile(vault, path.join('_config', 'desktop-tabs.json'));
-      if (!file || file.kind !== 'text') return out;
-      const raw = file.content || '';
-      const cfg = JSON.parse(raw) as { tabs?: unknown[]; chips?: unknown[] };
-      if (Array.isArray(cfg.tabs)) {
-        const seen = new Set<string>();
-        out.tabs = cfg.tabs
-          .map((t) => {
-            const tab = t as Partial<TabDef> & { id?: unknown; label?: unknown };
-            if (!tab || !tab.label) return null;
-            // no id: derive one from the label rather than silently dropping the tab
-            const id = String(tab.id || String(tab.label).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, ''));
-            return id ? { ...tab, id } : null;
-          })
-          .filter((t): t is Partial<TabDef> & { id: string; label: string } =>
-            !!t && !builtins.has(t.id.toLowerCase()) && !seen.has(t.id) && !!seen.add(t.id))
-          .map((t) => {
-            const url = t.url ? String(t.url) : '';
-            return {
-              id: String(t.id),
-              label: String(t.label),
-              kind: (t.kind || (url ? 'web' : (t.source ? 'query' : 'path'))) as TabDef['kind'],
-              path: t.path ? String(t.path) : '',
-              url: url && isSafeExternalUrl(url) ? url : '',
-              source: t.source ? String(t.source) : '',
-              where: normalizeWhere(t.where),
-              empty: t.empty ? String(t.empty) : '',
-            };
-          })
-          .slice(0, 12);
-      }
-      if (Array.isArray(cfg.chips)) {
-        out.chips = (cfg.chips as Array<Partial<ChipDef>>)
-          .filter((c) => !!(c && c.label && c.prompt))
-          .map((c) => ({ label: String(c.label), prompt: String(c.prompt) }))
-          .slice(0, 12);
-      }
-    } catch (_) {}
-    return out;
+    return vault ? readAppConfig(vault) : { tabs: [], chips: [], hiddenTabs: [], folders: [], availableFolders: [] };
+  });
+
+  handle('tabs:updatePreferences', async (_e, input: TabPreferenceUpdate): Promise<AppConfig> => {
+    const vault = activeVaultPath();
+    if (!vault) throw new Error('No vault is open');
+    const currentDocument = readDesktopTabsDocument(vault, true);
+    const current = appConfigFromDocument(vault, currentDocument);
+    const nextDocument = withTabPreferences(
+      currentDocument,
+      input,
+      [...BUILTIN_TAB_IDS, ...current.tabs.map((tab) => tab.id)],
+      current.availableFolders,
+    );
+    const createdConfigDirectory = writeDesktopTabsDocument(vault, nextDocument);
+    // On platforms without recursive root watching, a missing _config directory
+    // was skipped when the vault opened. Attach the fallback watcher now that the
+    // picker created it so later agent/manual edits still rebuild the tab bar live.
+    if (createdConfigDirectory) startWatchers(vault);
+    return appConfigFromDocument(vault, nextDocument);
   });
 
   handle('tab:query', async (_e, def: TabDef | null): Promise<TabQueryResult> => {

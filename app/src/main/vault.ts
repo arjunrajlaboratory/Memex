@@ -334,6 +334,29 @@ export function listFolder(vault: string, relDir: string): FileEntry[] {
   return acc;
 }
 
+const HIDDEN_FOLDER_NAMES = new Set(['node_modules', 'dist', 'release']);
+
+/** List user-facing vault folders without exposing hidden/configuration trees or symlinks. */
+export function listFolders(vault: string, maxDepth = 4): string[] {
+  const folders: string[] = [];
+  const walkFolders = (relDir: string, depth: number): void => {
+    if (depth > maxDepth || folders.length >= MAX_DIRECTORY_ENTRIES) return;
+    const full = relDir ? path.join(vault, relDir) : vault;
+    for (const ent of safeList(full)) {
+      if (folders.length >= MAX_DIRECTORY_ENTRIES) return;
+      if (!ent.isDirectory() || ent.isSymbolicLink() || ent.name.startsWith('.') || ent.name.startsWith('_') || HIDDEN_FOLDER_NAMES.has(ent.name)) continue;
+      const rel = relDir ? path.join(relDir, ent.name) : ent.name;
+      if (pathType(vault, rel) !== 'directory') continue;
+      // Store portable slash-separated paths in the vault config, including on Windows.
+      const portable = rel.split(path.sep).join('/');
+      folders.push(portable);
+      walkFolders(rel, depth + 1);
+    }
+  };
+  walkFolders('', 1);
+  return folders.sort((a, b) => a.localeCompare(b));
+}
+
 export function latestBriefing(vault: string): BriefingInfo | null {
   const dir = path.join(vault, 'Ops/Briefings');
   if (pathType(vault, 'Ops/Briefings') !== 'directory') return null;

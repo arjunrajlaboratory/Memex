@@ -1,6 +1,6 @@
 ---
 name: cv-scan
-description: Scan Gmail + Google Calendar (and recent vault signals) for CV-worthy events — invited talks, accepted/published papers, awards, editorial/review/departmental service — dedupe against the existing CV/*.tex, and append paste-ready LaTeX snippets to the CV candidates staging queue. Use whenever the user wants to refresh CV additions — signaled by "scan for CV items", "any new CV items", "update my CV", "what's missing from my CV", "run the CV scan", "/cv-scan", or when the weekly run-trackers pass hits the [[cv-items]] tracker. Read-only against Gmail/Calendar and the .tex files; writes ONLY Ops/Followups/CV candidates.md, log.md, and run bookkeeping on the [[cv-items]] tracker (last_checked/next_check/miss_count) + the followup's surface_on. Never sends email, never edits the .tex.
+description: Scan Gmail + Google Calendar (and recent vault signals) for CV-worthy events — invited talks, accepted/published papers, awards, editorial/review/departmental service — dedupe against the existing CV/*.tex, and append paste-ready LaTeX snippets to the CV candidates staging queue. Use whenever the user wants to refresh CV additions — signaled by "scan for CV items", "any new CV items", "update my CV", "what's missing from my CV", "run the CV scan", "/cv-scan", or when the weekly run-trackers pass hits the [[cv-items]] tracker. Read-only against Gmail/Calendar and the .tex files; writes ONLY Ops/Followups/CV candidates.md, a Tracker Digest, log.md, run bookkeeping and # History on the [[cv-items]] tracker, and the followup's surface_on. Never sends email, never edits the .tex.
 ---
 
 # cv-scan
@@ -10,8 +10,10 @@ LaTeX snippets in [[CV candidates]] for the user to fold into the canonical LaTe
 
 ## Hard rules
 
-- **Propose only.** Never edit any `CV/*.tex` file. Output goes to
-  `Ops/Followups/CV candidates.md` only (plus one `log.md` line).
+- **Propose only.** Never edit any `CV/*.tex` file. Allowed writes are
+  `Ops/Followups/CV candidates.md`, the run's Tracker Digest, `[[cv-items]]`
+  bookkeeping and `# History`, the [[CV candidates]] followup's `surface_on`, and one
+  `log.md` line.
 - **Read-only** against Gmail and Calendar. Never send, draft, or label email.
 - **Dedupe before proposing.** An item already present in the relevant `.tex` is dropped.
 - **Real, not tentative.** Talks must be delivered or firmly scheduled; papers accepted or
@@ -92,13 +94,30 @@ LaTeX snippets in [[CV candidates]] for the user to fold into the canonical LaTe
    ```
    Update the note's "Last scan window:" line.
 
-10. **Update the tracker.** Set `[[cv-items]]` `last_checked: <today>`,
-    `next_check: <today + 7d>`. If the run found nothing material, increment `miss_count`,
-    else reset to 0. Also bump the [[CV candidates]] followup's `surface_on` to the new
-    `next_check`.
+10. **Create the tracker digest.** Write
+    `Atlas/Trackers/Digests/Tracker Digest - cv-items - <today>.md` conforming to
+    `_schemas/tracker_digest.md`, including `material: false` runs. Count all fresh,
+    deduped candidates in `items_found`; count high- and medium-confidence candidates in
+    `items_material`. Populate every required body section:
+    - `# What I looked at` — scan window and Gmail, Calendar, lab-website, and vault signals checked.
+    - `# What's new` — every fresh, deduped candidate, including low-confidence items.
+    - `# What's material` — high- and medium-confidence candidates staged for the CV.
+    - `# What I changed` — the dated [[CV candidates]] block and `surface_on` update.
+    - `# What needs review` — the low-confidence / FYI candidates.
+    - `# Next-run recommendations` — useful query, source, or cadence adjustments.
 
-11. **Log.** Append to `log.md`:
-    `<datetime> — actor:me — scan — [[CV candidates]] — cv-scan: <N> candidates (<H> high, <M> med, <L> fyi)`
+11. **Update the tracker and its history.** Set `[[cv-items]]` `last_checked: <today>`,
+    `next_check: <today + 7d>`, `last_digest: [[Tracker Digest - cv-items - <today>]]`,
+    and `updated: <today>`. If the run found nothing material, increment `miss_count`;
+    otherwise reset it to 0. If `miss_count >= 5`, set `status: needs_review`. Also bump
+    the [[CV candidates]] followup's `surface_on` to the new `next_check`.
+
+    `last_digest` is state; `# History` is provenance. Append one bullet linking to the
+    digest—one line per run, including `material: false` runs:
+    `- <today> — Run. material=<bool>, <N> items (<H+M> material). <headline, or "nothing material">. Staged <N> candidates in [[CV candidates]]. → [[Tracker Digest - cv-items - <today>]].`
+
+12. **Log.** Append to `log.md`:
+    `<datetime> — agent:tracker — scan — [[CV candidates]] — cv-scan: <N> candidates (<H> high, <M> med, <L> fyi); [[Tracker Digest - cv-items - <today>]] created`
 
 ## What this skill never does
 

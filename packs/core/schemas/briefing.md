@@ -21,16 +21,22 @@ period_start: YYYY-MM-DD
 period_end: YYYY-MM-DD
 includes_calendar: true
 includes_agent_queue: true
-includes_comms: true      # daily briefing ran the default capture-comms + reconcile loop (Step 1b)
+includes_comms: true      # true iff at least one capture stream actually ran; calendar does not count
+comms_coverage: complete  # complete | partial if capture ran; skipped if no capture streams ran
 open_tasks_count: 0
 projects_reviewed: 0
 sensitivity: private      # briefings touch everything; default private
 ---
 ```
 
+`includes_comms` tracks capture execution, not the whole loop-closing pass: it is true only when
+at least one capture stream ran. If no capture streams ran — even when calendar reconciliation
+did — set `includes_comms: false` and `comms_coverage: skipped`. Never infer absence from partial
+coverage.
+
 ## Body sections (daily)
 
-- (optional) `## 0. State confirmation needed` — rendered above § 1 only when the default comms loop-closing pass ([[reconcile-from-comms]], via daily-briefing Step 1b) or the stale-state queries surface items whose vault status likely lags reality. Absent on a healthy day. Items are numbered for the batched "yes to 1,3" confirmation.
+- (optional) `## 0. State confirmation needed` — rendered above § 1 when the default comms loop-closing pass ([[reconcile-from-comms]], via daily-briefing Step 1b) or the stale-state queries surface items whose vault status likely lags reality, **or when `comms_coverage: partial`**. A partial capture starts the section with a warning naming each source/direction and un-scanned range; absence there is inconclusive. State proposals remain numbered for the batched "yes to 1,3" confirmation. Absent only when the pass has neither state items nor coverage gaps.
 1. `## 1. Top 3 outcomes for today`
 2. `## 2. Calendar / time map`
 3. `## 3. Tasks due or scheduled today`

@@ -90,3 +90,26 @@ test('vault collection content budgets are cumulative', () => {
   assert.equal(budget.take(4), true);
   assert.equal(budget.take(1), false);
 });
+
+test('folder discovery returns nested content folders but not hidden or configuration trees', (t) => {
+  const { vault, outside } = makeTree(t);
+  fs.mkdirSync(path.join(vault, 'Agents/Prompts'), { recursive: true });
+  fs.mkdirSync(path.join(vault, 'Atlas/Areas'), { recursive: true });
+  fs.mkdirSync(path.join(vault, '_config/private'), { recursive: true });
+  fs.mkdirSync(path.join(vault, '.living/private'), { recursive: true });
+  fs.mkdirSync(path.join(vault, 'node_modules/private'), { recursive: true });
+  try {
+    fs.symlinkSync(outside, path.join(vault, 'Linked'), process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (!error || (error.code !== 'EPERM' && error.code !== 'EACCES')) throw error;
+  }
+
+  const folders = vaultLib.listFolders(vault);
+  assert.equal(folders.includes('Agents'), true);
+  assert.equal(folders.includes('Agents/Prompts'), true);
+  assert.equal(folders.includes('Atlas/Areas'), true);
+  assert.equal(folders.some((folder) => folder.startsWith('_config')), false);
+  assert.equal(folders.some((folder) => folder.startsWith('.living')), false);
+  assert.equal(folders.some((folder) => folder.startsWith('node_modules')), false);
+  assert.equal(folders.includes('Linked'), false);
+});
