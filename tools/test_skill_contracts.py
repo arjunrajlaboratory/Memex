@@ -96,15 +96,22 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
     def test_jira_scan_is_bounded_paginated_and_changelog_aware(self):
         jira_step = numbered_step(self.skill, 5)
         self.assertRegex(jira_step, r"(?is)updated >=.+updated <")
+        jql = re.search(r"(?s)```text\n(.*?)\n\s*```", jira_step)
+        self.assertIsNotNone(jql)
+        self.assertNotRegex(
+            jql.group(1),
+            r"(?i)assignee|reporter|watcher|participant|mention|currentUser",
+        )
+        self.assertRegex(jira_step, r"(?is)do not pre-filter discovery.{0,220}unrelated issue")
         self.assertRegex(jira_step, r"(?i)calendar-day\s+slices")
         self.assertIn("nextPageToken", jira_step)
         self.assertRegex(jira_step, r"(?is)first result page.{0,40}never complete")
+        self.assertRegex(jira_step, r"(?i)for every issue in the global map")
         self.assertRegex(jira_step, r"(?i)comments and changelog|changelog/history")
         self.assertRegex(jira_step, r"(?i)author account id|actor account id")
-        self.assertRegex(jira_step, r"(?i)reassigned away|historical-assignee")
         self.assertRegex(
             jira_step,
-            r"(?is)(?:historical-assignment|mention-only).{0,220}coverage gap",
+            r"(?is)(?:comments or changelog/history).{0,260}(?:exhaustion|coverage gap)",
         )
 
     def test_jira_scan_is_read_only_and_writes_standard_digest(self):
@@ -139,6 +146,18 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         self.assertIn("notion-fetch", notion_step)
         self.assertIn("notion-get-comments", notion_step)
         self.assertRegex(notion_step, r"(?is)paginate comments.{0,40}exhaustion")
+        self.assertRegex(
+            notion_step,
+            r"(?is)comment-only activity independently.{0,320}last_edited_time",
+        )
+        self.assertRegex(
+            notion_step,
+            r"(?is)otherwise write `notion\.md` as partial.{0,300}coverage\s+gap",
+        )
+        self.assertRegex(
+            notion_step,
+            r"(?is)comment-only activity.{0,180}undiscoverable for the full window",
+        )
 
     def test_notion_scan_classifies_actors_privately_and_read_only(self):
         notion_step = numbered_step(self.skill, 6)

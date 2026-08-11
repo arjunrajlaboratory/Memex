@@ -103,7 +103,7 @@ generated `_config/sources.md` continues to advertise the streams.
 
 | Engine file changed here | Source-vault location | What to mirror |
 | --- | --- | --- |
-| `packs/core/skills/capture-comms/SKILL.md` | `.claude/skills/capture-comms/SKILL.md` | Add read-only Notion and Jira scans: identity resolution, bounded/paginated enumeration, actor-aware comment/edit/changelog classification, per-source digests, and coverage checks. |
+| `packs/core/skills/capture-comms/SKILL.md` | `.claude/skills/capture-comms/SKILL.md` | Add read-only Notion and Jira scans: identity resolution, unfiltered bounded/paginated Jira enumeration, actor-aware comment/edit/changelog classification, explicit Notion comment-only discovery gaps, per-source digests, and coverage checks. |
 | `packs/core/skills/reconcile-from-comms/SKILL.md` | `.claude/skills/reconcile-from-comms/SKILL.md` | Treat `↳ thread:` as a source locator and confirm Notion/Jira items through source-native read-only page/comment or issue/changelog reads. |
 | `packs/core/skills/daily-briefing/SKILL.md` | `.claude/skills/daily-briefing/SKILL.md` | Include enabled Notion/Jira activity in the default loop-closing pass and source-neutral read-only guarantees. |
 | `packs/core/workflows/daily-briefing.md` | `_workflows/daily-briefing.md` | Describe Notion comments/edits and Jira assignments/comments/transitions as capture inputs. |

@@ -270,28 +270,29 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      upper bounds, the resolved `cloudId`, and a query equivalent to:
      ```text
      updated >= "<slice_start>" AND updated < "<slice_end>"
-       AND (assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser())
        ORDER BY updated DESC
      ```
-     Also run bounded historical-assignee and text/comment-mention queries when the site supports
-     them, so an issue reassigned away during the window or a mention-only issue is not silently
-     lost. Do not make the core query invalid on sites where those clauses are unavailable;
-     preserve the core hits but mark the unsupported historical-assignment or mention-only scope
-     as a `coverage gap`. Filter returned timestamps against the exact slice boundaries locally
-     because JQL time comparisons use the Jira site's timezone.
+     This broad updated-set query is deliberate. **Do not pre-filter discovery** by current or
+     historical assignee, reporter, watcher, participant, or mention: the owner may have commented
+     on or transitioned an otherwise unrelated issue, and those relationships are not guaranteed
+     to be present. Use relationship fields only to classify or prioritize after reading history.
+     Filter returned timestamps against the exact slice boundaries locally because JQL time
+     comparisons use the Jira site's timezone.
    - **No silent result-page caps.** Split windows over 2 days into non-overlapping calendar-day
      slices and paginate every slice until `nextPageToken` (or the provider's equivalent) is
-     absent. Build one global map keyed by Jira issue key across every slice, page, relationship
-     clause, and optional mention query. Merge query/slice provenance before reading each unique
-     issue once. If pagination or a slice stops early, mark `jira.md` partial and record the exact
-     un-scanned slice plus next token in `coverage gap`; the first result page is never complete
-     coverage.
-   - **Read enough history to classify.** For every potentially loop-relevant issue, call
+     absent. Build one global map keyed by Jira issue key across every slice and page. Merge slice
+     provenance before reading each unique issue once. If pagination or a slice stops early, mark
+     `jira.md` partial and record the exact un-scanned slice plus next token in `coverage gap`; the
+     first result page is never complete coverage.
+   - **Read enough history to classify.** For every issue in the global map, call
      `getJiraIssue` with comments and changelog/history expansion (or the connector's closest
      read-only equivalent). Compare each event's author account id with the authenticated account
      id and ignore events outside the exact window. Do not classify from the issue's current
      fields alone: they do not identify who assigned, commented, or transitioned it during the
-     window.
+     window. If comments or changelog/history are paginated or report a total larger than the
+     returned entries, follow their cursors/pages to exhaustion. If the connector cannot expose
+     or exhaust that history, preserve positive hits but mark the affected issue and time range as
+     a `coverage gap`; never treat partial issue history as negative evidence.
    - **Open-loop signals:** a new assignment to the user; another user's comment that mentions,
      asks, or requests action from the user; or a transition by someone else that puts work back
      into an actionable state for the user. **Close-loop signals:** the user's own transition to
@@ -321,11 +322,20 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      only a capped search with no exhaustive cursor or bounded timestamp filter, preserve the hits
      but mark the unprovable remainder as a `coverage gap`; never call the first result page
      complete coverage.
-   - **Fetch page and comment context read-only.** For each potentially loop-relevant hit, call
+   - **Discover comment-only activity independently when possible.** A comment or resolution may
+     not change its parent page's `last_edited_time`, so page search alone cannot prove comment
+     coverage. If the connector exposes a read-only, workspace-wide comment/activity listing,
+     enumerate and paginate it over the same bounded slices and add every referenced page id to
+     the global map. Otherwise write `notion.md` as partial and record this explicit `coverage
+     gap`: comment-only activity on pages not returned by the last-edited search was
+     undiscoverable for the full window. Preserve positive page/comment hits, but never use this
+     partial scope as negative evidence.
+   - **Fetch page and comment context read-only.** For every page in the global map, call
      `notion-fetch`, then `notion-get-comments` with resolved threads included. Paginate comments
      to exhaustion too. Keep page id/URL, edit timestamp/actor, discussion id, comment timestamp,
      author id, mention targets, reply ancestry, and resolved state as provenance. Ignore events
-     outside the exact window. Summarize one level up; never paste page or comment bodies.
+     outside the exact window. If any page's comment pagination cannot finish, record that page
+     and remainder as a `coverage gap`. Summarize one level up; never paste page or comment bodies.
    - **Open-loop signals:** an unresolved comment by another user that mentions the owner or asks
      them for action, or a loop-relevant page edit/automation update that creates a review or
      approval request for them. **Close-loop signals:** the owner's own reply or resolution, or
@@ -360,14 +370,15 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
    3. For Slack, did the author-search use `after:<window_start date − 1 day>` rather than the
       window's own date, and did `slack_read_channel` cover every distinct conversation ID the
       search surfaced? If not, retry Step 4 or record the exact unscanned remainder as a gap.
-   4. For Jira, did identity + `cloudId` resolution succeed, did relationship,
-      historical-assignment, and mention queries either finish or record their unsupported scope,
-      did every JQL slice paginate to exhaustion, and did classification use changelog/comments
-      with event authors and timestamps? If not, retry Step 5 or record the exact un-scanned
-      remainder as a gap.
-   5. For Notion, did user identity resolution succeed, did page search and comment reads both
-      paginate to exhaustion, and did close classification use actor + request context? If not,
-      retry Step 6 or record the exact un-scanned remainder as a gap.
+   4. For Jira, did identity + `cloudId` resolution succeed, did the unfiltered updated-set query
+      and every JQL slice paginate to exhaustion, and did classification use exhaustive
+      changelog/comments with event authors and timestamps? If not, retry Step 5 or record the
+      exact un-scanned remainder as a gap.
+   5. For Notion, did user identity resolution succeed; did page search, independent comment
+      discovery (when supported), and per-page comment reads paginate to exhaustion; and did close
+      classification use actor + request context? If no independent comment discovery exists, is
+      the full-window comment-only scope explicitly recorded as a coverage gap? If not, retry Step
+      6 or record the exact un-scanned remainder as a gap.
    6. Does the digest contain any completeness claim — "quiet", "no DMs besides X", "nothing from
       Y" — resting on a search result or a partial scan? Verify it with the source read or delete it.
    7. Sanity-check the magnitude against the window length and this user's activity. **Three
