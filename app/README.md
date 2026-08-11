@@ -79,7 +79,10 @@ driving a packaged build, including how to test auto-update.
 
 ## Customizing tabs & quick-actions
 
-The right panel's tabs *and* the quick-action chips are user-customizable, the Memex way — as a plain
+The right panel starts with a curated set of frequently used tabs. Use the **gear beside the tab bar**
+to hide any of those defaults or add any other folder in the vault; choices are stored per vault.
+
+Tabs *and* the quick-action chips are also user-customizable, the Memex way — as a plain
 vault file the agent maintains, `_config/desktop-tabs.json`. You don't edit it by hand: just ask the
 agent ("add a CV tab", "add a tab for my p1 tasks", "embed my dashboards", "add a Blockers shortcut")
 and it writes the file. The app watches `_config/` and **rebuilds live** — no restart, no refresh.
@@ -95,6 +98,18 @@ and it writes the file. The app watches `_config/` and **rebuilds live** — no 
   "chips": [
     { "label": "Blockers", "prompt": "What's blocked right now and why?" }
   ]
+}
+```
+
+The gear stores its choices in the same file under `navigation`, while preserving tabs, chips, and
+other settings:
+
+```json
+{
+  "navigation": {
+    "hidden": ["ideas"],
+    "folders": ["Atlas/Areas", "Ops/Briefings"]
+  }
 }
 ```
 

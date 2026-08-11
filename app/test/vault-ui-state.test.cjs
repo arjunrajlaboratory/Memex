@@ -12,7 +12,8 @@ test('vault UI reset clears all session-scoped model state', () => {
     const state = {
       tab: 'artifact', activeAssistant: { raw: 'old vault' },
       toolCards: new Map([['old', {}]]), busy: true, hasArtifact: true,
-      history: [{ k: 'art' }], histPos: 0, customTabs: [{}], customChips: [{}],
+      history: [{ k: 'art' }], histPos: 0, customTabs: [{}], configuredTabs: [{}], customChips: [{}],
+      hiddenTabs: ['people'], selectedFolders: ['Atlas/Areas'], availableFolders: ['Atlas/Areas'],
     };
     resetVaultUiModel(state);
     return { ...state, toolCardCount: state.toolCards.size };
@@ -26,7 +27,11 @@ test('vault UI reset clears all session-scoped model state', () => {
   assert.deepEqual(Array.from(result.history), []);
   assert.equal(result.histPos, -1);
   assert.deepEqual(Array.from(result.customTabs), []);
+  assert.deepEqual(Array.from(result.configuredTabs), []);
   assert.deepEqual(Array.from(result.customChips), []);
+  assert.deepEqual(Array.from(result.hiddenTabs), []);
+  assert.deepEqual(Array.from(result.selectedFolders), []);
+  assert.deepEqual(Array.from(result.availableFolders), []);
 });
 
 test('a failed vault-open request does not advance the committed vault epoch', () => {

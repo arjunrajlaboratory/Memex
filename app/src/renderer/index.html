@@ -96,15 +96,32 @@
         </button>
       </div>
       <nav class="tabs" id="tabs">
-        <button class="tab active" data-tab="dashboard">Dashboard</button>
-        <button class="tab" data-tab="tasks">Tasks <span class="tab-count" id="cntTasks"></span></button>
-        <button class="tab" data-tab="projects">Projects <span class="tab-count" id="cntProjects"></span></button>
-        <button class="tab" data-tab="ideas">Ideas <span class="tab-count" id="cntIdeas"></span></button>
-        <button class="tab" data-tab="people">People <span class="tab-count" id="cntPeople"></span></button>
-        <button class="tab" data-tab="inbox">Inbox <span class="tab-count badge" id="cntInbox"></span></button>
-        <button class="tab" data-tab="outbox">Outbox <span class="tab-count" id="cntOutputs"></span></button>
+        <button class="tab active" data-tab="dashboard" data-builtin="1">Dashboard</button>
+        <button class="tab" data-tab="tasks" data-builtin="1">Tasks <span class="tab-count" id="cntTasks"></span></button>
+        <button class="tab" data-tab="projects" data-builtin="1">Projects <span class="tab-count" id="cntProjects"></span></button>
+        <button class="tab" data-tab="ideas" data-builtin="1">Ideas <span class="tab-count" id="cntIdeas"></span></button>
+        <button class="tab" data-tab="people" data-builtin="1">People <span class="tab-count" id="cntPeople"></span></button>
+        <button class="tab" data-tab="inbox" data-builtin="1">Inbox <span class="tab-count badge" id="cntInbox"></span></button>
+        <button class="tab" data-tab="outbox" data-builtin="1">Outbox <span class="tab-count" id="cntOutputs"></span></button>
         <button class="tab tab-artifact" data-tab="artifact" id="artifactTab" style="display:none">Artifact<span class="tab-close" id="artifactClose" title="Close artifact">×</span></button>
       </nav>
+      <div class="tab-settings" id="tabSettings">
+        <button class="tab-settings-toggle" id="tabSettingsToggle" type="button" title="Choose tabs" aria-label="Choose tabs" aria-haspopup="dialog" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6v.2h-4V21a1.7 1.7 0 00-1-1.6 1.7 1.7 0 00-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 00.3-1.9A1.7 1.7 0 003 14H2.8v-4H3a1.7 1.7 0 001.6-1 1.7 1.7 0 00-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 001.9.3A1.7 1.7 0 0010 3v-.2h4V3a1.7 1.7 0 001 1.6 1.7 1.7 0 001.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 00-.3 1.9 1.7 1.7 0 001.6 1h.2v4H21a1.7 1.7 0 00-1.6 1z"/></svg>
+        </button>
+        <form class="tab-settings-popover" id="tabSettingsPopover" role="dialog" aria-label="Choose tabs" hidden>
+          <div class="tab-settings-head">
+            <div><strong>Choose tabs</strong><span>Keep the essentials, add any vault folders you use.</span></div>
+            <button class="tab-settings-close" id="tabSettingsClose" type="button" aria-label="Close tab chooser">×</button>
+          </div>
+          <div class="tab-settings-options" id="tabSettingsOptions"></div>
+          <div class="tab-settings-foot">
+            <button class="tab-settings-reset" id="tabSettingsReset" type="button">Restore defaults</button>
+            <span class="tab-settings-status" id="tabSettingsStatus" aria-live="polite"></span>
+            <button class="btn tiny" id="tabSettingsSave" type="submit">Done</button>
+          </div>
+        </form>
+      </div>
       </div>
       <div class="panel-body" id="panelBody"></div>
     </section>

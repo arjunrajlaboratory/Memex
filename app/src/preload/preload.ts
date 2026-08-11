@@ -32,6 +32,7 @@ const api: MemexApi = {
   // data panels
   data: (kind: DataKind) => invoke('data:get', kind),
   appConfig: () => invoke('data:appConfig'),
+  updateTabPreferences: (preferences) => invoke('tabs:updatePreferences', preferences),
   search: (q) => invoke('vault:search', q),
   tabContent: (p) => invoke('tab:content', p),
   tabQuery: (def) => invoke('tab:query', def),

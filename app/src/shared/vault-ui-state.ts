@@ -7,7 +7,11 @@ interface ResettableVaultUiState {
   history: unknown[];
   histPos: number;
   customTabs: unknown[];
+  configuredTabs: unknown[];
   customChips: unknown[];
+  hiddenTabs: string[];
+  selectedFolders: string[];
+  availableFolders: string[];
 }
 
 interface VaultOpenEpochState {
@@ -38,5 +42,9 @@ function resetVaultUiModel(state: ResettableVaultUiState): void {
   state.history = [];
   state.histPos = -1;
   state.customTabs = [];
+  state.configuredTabs = [];
   state.customChips = [];
+  state.hiddenTabs = [];
+  state.selectedFolders = [];
+  state.availableFolders = [];
 }

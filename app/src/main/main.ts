@@ -26,6 +26,13 @@ import { buildWikiIndex } from './wiki-index';
 import { SerialQueue } from './serial-queue';
 import { unpackedClaudeBinaryPath } from './claude-binary';
 import { acceptanceRecord, loadLegal, needsAcceptance, type LegalDocs, type TermsAcceptance } from './legal';
+import {
+  parseDesktopTabsDocument,
+  tabPreferencesFromDocument,
+  withTabPreferences,
+  writeDesktopTabsDocument,
+  type DesktopTabsDocument,
+} from './tab-preferences';
 
 const fsp = fs.promises;
 // Development runs inside the engine checkout; packaged builds carry the exact
@@ -174,6 +181,88 @@ function filterRows<T extends FilterableRow>(rows: T[], where: QueryWhere | null
     if (source === 'tasks' && w.exclude_done !== false && !w.status && done.has(r.status || '')) return false;
     return true;
   });
+}
+
+const BUILTIN_TAB_IDS = new Set(['dashboard', 'tasks', 'projects', 'ideas', 'people', 'inbox', 'outbox']);
+const BUILTIN_TAB_PATHS = new Set(['Ops/Tasks', 'Atlas/Projects', 'Atlas/Ideas', 'Atlas/People', 'Inbox', 'outputs']);
+
+// desktop-tabs.json is hand-editable: accept a scalar where the schema wants an
+// array (e.g. "status": "next"), else the filter silently matches nothing.
+function normalizeWhere(w: unknown): QueryWhere | null {
+  if (!w || typeof w !== 'object') return null;
+  const out = { ...(w as QueryWhere) } as Record<string, unknown>;
+  for (const k of ['status', 'priority']) {
+    if (out[k] != null && !Array.isArray(out[k])) out[k] = [String(out[k])];
+  }
+  return out as QueryWhere;
+}
+
+function readDesktopTabsDocument(vault: string, strict = false): DesktopTabsDocument {
+  const relative = path.join('_config', 'desktop-tabs.json');
+  const file = vaultLib.readFile(vault, relative);
+  if (!file || file.kind !== 'text') {
+    if (strict && fs.existsSync(path.join(vault, relative))) throw new Error('desktop-tabs.json is not a safe readable file');
+    return {};
+  }
+  try {
+    return parseDesktopTabsDocument(file.content || '');
+  } catch (error) {
+    if (strict) throw error;
+    return {};
+  }
+}
+
+function appConfigFromDocument(vault: string, document: DesktopTabsDocument): AppConfig {
+  const out: AppConfig = { tabs: [], chips: [], hiddenTabs: [], folders: [], availableFolders: [] };
+  const cfg = document as { tabs?: unknown[]; chips?: unknown[] };
+  if (Array.isArray(cfg.tabs)) {
+    const seen = new Set<string>();
+    out.tabs = cfg.tabs
+      .map((t) => {
+        const tab = t as Partial<TabDef> & { id?: unknown; label?: unknown };
+        if (!tab || !tab.label) return null;
+        // no id: derive one from the label rather than silently dropping the tab
+        const id = String(tab.id || String(tab.label).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, ''));
+        return id ? { ...tab, id } : null;
+      })
+      .filter((t): t is Partial<TabDef> & { id: string; label: string } =>
+        !!t && !BUILTIN_TAB_IDS.has(t.id.toLowerCase()) && !t.id.startsWith('folder:') && !seen.has(t.id) && !!seen.add(t.id))
+      .map((t) => {
+        const url = t.url ? String(t.url) : '';
+        return {
+          id: String(t.id),
+          label: String(t.label),
+          kind: (t.kind || (url ? 'web' : (t.source ? 'query' : 'path'))) as TabDef['kind'],
+          path: t.path ? String(t.path) : '',
+          url: url && isSafeExternalUrl(url) ? url : '',
+          source: t.source ? String(t.source) : '',
+          where: normalizeWhere(t.where),
+          empty: t.empty ? String(t.empty) : '',
+        };
+      })
+      .slice(0, 12);
+  }
+  if (Array.isArray(cfg.chips)) {
+    out.chips = (cfg.chips as Array<Partial<ChipDef>>)
+      .filter((c) => !!(c && c.label && c.prompt))
+      .map((c) => ({ label: String(c.label), prompt: String(c.prompt) }))
+      .slice(0, 12);
+  }
+
+  const representedPaths = new Set(BUILTIN_TAB_PATHS);
+  for (const tab of out.tabs) {
+    if (tab.kind === 'path' && tab.path) representedPaths.add(tab.path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, ''));
+  }
+  // Bound renderer work for pathological vaults; the preference format itself is capped lower.
+  out.availableFolders = vaultLib.listFolders(vault).filter((folder) => !representedPaths.has(folder)).slice(0, 1000);
+  const preferences = tabPreferencesFromDocument(document, [...BUILTIN_TAB_IDS, ...out.tabs.map((tab) => tab.id)], out.availableFolders);
+  out.hiddenTabs = preferences.hiddenTabs;
+  out.folders = preferences.folders;
+  return out;
+}
+
+function readAppConfig(vault: string): AppConfig {
+  return appConfigFromDocument(vault, readDesktopTabsDocument(vault));
 }
 
 // ---------- markdown -> safe html ----------
@@ -971,62 +1060,28 @@ function registerIpc(): void {
     }
   });
 
-  // desktop-tabs.json is hand-editable: accept a scalar where the schema wants an
-  // array (e.g. "status": "next"), else the filter silently matches nothing.
-  function normalizeWhere(w: unknown): QueryWhere | null {
-    if (!w || typeof w !== 'object') return null;
-    const out = { ...(w as QueryWhere) } as Record<string, unknown>;
-    for (const k of ['status', 'priority']) {
-      if (out[k] != null && !Array.isArray(out[k])) out[k] = [String(out[k])];
-    }
-    return out as QueryWhere;
-  }
-
   handle('data:appConfig', async (): Promise<AppConfig> => {
-    const out: AppConfig = { tabs: [], chips: [] };
     const vault = activeVaultPath();
-    if (!vault) return out;
-    const builtins = new Set(['dashboard', 'tasks', 'projects', 'ideas', 'people', 'inbox', 'outbox', 'artifact']);
-    try {
-      const file = vaultLib.readFile(vault, path.join('_config', 'desktop-tabs.json'));
-      if (!file || file.kind !== 'text') return out;
-      const raw = file.content || '';
-      const cfg = JSON.parse(raw) as { tabs?: unknown[]; chips?: unknown[] };
-      if (Array.isArray(cfg.tabs)) {
-        const seen = new Set<string>();
-        out.tabs = cfg.tabs
-          .map((t) => {
-            const tab = t as Partial<TabDef> & { id?: unknown; label?: unknown };
-            if (!tab || !tab.label) return null;
-            // no id: derive one from the label rather than silently dropping the tab
-            const id = String(tab.id || String(tab.label).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, ''));
-            return id ? { ...tab, id } : null;
-          })
-          .filter((t): t is Partial<TabDef> & { id: string; label: string } =>
-            !!t && !builtins.has(t.id.toLowerCase()) && !seen.has(t.id) && !!seen.add(t.id))
-          .map((t) => {
-            const url = t.url ? String(t.url) : '';
-            return {
-              id: String(t.id),
-              label: String(t.label),
-              kind: (t.kind || (url ? 'web' : (t.source ? 'query' : 'path'))) as TabDef['kind'],
-              path: t.path ? String(t.path) : '',
-              url: url && isSafeExternalUrl(url) ? url : '',
-              source: t.source ? String(t.source) : '',
-              where: normalizeWhere(t.where),
-              empty: t.empty ? String(t.empty) : '',
-            };
-          })
-          .slice(0, 12);
-      }
-      if (Array.isArray(cfg.chips)) {
-        out.chips = (cfg.chips as Array<Partial<ChipDef>>)
-          .filter((c) => !!(c && c.label && c.prompt))
-          .map((c) => ({ label: String(c.label), prompt: String(c.prompt) }))
-          .slice(0, 12);
-      }
-    } catch (_) {}
-    return out;
+    return vault ? readAppConfig(vault) : { tabs: [], chips: [], hiddenTabs: [], folders: [], availableFolders: [] };
+  });
+
+  handle('tabs:updatePreferences', async (_e, input: TabPreferenceUpdate): Promise<AppConfig> => {
+    const vault = activeVaultPath();
+    if (!vault) throw new Error('No vault is open');
+    const currentDocument = readDesktopTabsDocument(vault, true);
+    const current = appConfigFromDocument(vault, currentDocument);
+    const nextDocument = withTabPreferences(
+      currentDocument,
+      input,
+      [...BUILTIN_TAB_IDS, ...current.tabs.map((tab) => tab.id)],
+      current.availableFolders,
+    );
+    const createdConfigDirectory = writeDesktopTabsDocument(vault, nextDocument);
+    // On platforms without recursive root watching, a missing _config directory
+    // was skipped when the vault opened. Attach the fallback watcher now that the
+    // picker created it so later agent/manual edits still rebuild the tab bar live.
+    if (createdConfigDirectory) startWatchers(vault);
+    return appConfigFromDocument(vault, nextDocument);
   });
 
   handle('tab:query', async (_e, def: TabDef | null): Promise<TabQueryResult> => {
