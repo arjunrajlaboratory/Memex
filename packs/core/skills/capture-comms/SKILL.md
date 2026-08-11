@@ -167,14 +167,20 @@ received. Received comms more often *open* loops (someone asks you for something
      discard messages outside the exact slice by timestamp. Within every slice — and for shorter
      windows too — follow `nextPageToken`, `cursor`, or the provider's equivalent until it is
      absent. Search results may be newest-first and capped: **never treat the first page as
-     complete coverage**. De-duplicate the overlapping inbox/anywhere searches by `threadId`.
+     complete coverage**. After pagination, build one global `threadId` map across all calendar-day slices and query variants
+     (`in:inbox`, `in:anywhere`, and `in:sent`), including every page and sent/received
+     direction.
+     Merge repeated hits into the existing entry, preserving
+     direction, exact slice bounds, timestamps, and query provenance. Only after every planned
+     search is enumerated, read each unique thread with `get_thread` and classify it once.
    - Track the direction, exact slice bounds, and pages exhausted for `## Coverage`. If any query
      stops before pagination is exhausted, mark the file `status: partial` and name the remaining
      un-scanned slice/range and next cursor in `coverage gap`. A completed pagination walk means
      only that the connector's returned result set was enumerated; it does not prove a stale index
      is fresh or that a different mailbox was visible.
-   - For any thread that looks loop-relevant, `get_thread` with `messageFormat: FULL_CONTENT` to
-     read the actual chain before classifying (snippets hide the substance). Record that thread's
+   - For any unique thread that looks loop-relevant, use the global entry's one `get_thread` read
+     with `messageFormat: FULL_CONTENT` to inspect the actual chain before classifying (snippets
+     hide the substance). Record that thread's
      `threadId` in the action item's `↳ thread:` field so phase-2 reconcile can re-confirm via
      `get_thread` without re-searching a possibly-stale index.
    - Mailbox visibility: the mail connector searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}.

@@ -21,13 +21,18 @@ period_start: YYYY-MM-DD
 period_end: YYYY-MM-DD
 includes_calendar: true
 includes_agent_queue: true
-includes_comms: true      # daily briefing ran the default capture-comms + reconcile loop (Step 1b)
-comms_coverage: complete  # complete | partial | skipped; never infer absence from partial coverage
+includes_comms: true      # true iff at least one capture stream actually ran; calendar does not count
+comms_coverage: complete  # complete | partial if capture ran; skipped if no capture streams ran
 open_tasks_count: 0
 projects_reviewed: 0
 sensitivity: private      # briefings touch everything; default private
 ---
 ```
+
+`includes_comms` tracks capture execution, not the whole loop-closing pass: it is true only when
+at least one capture stream ran. If no capture streams ran — even when calendar reconciliation
+did — set `includes_comms: false` and `comms_coverage: skipped`. Never infer absence from partial
+coverage.
 
 ## Body sections (daily)
 

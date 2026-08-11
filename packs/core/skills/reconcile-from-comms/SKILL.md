@@ -60,7 +60,8 @@ pre-flight — it relied on the user remembering; this reads the captured signal
 - **Delegate, don't reinvent.** Use the owning skill for each consequential mutation. The only
   changes you apply directly are the Tier-A bookkeeping fields (no skill wraps those).
 - **Idempotent.** Maintain a reconciliation ledger (see below) so a second run on the same day's
-  files never re-applies. If every action item is already reconciled, say so and stop.
+  files never re-applies. If every action item is already reconciled, skip comms-item processing;
+  still run the independently enabled calendar pass before reporting.
 
 ## The two tiers
 
@@ -101,8 +102,12 @@ job, and the mark is the idempotency key. For each reconciled item:
 
 1. **Resolve the date + load the enabled-source files.** Date = today (or the date arg). Read
    `_config/sources.md` and resolve the current enabled capture streams (older vault fallback:
-   email + Slack). Then `ls Inbox/comms/<date>/`. If the folder is missing, tell the user to run
-   [[capture-comms]] first and stop. **Ignore stale digests from disabled sources:** select only
+   email + Slack) plus the independently enabled calendar stream. When one or more capture streams
+   are enabled, `ls Inbox/comms/<date>/`; if the folder is missing, tell the user to run
+   [[capture-comms]] first and stop comms-item processing. If no capture streams are enabled, skip
+   the digest-folder requirement and comms-item processing, but continue to the calendar pass when
+   calendar is enabled. If neither capture nor calendar is enabled, report that there is nothing
+   to reconcile and stop. **Ignore stale digests from disabled sources:** select only
    files whose `source:` frontmatter is enabled, with the filename stem as the legacy fallback.
    Leave excluded files untouched. From the selected files, parse each `## Coverage` block first
    and collect every `status: partial` / `coverage gap`; do not discard a partial file's positive
@@ -152,7 +157,7 @@ job, and the mark is the idempotency key. For each reconciled item:
 8. **Log.** One `log.md` line summarizing the run (the per-change Tier-A lines from Step 5 are
    separate and already appended):
    ```
-   <datetime> — agent:librarian — reconcile — Inbox/comms/<date>/ — reconcile-from-comms: <A> auto-applied, <C> confirmed+applied, <P> still-proposed, <S> skipped
+   <datetime> — agent:librarian — reconcile — <Inbox/comms/<date>/ | calendar-only> — reconcile-from-comms: <A> auto-applied, <C> confirmed+applied, <P> still-proposed, <S> skipped
    ```
 
 9. **Report back.** Lead with any capture coverage gaps, naming the source, direction, un-scanned

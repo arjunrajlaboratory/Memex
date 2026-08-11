@@ -34,6 +34,15 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         self.assertRegex(mail_step, r"(?i)paginate|pagination|cursor")
         self.assertRegex(mail_step, r"(?i)first page.*(?:not|never).*complete|never.*first page")
 
+    def test_mail_threads_are_deduplicated_across_the_whole_scan(self):
+        mail_step = numbered_step(self.skill, 3)
+        self.assertRegex(
+            mail_step,
+            r"(?is)threadId.{0,240}all (?:calendar-day )?slices.{0,240}query variants",
+        )
+        self.assertRegex(mail_step, r"(?is)read.{0,100}classif(?:y|ied).{0,100}once")
+        self.assertRegex(mail_step, r"(?is)preserv(?:e|ing).{0,120}(?:direction|provenance)")
+
     def test_incomplete_provider_scan_must_record_the_gap(self):
         write_step = numbered_step(self.skill, 6)
         self.assertRegex(write_step, r"(?i)every\s+enabled (?:source|stream)")
@@ -108,6 +117,31 @@ class TestCommsCoverageConsumers(unittest.TestCase):
             self.reconcile,
             r"(?is)disabled.{0,300}## Coverage.{0,160}## Action items|"
             r"## Coverage.{0,160}## Action items.{0,300}disabled",
+        )
+
+    def test_calendar_only_runs_skip_comms_coverage(self):
+        artifacts = {
+            "briefing": self.briefing,
+            "schema": self.briefing_schema,
+            "prompt": self.briefing_prompt,
+            "workflow": self.briefing_workflow,
+        }
+        skipped_without_capture = (
+            r"(?is)(?:no|zero) (?:enabled )?capture streams?.{0,240}"
+            r"comms_coverage.{0,80}skipped"
+        )
+        includes_actual_capture = (
+            r"(?is)includes_comms.{0,180}(?:at least one|any) capture stream"
+        )
+        for name, artifact in artifacts.items():
+            with self.subTest(artifact=name):
+                self.assertRegex(artifact, skipped_without_capture)
+                self.assertRegex(artifact, includes_actual_capture)
+
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)no (?:enabled )?capture streams?.{0,240}"
+            r"(?:skip|do not require).{0,160}(?:digest|folder).{0,240}calendar",
         )
 
 

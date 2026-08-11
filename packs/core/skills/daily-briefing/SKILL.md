@@ -44,15 +44,21 @@ If today's briefing already has a `## Shutdown notes` section appended (from `sh
 
 This is the default multi-source pass that keeps vault state from lagging reality. It runs **before** synthesis so §0 and the task list reflect what actually happened off-vault (you answered an email, posted in Slack, a meeting ended).
 
-1. **Read `_config/sources.md`.** Determine which streams are `enabled: true`. Also read `mailboxes.*` if present: `mailboxes.connected` (legacy vaults: `mailboxes.gmail_connected`) is the only mailbox the mail connector searches; `mailboxes.forwarding_in` may cover received mail only; `mailboxes.other_sending_accounts` are outbound identities whose sent mail is invisible unless separately connected. If the file is absent (older vault), default to **email + slack enabled, calendar planning-only**. If no streams are enabled, skip to Step 2 — the §0 stale-state queries remain as the fallback safety net.
+1. **Read `_config/sources.md`.** Determine which streams are `enabled: true`, and separately track the enabled **capture streams** handled by [[capture-comms]] (email, Slack, and any future capture providers). Calendar is reconciliation-only and is not a capture stream. Also read `mailboxes.*` if present: `mailboxes.connected` (legacy vaults: `mailboxes.gmail_connected`) is the only mailbox the mail connector searches; `mailboxes.forwarding_in` may cover received mail only; `mailboxes.other_sending_accounts` are outbound identities whose sent mail is invisible unless separately connected. If the file is absent (older vault), default to **email + slack enabled, calendar planning-only**. If no streams of any kind are enabled, skip to Step 2 — the §0 stale-state queries remain as the fallback safety net.
 
 2. **Backfill guard.** If `<date>` is more than ~2 days in the past (a backfilled briefing), **skip the comms refresh** — a comms scan only makes sense near today — and note `(comms refresh skipped — backfilled briefing for a past date)` in §0. Generate from vault state alone.
 
-3. **Run [[capture-comms]]** for `<date>`, enabled streams only. It is read-only against mail/Slack and handles a per-source MCP outage gracefully (writes a gap note, continues), so a missing connector never fails the briefing. This refreshes `Inbox/comms/<date>/`. **Ignore stale digests from disabled sources:** using `source:` frontmatter (or the filename stem for legacy files), read `## Coverage` only from files whose source is in the enabled set resolved in item 1. Retain each selected `status: partial` / `coverage gap` with its source, direction, un-scanned time range, and reason. A partial scan's positive hits are usable, but absence inside its gap is inconclusive.
+3. **Run [[capture-comms]]** for `<date>` only when at least one capture stream is enabled, passing only those enabled capture streams. It is read-only against mail/Slack and handles a per-source MCP outage gracefully (writes a gap note, continues), so a missing connector never fails the briefing. This refreshes `Inbox/comms/<date>/`. **Ignore stale digests from disabled sources:** using `source:` frontmatter (or the filename stem for legacy files), read `## Coverage` only from files whose source is in the enabled capture-stream set resolved in item 1. Retain each selected `status: partial` / `coverage gap` with its source, direction, un-scanned time range, and reason. A partial scan's positive hits are usable, but absence inside its gap is inconclusive. If no capture streams are enabled, skip capture and digest parsing, but continue to item 4 so an enabled calendar can still reconcile passed events.
 
 4. **Run [[reconcile-from-comms]]** for `<date>` in its **briefing sub-mode** (see that skill's "When invoked by daily-briefing"): it auto-applies Tier-A reversible bookkeeping (bump `last_contact`, mark Followups `acted_on`) and **returns the Tier-B proposals plus any coverage gaps** — task closes, Letter→submitted, and (if the `calendar` stream is enabled) passed-event closes — **without prompting**. Hold those proposals and gaps for §0 and the batched report-back (Step 6).
 
 Tasks that Tier-A already advanced will read correctly through the rest of the briefing. Tier-B proposals are **not** applied here — the user confirms them in one batch in Step 6, preserving the "agents never self-close" guardrail.
+
+Coverage frontmatter records capture execution independently of calendar reconciliation.
+`includes_comms` is true only if at least one capture stream actually ran. If no capture streams
+ran — including a calendar-only Step 1b — set `includes_comms: false` and
+`comms_coverage: skipped`. When one or more capture streams ran, use `partial` if any enabled
+capture source was incomplete and `complete` only if every enabled capture source completed.
 
 If the contact/send status depends on mail that may have been sent from a non-connected account, the comms pass can only return an **inconclusive** prompt ("couldn't confirm from the connected mailbox; did this go from <account>?"). Never convert an empty connected-mailbox sent-mail search into "not sent" / "awaiting send" when the relevant thread may live in `mailboxes.other_sending_accounts` or the forwarding-in account's own sent folder.
 
@@ -89,8 +95,9 @@ When (a) and (b) point at the same note, keep the reconcile proposal (it carries
 Put this warning first: `> ⚠️ Comms coverage is partial — <source/direction>: <un-scanned range>
 (<reason>). Absence in that range is inconclusive.` Do not create an "awaiting send," "no reply,"
 or "quiet" item from the uncovered range. Set frontmatter `comms_coverage: partial`; otherwise use
-`complete` when every enabled comms source completed and `skipped` when Step 1b did not run. A
-disabled source's leftover digest never participates in this status.
+`complete` when every enabled capture source completed and `skipped` when no capture stream ran.
+A disabled source's leftover digest never participates in this status, and calendar
+reconciliation alone never upgrades capture coverage.
 
 For outbound-contact tasks (reply/send/email/follow-up tasks), do **not** infer "awaiting send" from stale note state alone when email is enabled. Step 1b's live comms capture (or a same-day `Inbox/comms/<date>/` digest) is the prerequisite. If the connected-mailbox search missed the send but the task/person uses a non-connected sending account, render the item as "couldn't confirm from the connected mailbox — may have gone from <account>" and ask the user, rather than asserting it remains open. The connected-mailbox search can also be **stale** (the search index lags reality and a repeat search won't refresh it), so a send that search can't see is "couldn't confirm" even without a second account — verify the specific thread with a full-thread read (Gmail: `get_thread(threadId)`) before asserting anything, and never emit "awaiting send" / "unsent" off an empty search.
 
@@ -143,8 +150,8 @@ period_start: <date>
 period_end: <date>
 includes_calendar: true
 includes_agent_queue: true
-includes_comms: <true if Step 1b ran; false if skipped>
-comms_coverage: <complete | partial | skipped>
+includes_comms: <true if at least one capture stream ran; false otherwise>
+comms_coverage: <complete | partial when capture ran; skipped if no capture streams ran>
 open_tasks_count: <count>
 projects_reviewed: <count>
 sensitivity: private
