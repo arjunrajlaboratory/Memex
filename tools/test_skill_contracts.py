@@ -231,9 +231,17 @@ class TestTrackerHistoryContract(unittest.TestCase):
         history_step = self.run_surfaces["skill"]
         self.assertRegex(
             history_step,
-            r"(?is)auto_update_wiki.{0,160}false.{0,160}needs-review Task",
+            r"(?is)auto_update_wiki.{0,160}false.{0,160}"
+            r"(?:(?:create|write) a needs-review Task|"
+            r"name the needs-review Task (?:that was )?created)",
         )
-        self.assertNotIn("no Tasks created", history_step)
+        self.assertNotRegex(
+            history_step,
+            r"(?is)auto_update_wiki.{0,160}false.{0,160}"
+            r"(?:(?:do not|don't|never|without|skip|omit).{0,80}"
+            r"(?:create|write|name).{0,80}(?:needs-review )?Tasks?|"
+            r"no (?:needs-review )?Tasks?(?: (?:created|written|named))?)",
+        )
 
     def test_specialized_runner_allows_digest_and_history_outputs(self):
         self.assertIn("Tracker Digest", self.cv_output_contract)
