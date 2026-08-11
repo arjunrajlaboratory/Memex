@@ -37,4 +37,4 @@ sensitivity: normal
 
 ## Rules
 
-- At most one tracker run per tracker per calendar date may create a digest. The date-keyed digest is immutable: if today's expected path already exists, do not overwrite it or start another run. Force requests bypass cadence only, not this same-day guard.
+- At most one tracker run per tracker per calendar date may create a digest. The date-keyed digest becomes immutable only when it has `status: complete`, the tracker `last_digest` points to it, and `# History` links to it; do not overwrite the completed digest. If any same-day artifact or reference exists but the digest is `partial` or `failed`, the file is missing, or either tracker reference is missing, resume or repair the existing run and reuse this path. Force requests bypass cadence only, not the completed-run guard.

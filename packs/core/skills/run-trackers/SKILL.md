@@ -48,7 +48,7 @@ If the set is empty, report "no trackers due — next due <date> for <tracker>" 
 
 If a tracker has `status: broken`, skip it (the auditor handles broken trackers; running them again won't fix them). If a tracker has `status: needs_review`, skip it and surface in the report — the user needs to decide whether to re-activate or retire.
 
-Before adding any tracker to the run set, resolve today's expected digest path: `Atlas/Trackers/Digests/Tracker Digest - <slug> - <today>.md`. If that file already exists or `last_digest` points to it, skip the tracker and report "already ran today." For an explicitly named tracker, stop instead of silently succeeding. A force flag does not override this guard. Do not overwrite a same-day digest; its date-keyed identity is the audit record for that run.
+Before adding any tracker to the run set, resolve today's expected digest path: `Atlas/Trackers/Digests/Tracker Digest - <slug> - <today>.md`. If the file is absent and neither `last_digest` nor `# History` points to it, this is a fresh run. A same-day run is completed only when the digest has `status: complete`, `last_digest` points to it, and `# History` links to it. If all three are true, skip the tracker and report "already ran today"; for an explicitly named tracker, stop instead of silently succeeding. A force flag does not override this completed-run guard. If any same-day artifact or reference exists but the digest is `partial` or `failed`, the file is missing, or either tracker reference is missing, resume or repair that run from its first incomplete step and reuse the same digest path. Do not overwrite a completed digest or create a second same-day digest.
 
 ## Step 2 — For each selected tracker, follow the recipe
 
