@@ -125,8 +125,10 @@ grep -qF "WorkingDirectory=$TMP/core%%pct/quartz" "$PCT_UNIT" \
 grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email stream not enabled by default"
 grep -q "slack: { enabled: true" "$TMP/core/_config/sources.md" || fail "slack stream not enabled by default"
 grep -q "calendar: { enabled: false" "$TMP/core/_config/sources.md" || fail "calendar should default off"
+grep -q "notion: { enabled: false, mcp: claude_ai_Notion }" "$TMP/core/_config/sources.md" || fail "notion should be present and default off"
+grep -q "jira: { enabled: false, mcp: claude_ai_Atlassian }" "$TMP/core/_config/sources.md" || fail "jira should be present and default off"
 grep -q "git_mode: local" "$TMP/core/_config/sources.md" || fail "default git_mode should be local"
-grep -q 'gmail_connected: "jane@example.com"' "$TMP/core/_config/sources.md" || fail "connected mailbox not recorded"
+grep -q 'connected: "jane@example.com"' "$TMP/core/_config/sources.md" || fail "connected mailbox not recorded"
 grep -q 'other_sending_accounts: \[\]' "$TMP/core/_config/sources.md" || fail "blank sending accounts should bake empty list"
 [ -d "$TMP/core/.git" ] || fail "local git mode should init a repo"
 grep -q "memex-quartz" "$TMP/core/.claude/settings.json" 2>/dev/null && fail "settings.json should reference hooks not launchd" || true
@@ -134,7 +136,7 @@ no_unbaked "$TMP/core"
 # blank OWNER_FORWARDING_EMAIL: optional-token prose must DROP, not bake empties
 no_empty_inline_code "$TMP/core/.claude/skills" || fail "empty inline-code (optional token baked blank) in core skills"
 grep -qF "forwards into it" "$TMP/core/.claude/skills/email/SKILL.md" && fail "blank-forwarding clause not dropped from email skill" || true
-grep -qF "Gmail MCP searches only the connected mailbox" "$TMP/core/.claude/skills/email/SKILL.md" || fail "email skill should state connected mailbox boundary"
+grep -qF "mail connector searches only the connected mailbox" "$TMP/core/.claude/skills/email/SKILL.md" || fail "email skill should state connected mailbox boundary"
 grep -qF "inconclusive access-gap evidence" "$TMP/core/.claude/skills/email/SKILL.md" || fail "email skill should treat non-connected sends as inconclusive"
 grep -rq "jane@example.com" "$TMP/core/.claude/skills" || fail "owner email not baked into skills"
 [ ! -e "$TMP/core/.claude/skills/draft-letter" ] || fail "pi skill leaked into core init"

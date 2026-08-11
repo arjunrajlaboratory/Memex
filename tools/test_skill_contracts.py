@@ -73,7 +73,7 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         self.assertRegex(mail_step, r"(?is)preserv(?:e|ing).{0,120}(?:direction|provenance)")
 
     def test_incomplete_provider_scan_must_record_the_gap(self):
-        write_step = numbered_step(self.skill, 6)
+        write_step = numbered_step(self.skill, 8)
         self.assertRegex(write_step, r"(?i)every\s+enabled (?:source|stream)")
         self.assertRegex(write_step, r"(?i)coverage gap")
         self.assertRegex(write_step, r"(?i)unscanned|un-scanned")
@@ -83,6 +83,80 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         self.assertRegex(hard_rules, r"(?i)no silent (?:caps|truncation)")
         self.assertIn("Notion", hard_rules)
         self.assertIn("Jira", hard_rules)
+
+    def test_jira_scan_resolves_identity_and_site_before_searching(self):
+        jira_step = numbered_step(self.skill, 5)
+        identity_pos = jira_step.index("atlassianUserInfo")
+        site_pos = jira_step.index("getAccessibleAtlassianResources")
+        search_pos = jira_step.index("searchJiraIssuesUsingJql")
+        self.assertLess(identity_pos, search_pos)
+        self.assertLess(site_pos, search_pos)
+        self.assertIn("cloudId", jira_step)
+
+    def test_jira_scan_is_bounded_paginated_and_changelog_aware(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(jira_step, r"(?is)updated >=.+updated <")
+        self.assertRegex(jira_step, r"(?i)calendar-day\s+slices")
+        self.assertIn("nextPageToken", jira_step)
+        self.assertRegex(jira_step, r"(?is)first result page.{0,40}never complete")
+        self.assertRegex(jira_step, r"(?i)comments and changelog|changelog/history")
+        self.assertRegex(jira_step, r"(?i)author account id|actor account id")
+        self.assertRegex(jira_step, r"(?i)reassigned away|historical-assignee")
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:historical-assignment|mention-only).{0,220}coverage gap",
+        )
+
+    def test_jira_scan_is_read_only_and_writes_standard_digest(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertIn("Inbox/comms/<date>/jira.md", jira_step)
+        self.assertIn("↳ thread:", jira_step)
+        for tool in (
+            "createJiraIssue",
+            "editJiraIssue",
+            "transitionJiraIssue",
+            "addCommentToJiraIssue",
+        ):
+            self.assertRegex(jira_step, rf"(?is)never call.{{0,180}}{tool}")
+
+    def test_notion_scan_resolves_identity_before_searching(self):
+        notion_step = numbered_step(self.skill, 6)
+        identity_pos = notion_step.index("notion-get-users")
+        search_pos = notion_step.index("notion-search")
+        self.assertLess(identity_pos, search_pos)
+        self.assertRegex(notion_step, r"(?i)stable Notion user id|actor-classification")
+        self.assertRegex(notion_step, r"(?is)do not guess.{0,160}partial")
+
+    def test_notion_scan_exhausts_pages_and_comment_threads(self):
+        notion_step = numbered_step(self.skill, 6)
+        self.assertRegex(notion_step, r"(?i)calendar-day slices")
+        self.assertRegex(notion_step, r"(?i)next_cursor|has_more")
+        self.assertRegex(
+            notion_step,
+            r"(?is)never.{0,30}first result page.{0,40}complete coverage|"
+            r"first result page.{0,40}(?:not|never).{0,30}complete",
+        )
+        self.assertIn("notion-fetch", notion_step)
+        self.assertIn("notion-get-comments", notion_step)
+        self.assertRegex(notion_step, r"(?is)paginate comments.{0,40}exhaustion")
+
+    def test_notion_scan_classifies_actors_privately_and_read_only(self):
+        notion_step = numbered_step(self.skill, 6)
+        self.assertIn("Inbox/comms/<date>/notion.md", notion_step)
+        self.assertIn("↳ thread:", notion_step)
+        self.assertRegex(notion_step, r"(?is)open-loop signals:.*unresolved comment")
+        self.assertRegex(notion_step, r"(?i)owner's own reply or resolution")
+        self.assertRegex(notion_step, r"(?i)summarize one level up")
+        self.assertRegex(notion_step, r"(?i)never paste page or comment bodies")
+        write_guard = notion_step.split("Never call", 1)[1]
+        for tool in (
+            "notion-create-*",
+            "notion-update-*",
+            "notion-move-pages",
+            "notion-duplicate-page",
+            "notion-create-comment",
+        ):
+            self.assertIn(tool, write_guard)
 
 
 class TestCommsCoverageConsumers(unittest.TestCase):

@@ -112,7 +112,10 @@ class TestParseStreams(unittest.TestCase):
         self.assertEqual(parse_streams([]), [])
 
     def test_comma_string(self):
-        self.assertEqual(parse_streams("email,calendar"), ["email", "calendar"])
+        self.assertEqual(
+            parse_streams("email,calendar,notion,jira"),
+            ["email", "calendar", "notion", "jira"],
+        )
 
     def test_list_with_whitespace_and_case(self):
         self.assertEqual(parse_streams([" Email ", "SLACK"]), ["email", "slack"])
@@ -123,7 +126,7 @@ class TestParseStreams(unittest.TestCase):
 
     def test_present_but_all_unknown_yields_empty(self):
         # a provided value is taken literally; unknown names drop to empty
-        self.assertEqual(parse_streams("notion,linear"), [])
+        self.assertEqual(parse_streams("linear,airtable"), [])
 
 class TestParseAccountList(unittest.TestCase):
     def test_comma_string_dedupes(self):
@@ -156,6 +159,8 @@ class TestSourcesConfigYaml(unittest.TestCase):
         self.assertIn("email: { enabled: true, mcp: claude_ai_Gmail }", out)
         self.assertIn("slack: { enabled: true, mcp: claude_ai_Slack }", out)
         self.assertIn("calendar: { enabled: false,", out)
+        self.assertIn("notion: { enabled: false, mcp: claude_ai_Notion }", out)
+        self.assertIn("jira: { enabled: false, mcp: claude_ai_Atlassian }", out)
         self.assertIn("git_mode: local", out)
         self.assertIn("updated: 2026-06-04", out)
         self.assertIn('connected: "jane@example.com"', out)
@@ -169,6 +174,13 @@ class TestSourcesConfigYaml(unittest.TestCase):
         self.assertIn("mode: minimal", out)
         self.assertIn("calendar: { enabled: true,", out)
         self.assertIn("git_mode: remote", out)
+
+    def test_optional_capture_streams_can_be_enabled(self):
+        out = sources_config_yaml(["notion", "jira"], "local", "2026-08-11")
+        self.assertIn("notion: { enabled: true, mcp: claude_ai_Notion }", out)
+        self.assertIn("jira: { enabled: true, mcp: claude_ai_Atlassian }", out)
+        self.assertIn("email: { enabled: false,", out)
+        self.assertIn("slack: { enabled: false,", out)
 
     def test_sources_config_provider_google_default(self):
         out = sources_config_yaml(["email"], "local", "2026-07-24", connected_email="jane@example.com")
@@ -184,6 +196,8 @@ class TestSourcesConfigYaml(unittest.TestCase):
         )
         self.assertIn("provider: microsoft", out)
         self.assertIn("mcp: claude_ai_Microsoft_365", out)
+        self.assertIn("notion: { enabled: false, mcp: claude_ai_Notion }", out)
+        self.assertIn("jira: { enabled: false, mcp: claude_ai_Atlassian }", out)
         self.assertNotIn("claude_ai_Gmail", out)
         self.assertNotIn("claude_ai_Google_Calendar", out)
 
@@ -195,6 +209,10 @@ class TestSourcesConfigYaml(unittest.TestCase):
         # microsoft maps BOTH email and calendar to the one 365 connector
         self.assertEqual(stream_mcp("microsoft")["calendar"], "claude_ai_Microsoft_365")
         self.assertEqual(stream_mcp("google")["calendar"], "claude_ai_Google_Calendar")
+        self.assertEqual(stream_mcp("google")["notion"], "claude_ai_Notion")
+        self.assertEqual(stream_mcp("microsoft")["notion"], "claude_ai_Notion")
+        self.assertEqual(stream_mcp("google")["jira"], "claude_ai_Atlassian")
+        self.assertEqual(stream_mcp("microsoft")["jira"], "claude_ai_Atlassian")
 
 class TestSeedSafety(unittest.TestCase):
     def test_seeds_skip_existing_files(self):

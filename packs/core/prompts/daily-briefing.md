@@ -32,8 +32,8 @@ immediately and tell the user. Do not overwrite it unless the user explicitly
 confirms regeneration.
 
 **Default loop-closing pass:** before gathering the inputs below, read `_config/sources.md`
-for enabled streams and `mailboxes.*`. Separate capture streams (email, Slack, and future capture
-providers) from calendar, which is reconciliation-only. If at least one capture stream is enabled,
+for enabled streams and `mailboxes.*`. Separate capture streams (email, Slack, Notion, Jira, and
+future providers) from calendar, which is reconciliation-only. If at least one capture stream is enabled,
 run `capture-comms` for {{date}} with only those streams; then run
 `reconcile-from-comms` in daily-briefing sub-mode for all enabled streams. If no capture streams
 are enabled, skip capture and stale digest parsing, but still reconcile an enabled calendar; set

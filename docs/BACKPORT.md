@@ -94,3 +94,17 @@ protections while leaving the engine contract tests behind.
 | `packs/core/prompts/run-trackers.md` | `Agents/Prompts/run-trackers.md` | Keep the pasteable prompt aligned with the canonical history contract. |
 | `packs/core/schemas/tracker.md` | `_schemas/tracker.md` | Require a digest-linked history entry after every run. |
 | `packs/pi/skills/cv-scan/SKILL.md` | `.claude/skills/cv-scan/SKILL.md` | Bring the specialized `[[cv-items]]` runner under the canonical digest/history contract and expand its allowed writes accordingly. |
+
+# Backport checklist — 2026-08-11 Notion + Jira capture streams
+
+These files are derive-managed. Mirror every row into the source vault before the next
+`tools/derive.py` run; otherwise derivation will remove the Notion/Jira capture behavior while the
+generated `_config/sources.md` continues to advertise the streams.
+
+| Engine file changed here | Source-vault location | What to mirror |
+| --- | --- | --- |
+| `packs/core/skills/capture-comms/SKILL.md` | `.claude/skills/capture-comms/SKILL.md` | Add read-only Notion and Jira scans: identity resolution, bounded/paginated enumeration, actor-aware comment/edit/changelog classification, per-source digests, and coverage checks. |
+| `packs/core/skills/reconcile-from-comms/SKILL.md` | `.claude/skills/reconcile-from-comms/SKILL.md` | Treat `↳ thread:` as a source locator and confirm Notion/Jira items through source-native read-only page/comment or issue/changelog reads. |
+| `packs/core/skills/daily-briefing/SKILL.md` | `.claude/skills/daily-briefing/SKILL.md` | Include enabled Notion/Jira activity in the default loop-closing pass and source-neutral read-only guarantees. |
+| `packs/core/workflows/daily-briefing.md` | `_workflows/daily-briefing.md` | Describe Notion comments/edits and Jira assignments/comments/transitions as capture inputs. |
+| `packs/core/prompts/daily-briefing.md` | `Agents/Prompts/daily-briefing.md` | List Notion and Jira as first-class capture streams in the pasteable daily flow. |
