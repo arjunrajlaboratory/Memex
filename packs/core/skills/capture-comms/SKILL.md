@@ -43,6 +43,11 @@ You are running as **`agent:capture`** for this skill.
 - **Ruthless on noise.** Most email/Slack is not loop-relevant. Action items are *only* items
   that open or close a vault loop. Everything else is a one-line count in `## Filtered as noise`
   — never a silent cap.
+- **No silent caps or truncation.** For every enabled provider stream — including any
+  vault-specific Notion or Jira scan — enumerate the whole resolved window with bounded daily
+  slices and/or pagination to exhaustion. Never treat the first page as complete. If a scan is
+  interrupted, rate-limited, or otherwise stopped early, record the un-scanned range as an
+  explicit `coverage gap`; never turn partial coverage into a claim that the period was quiet.
 - **No fabrication.** Every action item traces to a real message. If you can't find a likely
   vault target, say `(no obvious target)` — don't invent a note name.
 - **Idempotent.** Re-running for the same date regenerates the day's files in place (same path)
@@ -50,21 +55,25 @@ You are running as **`agent:capture`** for this skill.
 
 ## Output shape (decided + documented)
 
-**Two files per day, not one combined file:**
+**One file per enabled capture stream, not one combined file.** The default install has two:
 
 ```
 Inbox/comms/<YYYY-MM-DD>/email.md
 Inbox/comms/<YYYY-MM-DD>/slack.md
+# A vault-specific provider scan follows the same shape at <source>.md.
 ```
 
 Rationale: (1) the mail and Slack connectors are independently authenticated MCP servers with independent
 failure modes — if Slack auth is absent in a given run, the email file still lands clean and the
 Slack file records the gap, rather than one combined file being half-empty with no signal why;
 (2) it mirrors the shape the source idea note specified; (3) each source gets source-appropriate
-provenance. Phase 2 globs `Inbox/comms/<date>/*.md` and reads the `## Action items` section from
-both — the seam is per-section, not per-file, so two files cost it nothing.
+provenance. Phase 2 globs `Inbox/comms/<date>/*.md` and reads the operational `## Coverage` and
+`## Action items` sections from each — the seam is per-section, not per-file, so separate source
+files cost it nothing.
 
-Each file carries this frontmatter and these four sections:
+Each file carries this frontmatter and these five sections. `## Coverage` is operational data,
+not optional commentary: phase 2 and the briefing use it to distinguish a complete capture from
+a plausible-looking partial one.
 
 ```markdown
 ---
@@ -77,6 +86,11 @@ sensitivity: private           # NEVER lower — these are private comms
 generated_by: capture-comms
 phase: 1-capture-only          # APPLIES NOTHING; phase 2 reconciles
 ---
+
+## Coverage
+- status: complete             # or: partial
+- scanned: <directions, bounded time slices, and page counts actually exhausted>
+- coverage gap: none           # or: <direction + un-scanned time range/slice + reason/next cursor>
 
 ## Summary
 3–6 bullets — the gist of the day's <email|Slack>. What moved, who needs what.
@@ -116,7 +130,11 @@ received. Received comms more often *open* loops (someone asks you for something
    default to **email + slack enabled** (calendar is not a capture stream — it has its
    own loop-closing path in the briefing; see [[reconcile-from-comms]]). If a stream is
    disabled, skip its scan entirely and don't write that source's file. This is the
-   per-stream gate the default daily-briefing flow relies on.
+   per-stream gate the default daily-briefing flow relies on. **Ignore stale digests from
+   disabled sources.** Do not delete an existing same-day file when its source is disabled — it
+   may carry hand annotations or a reconciliation ledger — but every downstream consumer must
+   exclude that file by its `source:` frontmatter (falling back to the filename stem for legacy
+   digests) before parsing it.
 
 1. **Resolve the date + scan window.** Date is today (or the date argument if given). Find the
    most recent prior `Inbox/comms/<date>/` folder to get the last run time; the window is
@@ -131,18 +149,38 @@ received. Received comms more often *open* loops (someone asks you for something
    ToolSearch: select:mcp__claude_ai_Slack__slack_search_public_and_private,mcp__claude_ai_Slack__slack_read_channel,mcp__claude_ai_Slack__slack_read_thread,mcp__claude_ai_Slack__slack_read_user_profile,mcp__claude_ai_Slack__slack_search_users
    ```
    If either server is unavailable (interactive auth absent — a documented caveat for
-   headless/cron runs), **do not fail the whole run**: write that source's file with an empty
-   body and a `> ⚠️ <source> unavailable this run (auth/connection)` note at the top, and
-   proceed with the other source. This is exactly the partial-failure case the two-file split
-   exists to handle.
+   headless/cron runs), **do not fail the whole run**: write that source's standard digest with
+   `status: partial`, a `coverage gap` naming the full un-scanned window, and a
+   `> ⚠️ <source> unavailable this run (auth/connection)` note at the top. Then proceed with the
+   other source. This is exactly the partial-failure case the two-file split exists to handle.
 
 3. **Scan mail — both directions** (only if `email` is enabled per Step 0). Use the [[email]] broad-search technique (don't start
    narrow; on Microsoft 365 use the connector's own search parameters, not Gmail operators). Cover sent AND received in the window:
-   - Received: the inbox for the window (Gmail: `in:inbox newer_than:<window>`, plus a wider
-     `in:anywhere newer_than:<window>` for threads that skip the inbox).
-   - **Sent mail in the window** (Gmail: `in:sent newer_than:<window>`) — the loop-closing gold. What did *I* send today?
-   - For any thread that looks loop-relevant, `get_thread` with `messageFormat: FULL_CONTENT` to
-     read the actual chain before classifying (snippets hide the substance). Record that thread's
+   - Received: the inbox in each bounded window/slice (Gmail: `in:inbox` plus the slice bounds),
+     plus a wider `in:anywhere` pass for threads that skip the inbox.
+   - **Sent mail in each bounded window/slice** (Gmail: `in:sent` plus the slice bounds) — the
+     loop-closing gold. What did *I* send?
+   - **Enumerate the full window, not just the newest page.** When the window exceeds 2 days,
+     split each received and sent search into bounded, non-overlapping **calendar-day slices** in
+     the vault timezone. Use the provider's explicit start/end parameters where available. For
+     Gmail date operators, widen the query boundaries enough to absorb their date semantics, then
+     discard messages outside the exact slice by timestamp. Within every slice — and for shorter
+     windows too — follow `nextPageToken`, `cursor`, or the provider's equivalent until it is
+     absent. Search results may be newest-first and capped: **never treat the first page as
+     complete coverage**. After pagination, build one global `threadId` map across all calendar-day slices and query variants
+     (`in:inbox`, `in:anywhere`, and `in:sent`), including every page and sent/received
+     direction.
+     Merge repeated hits into the existing entry, preserving
+     direction, exact slice bounds, timestamps, and query provenance. Only after every planned
+     search is enumerated, read each unique thread with `get_thread` and classify it once.
+   - Track the direction, exact slice bounds, and pages exhausted for `## Coverage`. If any query
+     stops before pagination is exhausted, mark the file `status: partial` and name the remaining
+     un-scanned slice/range and next cursor in `coverage gap`. A completed pagination walk means
+     only that the connector's returned result set was enumerated; it does not prove a stale index
+     is fresh or that a different mailbox was visible.
+   - For any unique thread that looks loop-relevant, use the global entry's one `get_thread` read
+     with `messageFormat: FULL_CONTENT` to inspect the actual chain before classifying (snippets
+     hide the substance). Record that thread's
      `threadId` in the action item's `↳ thread:` field so phase-2 reconcile can re-confirm via
      `get_thread` without re-searching a possibly-stale index.
    - Mailbox visibility: the mail connector searches only the connected mailbox, `{{OWNER_PRIMARY_EMAIL}}`{{?OWNER_FORWARDING_EMAIL}}.
@@ -165,6 +203,11 @@ received. Received comms more often *open* loops (someone asks you for something
 4. **Scan Slack — both directions, including what I sent** (only if `slack` is enabled per Step 0).
    - Resolve the user's own Slack identity first (`slack_read_user_profile` /
      `slack_search_users`) so you can recognize `from:<me>`.
+   - When the window exceeds 2 days, split both searches below into bounded calendar-day slices
+     using explicit epoch `after`/`before` parameters (with local timestamp filtering at the
+     boundaries). Paginate every slice to exhaustion. Record each slice and page count in
+     `## Coverage`; if a slice is cut short, mark the digest partial and record its un-scanned
+     remainder and next cursor as a `coverage gap`.
    - Search messages **I sent** in the window (`slack_search_public_and_private` filtered to the
      user as author) — "I sent the form to Riley", "shipped the deploy", "replied to the review"
      are the strongest close signals.
@@ -212,17 +255,27 @@ received. Received comms more often *open* loops (someone asks you for something
      correspondent, `create-task` for a concrete new action).
    - **Noise** — everything else. Count it; one line in `## Filtered as noise`.
 
-6. **Write the two files (idempotent).** First, run the **completeness self-check** — answer all
-   four honestly; any "no" means go back before writing:
-   1. Did my author-search use `after:<window_start date − 1 day>` rather than the window's own
-      date? (`after:` is exclusive — see the Step 4 warning.) If not, re-run it → Step 4.
-   2. Did I **paginate** to exhaustion, and did I `slack_read_channel` every distinct conversation
-      ID the search surfaced? A capped single page is not coverage → Step 4.
-   3. Does the digest contain any completeness claim — "quiet", "no DMs besides X", "nothing from
-      Y" — resting on a search result rather than a `slack_read_channel` read? Verify it or delete it.
-   4. Sanity-check the magnitude: is the message count plausible for the window length and this
-      user's activity? **Three messages for a workday is a bug, not a quiet day.** Nothing inside a
-      truncated digest looks wrong — only the count does.
+6. **Write the per-source files (idempotent).** First, run the **completeness self-check for every
+   enabled source or stream**. Retry a recoverable gap before writing; if auth, rate limits, tool
+   failure, or time prevents completion, still write the digest as partial rather than losing the
+   successfully captured material:
+   1. Is there a coverage plan for every direction/query, with bounded calendar-day slices for a
+      window over 2 days? Were all planned slices attempted?
+   2. Was every slice **paginated to exhaustion**? A capped first page is not coverage. If not,
+      does `## Coverage` say `status: partial` and identify the direction, un-scanned time
+      range/slice, reason, and next cursor/token (when one exists) as a `coverage gap`?
+   3. For Slack, did the author-search use `after:<window_start date − 1 day>` rather than the
+      window's own date, and did `slack_read_channel` cover every distinct conversation ID the
+      search surfaced? If not, retry Step 4 or record the exact unscanned remainder as a gap.
+   4. Does the digest contain any completeness claim — "quiet", "no DMs besides X", "nothing from
+      Y" — resting on a search result or a partial scan? Verify it with the source read or delete it.
+   5. Sanity-check the magnitude against the window length and this user's activity. **Three
+      messages for a workday is a bug, not a quiet day.** An implausible count requires another
+      pass or an explicit coverage gap; nothing inside a truncated digest looks wrong by itself.
+
+   Apply the same self-check to any additional enabled provider scan supplied by the vault (for
+   example Notion or Jira): bounded slices or cursor exhaustion, never a first-page assumption,
+   and an explicit un-scanned remainder whenever coverage is partial.
 
    Then: `mkdir -p Inbox/comms/<date>` once. For each source: if
    the file already exists, **Read it first**; if it looks hand-edited or annotated below the
@@ -243,13 +296,19 @@ idea. Phase 2 — a *separate* `reconcile-from-comms` skill (propose-only, manua
 on the daily-briefing §0 "State confirmation needed" pre-flight) — is the half that mutates
 vault state.
 
-**The handoff contract is the `## Action items` section.** Phase 2:
-1. Globs `Inbox/comms/<date>/*.md`, parses each `## Action items` block (the checkbox + `↳`
-   format above is the schema).
-2. For each item, resolves `likely target` to a real note and proposes the `suggested action`
+**The handoff contract has two operational sections: `## Coverage` and `## Action items`.** Phase 2:
+1. Reads the enabled capture streams from `_config/sources.md`, then globs
+   `Inbox/comms/<date>/*.md`. **Ignore stale digests from disabled sources:** exclude the whole
+   file before parsing either `## Coverage` or `## Action items`, using `source:` frontmatter and
+   the filename stem as the legacy fallback. This preserves the file on disk without letting its
+   old coverage or action items affect the current run.
+2. Parses `## Coverage` from the remaining enabled-source files first. It carries any partial
+   source, direction, and un-scanned range forward as inconclusive rather than negative evidence.
+3. Parses each `## Action items` block (the checkbox + `↳` format above is the item schema).
+4. For each item, resolves `likely target` to a real note and proposes the `suggested action`
    (close Task, flip Letter `drafting→submitted`, bump Person `last_contact`/`next_touch`, mark
    Followup `acted_on`).
-3. Auto-applies only the trivial/reversible ones (bump `last_contact`, mark a Followup); surfaces
+5. Auto-applies only the trivial/reversible ones (bump `last_contact`, mark a Followup); surfaces
    the consequential/irreversible ones (close a p1 Task, flip a Letter to submitted, anything
    needing a final Work-log narrative) for explicit user confirmation before applying.
 

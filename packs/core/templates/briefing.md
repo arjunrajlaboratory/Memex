@@ -9,6 +9,8 @@ period_start: {{date}}
 period_end: {{date}}
 includes_calendar: true
 includes_agent_queue: true
+includes_comms: false
+comms_coverage: skipped
 open_tasks_count: 0
 projects_reviewed: 0
 sensitivity: private
