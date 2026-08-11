@@ -34,3 +34,7 @@ sensitivity: normal
 - `# What I changed` — which wiki pages were edited (or proposed for edit)
 - `# What needs review` — items the human should look at
 - `# Next-run recommendations` — adjust queries, adjust cadence, adjust update targets
+
+## Rules
+
+- At most one tracker run per tracker per calendar date may create a digest. The date-keyed digest is immutable: if today's expected path already exists, do not overwrite it or start another run. Force requests bypass cadence only, not this same-day guard.

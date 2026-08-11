@@ -28,6 +28,15 @@ def numbered_list_step(document: str, number: int, indent: str = "") -> str:
     return match.group(0)
 
 
+def markdown_section(document: str, heading: str, next_heading=None) -> str:
+    """Return a Markdown section by exact heading text."""
+    end = rf"(?=^{re.escape(next_heading)}$)" if next_heading else r"\Z"
+    match = re.search(rf"(?ms)^{re.escape(heading)}$.*?{end}", document)
+    if match is None:
+        raise AssertionError(f"section {heading!r} not found")
+    return match.group(0)
+
+
 def frontmatter_keys(document: str) -> set[str]:
     """Return field names from the first YAML frontmatter example or document."""
     match = re.search(r"(?ms)^---\n(.*?)^---$", document)
@@ -177,6 +186,10 @@ class TestTrackerHistoryContract(unittest.TestCase):
         core = ROOT / "packs/core"
         pi = ROOT / "packs/pi"
         skill = (core / "skills/run-trackers/SKILL.md").read_text()
+        workflow = (core / "workflows/run-tracker.md").read_text()
+        prompt = (core / "prompts/run-trackers.md").read_text()
+        tracker_schema = (core / "schemas/tracker.md").read_text()
+        digest_schema = (core / "schemas/tracker_digest.md").read_text()
         cv_skill = (pi / "skills/cv-scan/SKILL.md").read_text()
         skill_history = re.search(
             r"(?ms)^### 2\.7 .*?(?=^### 2\.8 )",
@@ -187,16 +200,28 @@ class TestTrackerHistoryContract(unittest.TestCase):
 
         cls.run_surfaces = {
             "skill": skill_history.group(0),
-            "workflow": numbered_list_step(
-                (core / "workflows/run-tracker.md").read_text(), 9
-            ),
-            "prompt": numbered_list_step(
-                (core / "prompts/run-trackers.md").read_text(), 7
-            ),
-            "schema": numbered_list_step(
-                (core / "schemas/tracker.md").read_text(), 4, indent="  "
-            ),
+            "workflow": numbered_list_step(workflow, 9),
+            "prompt": numbered_list_step(prompt, 7),
+            "schema": numbered_list_step(tracker_schema, 4, indent="  "),
             "cv-scan": numbered_list_step(cv_skill, 11),
+        }
+        cls.same_day_guards = {
+            "skill": markdown_section(
+                skill,
+                "## Step 1 — Determine the run set",
+                "## Step 2 — For each selected tracker, follow the recipe",
+            ),
+            "workflow": numbered_list_step(workflow, 1),
+            "prompt": prompt.split("Determine which trackers to run:", 1)[1].split(
+                "For each selected tracker", 1
+            )[0],
+            "cv-scan": numbered_list_step(cv_skill, 3),
+        }
+        cls.same_day_contracts = {
+            "tracker schema": markdown_section(
+                tracker_schema, "## Rules", "## Examples of good tracker subjects"
+            ),
+            "digest schema": markdown_section(digest_schema, "## Rules"),
         }
         cls.cv_output_contract = cv_skill.split("## Steps", 1)[0]
         cls.cv_digest_step = numbered_list_step(cv_skill, 10)
@@ -224,6 +249,20 @@ class TestTrackerHistoryContract(unittest.TestCase):
     def test_specialized_runner_creates_the_canonical_digest(self):
         self.assertIn("_schemas/tracker_digest.md", self.cv_digest_step)
         self.assertRegex(self.cv_digest_step, r"(?i)including[^\n]*material.{0,12}false")
+
+    def test_every_entry_point_blocks_same_day_digest_overwrites(self):
+        for name, guard in self.same_day_guards.items():
+            with self.subTest(surface=name):
+                self.assertRegex(guard, r"(?is)today.{0,120}digest|digest.{0,120}today")
+                self.assertRegex(guard, r"(?i)(?:stop|skip|do not run)")
+                self.assertRegex(guard, r"(?is)(?:explicit|force).{0,120}(?:not|never)")
+                self.assertRegex(guard, r"(?is)(?:do\s+not|never).{0,80}overwrite")
+
+    def test_schemas_define_one_immutable_digest_per_day(self):
+        for name, contract in self.same_day_contracts.items():
+            with self.subTest(surface=name):
+                self.assertRegex(contract, r"(?i)at most one[^\n]*run[^\n]*(?:day|date)")
+                self.assertRegex(contract, r"(?is)(?:do\s+not|never).{0,80}overwrite")
 
 
 if __name__ == "__main__":

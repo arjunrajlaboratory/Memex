@@ -37,7 +37,10 @@ LaTeX snippets in [[CV candidates]] for the user to fold into the canonical LaTe
    citations** — far cleaner than email. Use it both to dedupe (skip papers already in
    `publications.tex`) and as a primary publications signal in its own right.
 
-3. **Determine the scan window.** Read the last `## <date> scan` block in
+3. **Determine the scan window.** Before scanning, check whether today's expected digest file
+   already exists or `[[cv-items]]` `last_digest` points to it. If so, stop and report "already
+   ran today," even for an explicit invocation; a force request does not bypass this guard. Do
+   not overwrite the same-day digest. Otherwise, read the last `## <date> scan` block in
    `Ops/Followups/CV candidates.md`; the window is (that date → today). If none, use the last
    30 days. Also read `[[cv-items]]` `last_checked` as a cross-check.
 

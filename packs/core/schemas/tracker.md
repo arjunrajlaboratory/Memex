@@ -80,6 +80,7 @@ miss_count: 0             # how many consecutive runs produced nothing material
 ## Rules
 
 - A tracker is **due** when `next_check <= today` and `status == active`.
+- At most one digest-producing run is allowed per tracker per calendar date. If today's expected digest path already exists or `last_digest` points to it, do not run or overwrite it. A force request bypasses cadence only, not this same-day guard.
 - After a run, the tracker agent:
   1. Creates a `tracker_digest` note under `Atlas/Trackers/Digests/`.
   2. Updates `last_checked`, `next_check` (computed from `cadence`), and `last_digest:` on the tracker.

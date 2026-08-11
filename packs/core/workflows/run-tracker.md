@@ -6,7 +6,7 @@
 
 ## Steps for a single tracker
 
-1. Read the tracker note end-to-end. Note its `search_strategy`, `queries`, `sources_to_revisit`, `freshness_window_days`, `reliability_floor`, `update_targets`, `auto_update_wiki`, `human_review_required`, `allowed_agents`, `forbidden_actions`.
+1. Read the tracker note end-to-end. Note its `search_strategy`, `queries`, `sources_to_revisit`, `freshness_window_days`, `reliability_floor`, `update_targets`, `auto_update_wiki`, `human_review_required`, `allowed_agents`, `forbidden_actions`. Before searching, check whether today's expected digest file already exists or `last_digest` points to it. If so, stop and report "already ran today," even for an explicit request; a force request does not bypass this guard. Do not overwrite the same-day digest.
 2. If `search_strategy: web`, run the queries via the allowed web search tool and revisit any URLs in `sources_to_revisit`. Restrict to `domains_to_prefer` if set; exclude `domains_to_exclude`. Filter to items dated within `freshness_window_days`.
 3. If `search_strategy: rss` or `github_releases` or `arxiv`, poll the relevant feeds/APIs from `sources_to_revisit`.
 4. If `search_strategy: manual_prompt`, present the queries to the user and wait for a reply.

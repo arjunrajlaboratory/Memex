@@ -25,6 +25,10 @@ Determine which trackers to run:
 - If {{tracker_id}} is set, load only that tracker from Atlas/Trackers/.
 - Otherwise, list all files in Atlas/Trackers/ (not Digests/) and select those
   where status: active and next_check <= today.
+- Before adding a tracker, check whether today's expected digest file already
+  exists or last_digest points to it. If so, skip it and report "already ran
+  today"; for an explicitly named tracker, stop. A force request does not bypass
+  this guard. Do not overwrite a same-day digest.
 
 For each selected tracker, follow _workflows/run-tracker.md exactly:
 
