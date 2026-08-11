@@ -27,6 +27,8 @@ import { SerialQueue } from './serial-queue';
 import { unpackedClaudeBinaryPath } from './claude-binary';
 import { acceptanceRecord, loadLegal, needsAcceptance, type LegalDocs, type TermsAcceptance } from './legal';
 import {
+  CONFIGURABLE_BUILTIN_TAB_IDS,
+  isReservedDesktopTabId,
   parseDesktopTabsDocument,
   tabPreferencesFromDocument,
   withTabPreferences,
@@ -183,7 +185,7 @@ function filterRows<T extends FilterableRow>(rows: T[], where: QueryWhere | null
   });
 }
 
-const BUILTIN_TAB_IDS = new Set(['dashboard', 'tasks', 'projects', 'ideas', 'people', 'inbox', 'outbox']);
+const BUILTIN_TAB_IDS = new Set<string>(CONFIGURABLE_BUILTIN_TAB_IDS);
 const BUILTIN_TAB_PATHS = new Set(['Ops/Tasks', 'Atlas/Projects', 'Atlas/Ideas', 'Atlas/People', 'Inbox', 'outputs']);
 
 // desktop-tabs.json is hand-editable: accept a scalar where the schema wants an
@@ -226,7 +228,7 @@ function appConfigFromDocument(vault: string, document: DesktopTabsDocument): Ap
         return id ? { ...tab, id } : null;
       })
       .filter((t): t is Partial<TabDef> & { id: string; label: string } =>
-        !!t && !BUILTIN_TAB_IDS.has(t.id.toLowerCase()) && !t.id.startsWith('folder:') && !seen.has(t.id) && !!seen.add(t.id))
+        !!t && !isReservedDesktopTabId(t.id) && !seen.has(t.id) && !!seen.add(t.id))
       .map((t) => {
         const url = t.url ? String(t.url) : '';
         return {

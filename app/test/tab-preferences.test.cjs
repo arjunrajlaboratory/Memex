@@ -5,6 +5,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
+  CONFIGURABLE_BUILTIN_TAB_IDS,
+  isReservedDesktopTabId,
   parseDesktopTabsDocument,
   tabPreferencesFromDocument,
   withTabPreferences,
@@ -42,6 +44,15 @@ test('tab preferences are validated, deduplicated, and preserve unrelated deskto
   assert.deepEqual(updated.tabs, original.tabs);
   assert.deepEqual(updated.chips, original.chips);
   assert.deepEqual(updated.futureSetting, { keep: true });
+});
+
+test('renderer-owned and generated tab IDs remain reserved from custom tabs', () => {
+  for (const id of [...CONFIGURABLE_BUILTIN_TAB_IDS, 'artifact']) {
+    assert.equal(isReservedDesktopTabId(id), true, `${id} should be reserved`);
+    assert.equal(isReservedDesktopTabId(id.toUpperCase()), true, `${id} should be reserved case-insensitively`);
+  }
+  assert.equal(isReservedDesktopTabId('folder:Atlas/Areas'), true);
+  assert.equal(isReservedDesktopTabId('cv'), false);
 });
 
 test('hand-edited preferences cannot hide every available tab without selecting a folder', () => {

@@ -4,6 +4,21 @@ import { pathType } from './vault';
 
 export interface DesktopTabsDocument { [key: string]: unknown; }
 
+export const CONFIGURABLE_BUILTIN_TAB_IDS = [
+  'dashboard', 'tasks', 'projects', 'ideas', 'people', 'inbox', 'outbox',
+] as const;
+
+const RESERVED_DESKTOP_TAB_IDS = new Set<string>([
+  ...CONFIGURABLE_BUILTIN_TAB_IDS,
+  'artifact',
+]);
+
+/** Reject IDs owned by renderer views and the namespace used for generated folder tabs. */
+export function isReservedDesktopTabId(id: string): boolean {
+  const normalized = String(id || '').toLowerCase();
+  return RESERVED_DESKTOP_TAB_IDS.has(normalized) || normalized.startsWith('folder:');
+}
+
 interface NavigationDocument {
   hidden?: unknown;
   folders?: unknown;
