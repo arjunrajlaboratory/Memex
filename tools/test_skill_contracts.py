@@ -16,6 +16,14 @@ def numbered_step(skill: str, number: int) -> str:
     return match.group(0)
 
 
+def frontmatter_keys(document: str) -> set[str]:
+    """Return field names from the first YAML frontmatter example or document."""
+    match = re.search(r"(?ms)^---\n(.*?)^---$", document)
+    if match is None:
+        raise AssertionError("YAML frontmatter not found")
+    return set(re.findall(r"(?m)^([a-z][a-z0-9_]*):", match.group(1)))
+
+
 class TestCaptureCommsCoverageContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -63,6 +71,7 @@ class TestCommsCoverageConsumers(unittest.TestCase):
         cls.reconcile = (core / "skills/reconcile-from-comms/SKILL.md").read_text()
         cls.briefing = (core / "skills/daily-briefing/SKILL.md").read_text()
         cls.briefing_schema = (core / "schemas/briefing.md").read_text()
+        cls.briefing_template = (core / "templates/briefing.md").read_text()
         cls.briefing_prompt = (core / "prompts/daily-briefing.md").read_text()
         cls.briefing_workflow = (core / "workflows/daily-briefing.md").read_text()
 
@@ -95,6 +104,11 @@ class TestCommsCoverageConsumers(unittest.TestCase):
             self.briefing_workflow,
             r"(?is)## Coverage.*partial.*inconclusive",
         )
+
+    def test_installed_briefing_template_matches_schema_frontmatter(self):
+        schema_fields = frontmatter_keys(self.briefing_schema)
+        template_fields = frontmatter_keys(self.briefing_template)
+        self.assertEqual(set(), schema_fields - template_fields)
 
     def test_disabled_source_digests_are_ignored_everywhere(self):
         consumers = {
