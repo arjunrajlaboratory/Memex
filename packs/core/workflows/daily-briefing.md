@@ -14,7 +14,9 @@ closes (plus passed calendar-event closes if the `calendar` stream is enabled) b
 numbered `## 0. State confirmation needed` section, confirmed in one batch. Skip this pass
 for backfilled briefings more than ~2 days old.
 
-Read every capture file's `## Coverage` before reconciliation. If any says `status: partial`,
+**Ignore stale digests from disabled sources:** before reconciliation, exclude their whole files
+by `source:` frontmatter (filename stem for legacy files) from both `## Coverage` and `## Action
+items` parsing. Read `## Coverage` only from enabled-source files. If any says `status: partial`,
 preserve the exact `coverage gap`, set briefing frontmatter `comms_coverage: partial`, and surface
 the warning at the top of §0 and the chat report-back. Positive captured signals remain usable;
 absence in an un-scanned source/direction/time range is inconclusive and must never become "not

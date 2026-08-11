@@ -36,11 +36,13 @@ for enabled streams and `mailboxes.*`. Run `capture-comms` for {{date}}, then
 `reconcile-from-comms` in daily-briefing sub-mode, unless {{date}} is more than ~2 days
 old. Tier-A reversible bookkeeping auto-applies; Tier-B proposals become `## 0. State
 confirmation needed` and are confirmed in one batch after the briefing. The capture files also
-expose `## Coverage`: read it before reconciling. If any source says
-`status: partial`, retain its exact `coverage gap`, treat absence in its un-scanned range as
-inconclusive, set `comms_coverage: partial`, and put the warning at the top of §0 and the chat
-report-back even when there are no numbered state proposals. Never turn partial capture into
-"not sent," "no reply," or "quiet." The mail connector
+expose `## Coverage`: read it before reconciling. **Ignore stale digests from disabled sources:**
+exclude their whole files by `source:` frontmatter (filename stem for legacy files) before parsing
+either `## Coverage` or `## Action items`. If any enabled source says `status: partial`, retain its
+exact `coverage gap`, treat absence in its un-scanned range as inconclusive, set
+`comms_coverage: partial`, and put the warning at the top of §0 and the chat report-back even when
+there are no numbered state proposals. Never turn partial capture into "not sent," "no reply," or
+"quiet." The mail connector
 searches only `mailboxes.connected` (legacy vaults: `mailboxes.gmail_connected`): sent mail from `mailboxes.forwarding_in` or
 `mailboxes.other_sending_accounts` is invisible unless separately connected. Separately,
 `search_threads` can lag the connected mailbox itself (a stale cached view, days behind and

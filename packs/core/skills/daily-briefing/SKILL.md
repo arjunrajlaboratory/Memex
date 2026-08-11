@@ -48,7 +48,7 @@ This is the default multi-source pass that keeps vault state from lagging realit
 
 2. **Backfill guard.** If `<date>` is more than ~2 days in the past (a backfilled briefing), **skip the comms refresh** — a comms scan only makes sense near today — and note `(comms refresh skipped — backfilled briefing for a past date)` in §0. Generate from vault state alone.
 
-3. **Run [[capture-comms]]** for `<date>`, enabled streams only. It is read-only against mail/Slack and handles a per-source MCP outage gracefully (writes a gap note, continues), so a missing connector never fails the briefing. This refreshes `Inbox/comms/<date>/`. Read every generated `## Coverage` block immediately: retain each `status: partial` / `coverage gap` with its source, direction, un-scanned time range, and reason. A partial scan's positive hits are usable, but absence inside its gap is inconclusive.
+3. **Run [[capture-comms]]** for `<date>`, enabled streams only. It is read-only against mail/Slack and handles a per-source MCP outage gracefully (writes a gap note, continues), so a missing connector never fails the briefing. This refreshes `Inbox/comms/<date>/`. **Ignore stale digests from disabled sources:** using `source:` frontmatter (or the filename stem for legacy files), read `## Coverage` only from files whose source is in the enabled set resolved in item 1. Retain each selected `status: partial` / `coverage gap` with its source, direction, un-scanned time range, and reason. A partial scan's positive hits are usable, but absence inside its gap is inconclusive.
 
 4. **Run [[reconcile-from-comms]]** for `<date>` in its **briefing sub-mode** (see that skill's "When invoked by daily-briefing"): it auto-applies Tier-A reversible bookkeeping (bump `last_contact`, mark Followups `acted_on`) and **returns the Tier-B proposals plus any coverage gaps** — task closes, Letter→submitted, and (if the `calendar` stream is enabled) passed-event closes — **without prompting**. Hold those proposals and gaps for §0 and the batched report-back (Step 6).
 
@@ -84,12 +84,13 @@ Also pull yesterday's briefing's "## Shutdown notes" section if present — it c
 
 When (a) and (b) point at the same note, keep the reconcile proposal (it carries the signal) and drop the duplicate. If Step 1b was skipped (no streams enabled, or the backfill guard fired), § 0 is just (b).
 
-**Coverage gaps are warnings, not state proposals.** If any capture file says `status: partial`,
-render `## 0. State confirmation needed` even when there are no numbered closes. Put this warning
-first: `> ⚠️ Comms coverage is partial — <source/direction>: <un-scanned range> (<reason>). Absence
-in that range is inconclusive.` Do not create an "awaiting send," "no reply," or "quiet" item from
-the uncovered range. Set frontmatter `comms_coverage: partial`; otherwise use `complete` when every
-enabled comms source completed and `skipped` when Step 1b did not run.
+**Coverage gaps are warnings, not state proposals.** If any **enabled-source** capture file says
+`status: partial`, render `## 0. State confirmation needed` even when there are no numbered closes.
+Put this warning first: `> ⚠️ Comms coverage is partial — <source/direction>: <un-scanned range>
+(<reason>). Absence in that range is inconclusive.` Do not create an "awaiting send," "no reply,"
+or "quiet" item from the uncovered range. Set frontmatter `comms_coverage: partial`; otherwise use
+`complete` when every enabled comms source completed and `skipped` when Step 1b did not run. A
+disabled source's leftover digest never participates in this status.
 
 For outbound-contact tasks (reply/send/email/follow-up tasks), do **not** infer "awaiting send" from stale note state alone when email is enabled. Step 1b's live comms capture (or a same-day `Inbox/comms/<date>/` digest) is the prerequisite. If the connected-mailbox search missed the send but the task/person uses a non-connected sending account, render the item as "couldn't confirm from the connected mailbox — may have gone from <account>" and ask the user, rather than asserting it remains open. The connected-mailbox search can also be **stale** (the search index lags reality and a repeat search won't refresh it), so a send that search can't see is "couldn't confirm" even without a second account — verify the specific thread with a full-thread read (Gmail: `get_thread(threadId)`) before asserting anything, and never emit "awaiting send" / "unsent" off an empty search.
 

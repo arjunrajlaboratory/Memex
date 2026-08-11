@@ -87,6 +87,29 @@ class TestCommsCoverageConsumers(unittest.TestCase):
             r"(?is)## Coverage.*partial.*inconclusive",
         )
 
+    def test_disabled_source_digests_are_ignored_everywhere(self):
+        consumers = {
+            "capture handoff": (
+                ROOT / "packs/core/skills/capture-comms/SKILL.md"
+            ).read_text(),
+            "reconcile": self.reconcile,
+            "briefing": self.briefing,
+            "briefing prompt": self.briefing_prompt,
+            "briefing workflow": self.briefing_workflow,
+        }
+        disabled_filter = r"(?is)(?:ignore|exclude)[^.\n]{0,240}(?:disabled|not enabled)"
+        for name, artifact in consumers.items():
+            with self.subTest(consumer=name):
+                self.assertRegex(artifact, disabled_filter)
+
+        # Filtering applies to the whole stale digest, not coverage alone: old
+        # action items from a disabled source must not reconcile either.
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)disabled.{0,300}## Coverage.{0,160}## Action items|"
+            r"## Coverage.{0,160}## Action items.{0,300}disabled",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

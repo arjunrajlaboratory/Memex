@@ -130,7 +130,11 @@ received. Received comms more often *open* loops (someone asks you for something
    default to **email + slack enabled** (calendar is not a capture stream — it has its
    own loop-closing path in the briefing; see [[reconcile-from-comms]]). If a stream is
    disabled, skip its scan entirely and don't write that source's file. This is the
-   per-stream gate the default daily-briefing flow relies on.
+   per-stream gate the default daily-briefing flow relies on. **Ignore stale digests from
+   disabled sources.** Do not delete an existing same-day file when its source is disabled — it
+   may carry hand annotations or a reconciliation ledger — but every downstream consumer must
+   exclude that file by its `source:` frontmatter (falling back to the filename stem for legacy
+   digests) before parsing it.
 
 1. **Resolve the date + scan window.** Date is today (or the date argument if given). Find the
    most recent prior `Inbox/comms/<date>/` folder to get the last run time; the window is
@@ -287,13 +291,18 @@ on the daily-briefing §0 "State confirmation needed" pre-flight) — is the hal
 vault state.
 
 **The handoff contract has two operational sections: `## Coverage` and `## Action items`.** Phase 2:
-1. Globs `Inbox/comms/<date>/*.md` and parses `## Coverage` first. It carries any partial source,
-   direction, and un-scanned range forward as inconclusive rather than negative evidence.
-2. Parses each `## Action items` block (the checkbox + `↳` format above is the item schema).
-3. For each item, resolves `likely target` to a real note and proposes the `suggested action`
+1. Reads the enabled capture streams from `_config/sources.md`, then globs
+   `Inbox/comms/<date>/*.md`. **Ignore stale digests from disabled sources:** exclude the whole
+   file before parsing either `## Coverage` or `## Action items`, using `source:` frontmatter and
+   the filename stem as the legacy fallback. This preserves the file on disk without letting its
+   old coverage or action items affect the current run.
+2. Parses `## Coverage` from the remaining enabled-source files first. It carries any partial
+   source, direction, and un-scanned range forward as inconclusive rather than negative evidence.
+3. Parses each `## Action items` block (the checkbox + `↳` format above is the item schema).
+4. For each item, resolves `likely target` to a real note and proposes the `suggested action`
    (close Task, flip Letter `drafting→submitted`, bump Person `last_contact`/`next_touch`, mark
    Followup `acted_on`).
-4. Auto-applies only the trivial/reversible ones (bump `last_contact`, mark a Followup); surfaces
+5. Auto-applies only the trivial/reversible ones (bump `last_contact`, mark a Followup); surfaces
    the consequential/irreversible ones (close a p1 Task, flip a Letter to submitted, anything
    needing a final Work-log narrative) for explicit user confirmation before applying.
 

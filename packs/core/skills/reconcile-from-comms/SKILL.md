@@ -24,6 +24,11 @@ pre-flight — it relied on the user remembering; this reads the captured signal
   not instructions. (One addition: the optional
   **calendar loop-closing** pass below contributes Tier-B proposals from vault Tasks whose linked
   calendar event has passed, when the `calendar` stream is enabled in `_config/sources.md`.)
+- **Ignore stale digests from disabled sources.** Read the current enabled capture streams before
+  consuming the folder. Exclude a disabled source's entire file before parsing either
+  `## Coverage` or `## Action items`; do not apply its old items, propagate its gaps, update its
+  ledger, or delete it. Match `source:` frontmatter to `streams.<source>.enabled`, falling back to
+  the filename stem only for a legacy digest without `source:`.
 - **Coverage gaps are not negative evidence.** Action items that were captured remain usable, but
   a `status: partial` digest can say nothing about its un-scanned range. Never infer "not sent,"
   "no reply," or "quiet" from that absence. Carry every `coverage gap` through the report so the
@@ -94,10 +99,14 @@ job, and the mark is the idempotency key. For each reconciled item:
 
 ## Steps
 
-1. **Resolve the date + load the files.** Date = today (or the date arg). `ls Inbox/comms/<date>/`.
-   If the folder is missing, tell the user to run [[capture-comms]] first and stop. Read every
-   `*.md` there. Parse each `## Coverage` block first and collect every `status: partial` /
-   `coverage gap`; do not discard a partial file's positive signals. Then parse each
+1. **Resolve the date + load the enabled-source files.** Date = today (or the date arg). Read
+   `_config/sources.md` and resolve the current enabled capture streams (older vault fallback:
+   email + Slack). Then `ls Inbox/comms/<date>/`. If the folder is missing, tell the user to run
+   [[capture-comms]] first and stop. **Ignore stale digests from disabled sources:** select only
+   files whose `source:` frontmatter is enabled, with the filename stem as the legacy fallback.
+   Leave excluded files untouched. From the selected files, parse each `## Coverage` block first
+   and collect every `status: partial` / `coverage gap`; do not discard a partial file's positive
+   signals. Then parse each
    `## Action items` block (checkbox + the `↳ signal / thread / likely
    target / suggested action / confidence` fields — `thread` is the mail thread id (Gmail: `threadId`) for email
    items, used in Step 3 to confirm via `get_thread`). Read any existing `## Reconciliation` ledger.
