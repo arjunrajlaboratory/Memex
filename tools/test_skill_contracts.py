@@ -175,7 +175,9 @@ class TestTrackerHistoryContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         core = ROOT / "packs/core"
+        pi = ROOT / "packs/pi"
         skill = (core / "skills/run-trackers/SKILL.md").read_text()
+        cv_skill = (pi / "skills/cv-scan/SKILL.md").read_text()
         skill_history = re.search(
             r"(?ms)^### 2\.7 .*?(?=^### 2\.8 )",
             skill,
@@ -194,7 +196,10 @@ class TestTrackerHistoryContract(unittest.TestCase):
             "schema": numbered_list_step(
                 (core / "schemas/tracker.md").read_text(), 4, indent="  "
             ),
+            "cv-scan": numbered_list_step(cv_skill, 11),
         }
+        cls.cv_output_contract = cv_skill.split("## Steps", 1)[0]
+        cls.cv_digest_step = numbered_list_step(cv_skill, 10)
 
     def test_every_run_surface_requires_a_history_entry(self):
         for name, artifact in self.run_surfaces.items():
@@ -202,7 +207,7 @@ class TestTrackerHistoryContract(unittest.TestCase):
                 self.assertIn("# History", artifact)
                 self.assertRegex(artifact, r"(?i)(?:one bullet|one line) per run")
                 self.assertRegex(artifact, r"(?i)(?:including|even)[^\n]*material.{0,12}false")
-                self.assertRegex(artifact, r"(?i)# History[^\n]*digest")
+                self.assertRegex(artifact, r"(?is)# History.{0,120}digest")
 
     def test_history_is_distinct_from_latest_digest_state(self):
         for name, artifact in self.run_surfaces.items():
@@ -211,6 +216,14 @@ class TestTrackerHistoryContract(unittest.TestCase):
                     artifact,
                     r"(?is)last_digest.{0,160}state.{0,160}# History.{0,160}provenance",
                 )
+
+    def test_specialized_runner_allows_digest_and_history_outputs(self):
+        self.assertIn("Tracker Digest", self.cv_output_contract)
+        self.assertIn("# History", self.cv_output_contract)
+
+    def test_specialized_runner_creates_the_canonical_digest(self):
+        self.assertIn("_schemas/tracker_digest.md", self.cv_digest_step)
+        self.assertRegex(self.cv_digest_step, r"(?i)including[^\n]*material.{0,12}false")
 
 
 if __name__ == "__main__":
