@@ -6,11 +6,14 @@ from unittest import mock
 from memex_bake import BakeResult, sha256_file
 from memex_update import (
     Disposition,
+    apply_safe_operations,
     classify_update,
     detect_renames,
     fill_new_answers,
+    migrate_sources_config_text,
     missing_required_tokens,
     plan_update_paths,
+    strip_work_heavy,
     unresolved_plan_entries,
 )
 
@@ -215,6 +218,205 @@ class TestUpdateClassification(unittest.TestCase):
             self.assertIsNotNone(entries[0]["staged_path"])
 
 
+class TestSourcesConfigMigration(unittest.TestCase):
+    OLD_CONFIG = """---
+type: config
+scope: sources
+streams:
+  email: { enabled: true, mcp: custom_Mail }
+  slack: { enabled: false, mcp: custom_Slack }
+  calendar: { enabled: true, mcp: custom_Calendar, mode: minimal }
+custom_setting: keep-me
+---
+
+# User-edited sources prose
+"""
+    STAGED_CONFIG = """---
+type: config
+scope: sources
+streams:
+  email: { enabled: true, mcp: claude_ai_Gmail }
+  slack: { enabled: true, mcp: claude_ai_Slack }
+  calendar: { enabled: false, mcp: claude_ai_Google_Calendar, mode: minimal }
+  notion: { enabled: true, mcp: claude_ai_Notion }
+  jira: { enabled: false, mcp: claude_ai_Atlassian }
+---
+"""
+
+    def test_adds_only_missing_streams_as_disabled_and_is_idempotent(self):
+        migrated, added = migrate_sources_config_text(self.OLD_CONFIG, self.STAGED_CONFIG)
+        self.assertEqual(added, ["notion", "jira"])
+        self.assertIn("  email: { enabled: true, mcp: custom_Mail }", migrated)
+        self.assertIn("  calendar: { enabled: true, mcp: custom_Calendar, mode: minimal }", migrated)
+        self.assertIn("  notion: { enabled: false, mcp: claude_ai_Notion }", migrated)
+        self.assertIn("  jira: { enabled: false, mcp: claude_ai_Atlassian }", migrated)
+        self.assertLess(migrated.index("  jira:"), migrated.index("custom_setting:"))
+        self.assertTrue(migrated.endswith("# User-edited sources prose\n"))
+
+        second_pass, second_added = migrate_sources_config_text(migrated, self.STAGED_CONFIG)
+        self.assertEqual(second_pass, migrated)
+        self.assertEqual(second_added, [])
+
+    def test_declines_nonstandard_seed_instead_of_guessing(self):
+        configs = {
+            "no frontmatter": "# Sources\n\nUser-owned prose without frontmatter.\n",
+            "sequence": "---\nstreams:\n  - email\n  - slack\n---\n",
+            "block mapping": (
+                "---\nstreams:\n  email:\n    enabled: true\n    mcp: custom_Mail\n---\n"
+            ),
+            "malformed inline mapping": (
+                "---\nstreams:\n  email: { enabled: true } trailing text\n---\n"
+            ),
+            "duplicate comma": (
+                "---\nstreams:\n  email: { enabled: true,, mcp: mail }\n---\n"
+            ),
+            "unmatched flow bracket": (
+                "---\nstreams:\n  email: { enabled: [true, mcp: mail }\n---\n"
+            ),
+            "unterminated double quote": (
+                '---\nstreams:\n  email: { enabled: true, mcp: "mail }\n---\n'
+            ),
+            "unterminated single quote": (
+                "---\nstreams:\n  email: { enabled: true, mcp: 'mail }\n---\n"
+            ),
+            "duplicate inner key": (
+                "---\nstreams:\n  email: { enabled: true, enabled: false }\n---\n"
+            ),
+            "inconsistent indentation": (
+                "---\nstreams:\n  email: { enabled: true, mcp: custom_Mail }\n"
+                "   slack: { enabled: true, mcp: custom_Slack }\n---\n"
+            ),
+            "duplicate key": (
+                "---\nstreams:\n  email: { enabled: true, mcp: first }\n"
+                "  email: { enabled: false, mcp: second }\n---\n"
+            ),
+            "duplicate top-level streams mapping": (
+                "---\nstreams:\n  email: { enabled: true, mcp: custom_Mail }\n"
+                "streams:\n  slack: { enabled: true, mcp: custom_Slack }\n---\n"
+            ),
+            "tab indentation": (
+                "---\nstreams:\n\temail: { enabled: true, mcp: custom_Mail }\n---\n"
+            ),
+        }
+        for name, current in configs.items():
+            with self.subTest(shape=name):
+                self.assertEqual(
+                    migrate_sources_config_text(current, self.STAGED_CONFIG),
+                    (current, []),
+                )
+
+    def test_accepts_valid_quoted_inline_scalars(self):
+        current = (
+            "---\nstreams:\n"
+            '  email: { enabled: true, mcp: "custom, Mail" }\n'
+            "  slack: { enabled: false, mcp: 'team''s Slack' }\n"
+            "---\n"
+        )
+        migrated, added = migrate_sources_config_text(current, self.STAGED_CONFIG)
+        self.assertEqual(added, ["notion", "jira"])
+        self.assertIn('mcp: "custom, Mail"', migrated)
+        self.assertIn("mcp: 'team''s Slack'", migrated)
+
+    def test_preserves_a_consistent_nondefault_mapping_indent(self):
+        current = (
+            "---\nstreams:\n"
+            "    email: { enabled: true, mcp: custom_Mail }\n"
+            "    slack: { enabled: false, mcp: custom_Slack }\n"
+            "---\n"
+        )
+        migrated, added = migrate_sources_config_text(current, self.STAGED_CONFIG)
+        self.assertEqual(added, ["notion", "jira"])
+        self.assertIn("\n    notion: { enabled: false", migrated)
+        self.assertIn("\n    jira: { enabled: false", migrated)
+        self.assertNotIn("\n  notion:", migrated)
+
+    def test_classification_and_apply_preserve_original_in_undo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            baseline = root / "baseline"
+            vault = root / "vault"
+            staged = root / "staged"
+            work = root / "work"
+            rel = "_config/sources.md"
+            write(vault / rel, self.OLD_CONFIG)
+            (vault / rel).chmod(0o640)
+            write(staged / rel, self.STAGED_CONFIG)
+            source_map = BakeResult()
+            source_map.record(rel, None)
+            layout = {
+                "framework": {"prose": [], "code": []},
+                "hybrid": [],
+                "seed": [rel],
+                "data": [],
+            }
+
+            entries, unresolved, _meta = classify_update(
+                manifest={"files": {}},
+                layout=layout,
+                baseline_dir=baseline,
+                vault_dir=vault,
+                staged_dir=staged,
+                source_map=source_map,
+                work_dir=work,
+            )
+
+            self.assertEqual(unresolved, [])
+            self.assertEqual(len(entries), 1)
+            entry = entries[0]
+            self.assertEqual(entry["disposition"], Disposition.SEED_PRESENT)
+            self.assertEqual(entry["resolution"], "auto-migrated")
+            self.assertEqual(entry["added_streams"], ["notion", "jira"])
+
+            apply_safe_operations(
+                entries,
+                vault_dir=vault,
+                staged_dir=staged,
+                work_dir=work,
+                prune_removed=False,
+            )
+            self.assertTrue(entry["applied"])
+            self.assertEqual((work / "undo" / rel).read_text(), self.OLD_CONFIG)
+            installed = (vault / rel).read_text()
+            self.assertIn("notion: { enabled: false", installed)
+            self.assertIn("jira: { enabled: false", installed)
+            self.assertEqual((vault / rel).stat().st_mode & 0o777, 0o640)
+
+    def test_classification_never_follows_a_sources_config_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            outside = root / "outside.md"
+            vault = root / "vault"
+            staged = root / "staged"
+            rel = "_config/sources.md"
+            write(outside, self.OLD_CONFIG)
+            (vault / rel).parent.mkdir(parents=True)
+            (vault / rel).symlink_to(outside)
+            write(staged / rel, self.STAGED_CONFIG)
+            source_map = BakeResult()
+            source_map.record(rel, None)
+            layout = {
+                "framework": {"prose": [], "code": []},
+                "hybrid": [],
+                "seed": [rel],
+                "data": [],
+            }
+
+            entries, unresolved, _meta = classify_update(
+                manifest={"files": {}},
+                layout=layout,
+                baseline_dir=root / "baseline",
+                vault_dir=vault,
+                staged_dir=staged,
+                source_map=source_map,
+                work_dir=root / "work",
+            )
+
+            self.assertEqual(unresolved, [])
+            self.assertEqual(entries[0]["disposition"], Disposition.SEED_PRESENT)
+            self.assertNotIn("resolution", entries[0])
+            self.assertEqual(outside.read_text(), self.OLD_CONFIG)
+
+
 class TestDetectRenames(unittest.TestCase):
     def test_score_sorted_greedy_lets_best_global_pairs_win(self):
         # a.md matches new1.md at ~0.92 and new2.md at ~0.90; b.md matches
@@ -393,6 +595,31 @@ class TestPlanResolution(unittest.TestCase):
         self.assertIn("scripts/tool.local.py", paths)
         self.assertIn(".claude/skills/old/SKILL.md", paths)
         self.assertIn("scripts/tool.py", paths)
+
+    def test_plan_paths_include_auto_migrated_seed_before_applied_is_persisted(self):
+        plan = {
+            "entries": [
+                {
+                    "disposition": Disposition.SEED_PRESENT,
+                    "path": "_config/sources.md",
+                    "resolution": "auto-migrated",
+                    "applied": False,
+                }
+            ]
+        }
+        self.assertIn("_config/sources.md", plan_update_paths(plan))
+
+    def test_completed_work_cleanup_removes_migrated_tree_but_keeps_undo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = pathlib.Path(tmp)
+            for name in ("staged", "versions", "merged", "migrated", "undo"):
+                write(work / name / "sentinel", name)
+
+            strip_work_heavy(work)
+
+            for name in ("staged", "versions", "merged", "migrated"):
+                self.assertFalse((work / name).exists(), name)
+            self.assertTrue((work / "undo" / "sentinel").exists())
 
 
 if __name__ == "__main__":

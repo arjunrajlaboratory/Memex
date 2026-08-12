@@ -144,7 +144,7 @@ def _prompt_input(prompt: str) -> str:
 
 def ask_streams() -> list[str]:
     """Per-stream y/n for the default loop-closing flow."""
-    print("\nWhich streams should the daily flow check by default (capture-comms)?")
+    print("\nWhich streams should the daily loop-closing flow check by default?")
     chosen = []
     for stream in VALID_STREAMS:
         on_by_default = stream in DEFAULT_STREAMS

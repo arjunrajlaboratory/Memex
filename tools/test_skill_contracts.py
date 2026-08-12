@@ -73,7 +73,7 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         self.assertRegex(mail_step, r"(?is)preserv(?:e|ing).{0,120}(?:direction|provenance)")
 
     def test_incomplete_provider_scan_must_record_the_gap(self):
-        write_step = numbered_step(self.skill, 6)
+        write_step = numbered_step(self.skill, 8)
         self.assertRegex(write_step, r"(?i)every\s+enabled (?:source|stream)")
         self.assertRegex(write_step, r"(?i)coverage gap")
         self.assertRegex(write_step, r"(?i)unscanned|un-scanned")
@@ -83,6 +83,224 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         self.assertRegex(hard_rules, r"(?i)no silent (?:caps|truncation)")
         self.assertIn("Notion", hard_rules)
         self.assertIn("Jira", hard_rules)
+
+    def test_jira_scan_resolves_identity_and_site_before_searching(self):
+        jira_step = numbered_step(self.skill, 5)
+        identity_pos = jira_step.index("atlassianUserInfo")
+        site_pos = jira_step.index("getAccessibleAtlassianResources")
+        search_pos = jira_step.index("searchJiraIssuesUsingJql")
+        self.assertLess(identity_pos, search_pos)
+        self.assertLess(site_pos, search_pos)
+        self.assertIn("cloudId", jira_step)
+
+    def test_jira_scan_is_bounded_paginated_and_changelog_aware(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(jira_step, r"(?is)updated >=.+updated <")
+        jql = re.search(r"(?s)```text\n(.*?)\n\s*```", jira_step)
+        self.assertIsNotNone(jql)
+        self.assertNotRegex(
+            jql.group(1),
+            r"(?i)assignee|reporter|watcher|participant|mention|currentUser",
+        )
+        self.assertRegex(jira_step, r"(?is)do not pre-filter discovery.{0,220}unrelated issue")
+        self.assertRegex(jira_step, r"(?i)calendar-day\s+slices")
+        self.assertIn("nextPageToken", jira_step)
+        self.assertRegex(jira_step, r"(?is)first result page.{0,40}never complete")
+        self.assertRegex(jira_step, r"(?i)for every issue in the global map")
+        self.assertRegex(jira_step, r"(?i)comments and changelog|changelog/history")
+        self.assertRegex(jira_step, r"(?i)author account id|actor account id")
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:comments or changelog/history).{0,260}(?:exhaustion|coverage gap)",
+        )
+
+    def test_jira_query_bounds_cover_timezone_and_precision_edges(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(jira_step, r"(?is)Jira site(?:'s)? timezone.{0,300}(?:convert|query bounds)")
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:timezone.{0,260}(?:unavailable|unknown)|precision.{0,260}(?:coarse|unknown))"
+            r".{0,320}(?:widen|padding).{0,120}(?:two|2) (?:calendar )?days",
+        )
+        self.assertRegex(jira_step, r"(?is)(?:discard|filter).{0,160}exact slice")
+
+    def test_jira_scan_captures_mentions_from_editable_fields(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:description|editable text/rich-text fields?).{0,300}mention",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)changelog/history.{0,500}field changes?.{0,300}mention",
+        )
+        self.assertRegex(jira_step, r"(?is)mention.{0,180}stable account id")
+        self.assertRegex(
+            jira_step,
+            r"(?is)created in the window.{0,220}creator\.accountId.{0,220}intervening field rewrite",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:field bodies|field values).{0,260}coverage gap",
+        )
+        completeness = numbered_step(self.skill, 8)
+        self.assertRegex(completeness, r"(?i)mention-bearing field changes")
+
+    def test_jira_close_is_suppressed_after_a_later_reopen(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:chronological|timestamp order).{0,260}(?:current status|current state)",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:close candidate|terminal transition).{0,320}later transition"
+            r".{0,260}(?:non-terminal|actionable|reopen).{0,220}(?:discard|suppress|supersed)",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:current status|current state).{0,180}(?:terminal|Done/Resolved)",
+        )
+
+    def test_jira_open_state_candidates_must_still_be_current(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(
+            jira_step,
+            r"(?is)assignment.{0,260}current assignee.{0,260}(?:later|subsequent)"
+            r".{0,180}(?:away|different|reassign).{0,180}(?:discard|suppress|supersed)",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)actionable transition.{0,300}current\s+status.{0,260}later transition"
+            r".{0,180}(?:discard|suppress|supersed)",
+        )
+
+    def test_jira_stateful_signal_matrix_covers_cross_field_outcomes(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(jira_step, r"(?i)stateful-signal invariant")
+        self.assertRegex(jira_step, r"(?is)fold.{0,160}through read time")
+        expected_rows = (
+            r"Assignment to owner\s*\|\s*Owner\s*\|\s*Actionable/non-terminal\s*\|\s*Open",
+            r"Assignment to owner\s*\|\s*Owner\s*\|\s*Terminal\s*\|\s*Superseded",
+            r"Assignment to owner\s*\|\s*Other or unassigned\s*\|\s*Any\s*\|\s*Superseded",
+            r"Actionable transition for owner\s*\|[^\n]*\|\s*Actionable/non-terminal\s*\|\s*Open",
+            r"Actionable transition for owner\s*\|[^\n]*\|\s*Terminal\s*\|\s*Superseded",
+            r"Owner terminal transition\s*\|[^\n]*\|\s*Terminal, no later reversal\s*\|\s*Close",
+            r"Owner terminal transition\s*\|[^\n]*\|\s*Actionable/reopened\s*\|\s*Superseded",
+            r"Reopen then owner reclose\s*\|[^\n]*\|\s*Terminal\s*\|\s*Only the later owner close",
+        )
+        for row in expected_rows:
+            self.assertRegex(jira_step, rf"(?i){row}")
+
+    def test_jira_requests_are_suppressed_after_a_later_owner_reply(self):
+        hard_rules = self.skill.split("## Output shape", 1)[0]
+        self.assertRegex(hard_rules, r"(?i)communication-loop invariant")
+        self.assertRegex(
+            hard_rules,
+            r"(?is)(?:thread|discussion).{0,220}through read\s+time.{0,420}"
+            r"later substantive owner (?:response|reply).{0,220}supersed",
+        )
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:comment|field-mention) request.{0,260}exhaustive comment"
+            r".{0,260}later substantive owner (?:comment|reply).{0,220}supersed",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)after (?:the )?(?:capture )?window.{0,220}suppress"
+            r".{0,180}(?:not|never).{0,120}emit",
+        )
+
+    def test_jira_scan_is_read_only_and_writes_standard_digest(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertIn("Inbox/comms/<date>/jira.md", jira_step)
+        self.assertIn("↳ thread:", jira_step)
+        for tool in (
+            "createJiraIssue",
+            "editJiraIssue",
+            "transitionJiraIssue",
+            "addCommentToJiraIssue",
+        ):
+            self.assertRegex(jira_step, rf"(?is)never call.{{0,180}}{tool}")
+
+    def test_notion_scan_resolves_identity_before_searching(self):
+        notion_step = numbered_step(self.skill, 6)
+        identity_pos = notion_step.index("notion-get-users")
+        search_pos = notion_step.index("notion-search")
+        self.assertLess(identity_pos, search_pos)
+        self.assertRegex(notion_step, r"(?i)stable Notion user id|actor-classification")
+        self.assertRegex(notion_step, r"(?is)do not guess.{0,160}partial")
+
+    def test_notion_scan_exhausts_pages_and_comment_threads(self):
+        notion_step = numbered_step(self.skill, 6)
+        self.assertRegex(notion_step, r"(?i)calendar-day slices")
+        self.assertRegex(notion_step, r"(?i)next_cursor|has_more")
+        self.assertRegex(
+            notion_step,
+            r"(?is)never.{0,30}first result page.{0,40}complete coverage|"
+            r"first result page.{0,40}(?:not|never).{0,30}complete",
+        )
+        self.assertIn("notion-fetch", notion_step)
+        self.assertIn("notion-get-comments", notion_step)
+        self.assertRegex(notion_step, r"(?is)paginate comments.{0,40}exhaustion")
+        self.assertRegex(
+            notion_step,
+            r"(?is)comment-only activity independently.{0,320}last_edited_time",
+        )
+        self.assertRegex(
+            notion_step,
+            r"(?is)otherwise write `notion\.md` as partial.{0,300}coverage\s+gap",
+        )
+        self.assertRegex(
+            notion_step,
+            r"(?is)comment-only activity.{0,180}undiscoverable for the full window",
+        )
+
+    def test_notion_scan_classifies_actors_privately_and_read_only(self):
+        notion_step = numbered_step(self.skill, 6)
+        self.assertIn("Inbox/comms/<date>/notion.md", notion_step)
+        self.assertIn("↳ thread:", notion_step)
+        self.assertRegex(notion_step, r"(?is)open-loop signals:.*unresolved comment")
+        self.assertRegex(notion_step, r"(?i)owner's own reply or resolution")
+        self.assertRegex(notion_step, r"(?i)summarize one level up")
+        self.assertRegex(notion_step, r"(?i)never paste page or\s+comment bodies")
+        write_guard = notion_step.split("Never call", 1)[1]
+        for tool in (
+            "notion-create-*",
+            "notion-update-*",
+            "notion-move-pages",
+            "notion-duplicate-page",
+            "notion-create-comment",
+        ):
+            self.assertIn(tool, write_guard)
+
+    def test_notion_missing_edit_or_resolution_history_is_partial(self):
+        notion_step = numbered_step(self.skill, 6)
+        self.assertRegex(
+            notion_step,
+            r"(?is)(?:page-edit|page edit) history.{0,240}(?:actors|actor ids?)"
+            r".{0,160}timestamps.{0,420}coverage gap",
+        )
+        self.assertRegex(
+            notion_step,
+            r"(?is)resolution.{0,180}(?:actor|resolver).{0,180}timestamp"
+            r".{0,260}coverage gap",
+        )
+        completeness = numbered_step(self.skill, 8)
+        self.assertRegex(completeness, r"(?is)Notion.{0,500}(?:edit history|edit actors)")
+        self.assertRegex(completeness, r"(?is)Notion.{0,600}(?:resolution provenance|resolver)")
+
+    def test_notion_resolution_is_suppressed_after_a_reopen(self):
+        notion_step = numbered_step(self.skill, 6)
+        self.assertRegex(
+            notion_step,
+            r"(?is)resolution.{0,360}(?:currently|current state).{0,120}resolved",
+        )
+        self.assertRegex(
+            notion_step,
+            r"(?is)(?:reopen|later reversal).{0,220}(?:discard|suppress|supersed)",
+        )
 
 
 class TestCommsCoverageConsumers(unittest.TestCase):
@@ -104,6 +322,88 @@ class TestCommsCoverageConsumers(unittest.TestCase):
         )
         briefing_mode = self.reconcile.split("## When invoked by daily-briefing", 1)[1]
         self.assertRegex(briefing_mode, r"(?i)coverage gaps?.*briefing")
+
+    def test_reconcile_rechecks_jira_field_mentions(self):
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,1500}(?:description|editable text/rich-text field).{0,260}mention",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,1500}changelog/history.{0,300}(?:field-change|field change)",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)creation-time field-mention.{0,180}creator\.accountId.{0,180}intervening field rewrite",
+        )
+
+    def test_reconcile_rechecks_stateful_close_candidates(self):
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,1800}(?:current status|current state).{0,260}terminal"
+            r".{0,320}(?:later transition|reopen)",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Notion items.{0,1000}(?:currently|current state).{0,160}resolved"
+            r".{0,320}(?:reopen|later reversal)",
+        )
+
+    def test_reconcile_rechecks_jira_open_state_candidates(self):
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,2000}assignment.{0,220}current\s+assignee"
+            r".{0,260}(?:reassign|later\s+assignee change|moved away)",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,2400}actionable transition.{0,260}current\s+status"
+            r".{0,260}later\s+transition",
+        )
+
+    def test_reconcile_applies_one_jira_stateful_signal_invariant(self):
+        self.assertRegex(self.reconcile, r"(?i)Jira stateful-signal invariant")
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)fold.{0,180}through (?:the )?live read time.{0,600}"
+            r"current assignee.{0,180}actionable/non-terminal",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)latest unsuperseded.{0,220}terminal.{0,180}owner",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)(?:contradicts|fails).{0,180}superseded.{0,220}do not propose",
+        )
+
+    def test_reconcile_rechecks_later_replies_before_proposing_open_work(self):
+        self.assertRegex(self.reconcile, r"(?i)live communication-loop invariant")
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)(?:thread|discussion).{0,220}through (?:the )?live\s+read\s+time"
+            r".{0,420}later substantive owner (?:response|reply).{0,220}superseded",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)For a Jira (?:comment request or field-mention request)"
+            r".{0,360}later substantive owner (?:comment|reply).{0,260}do not\s+propose",
+        )
+
+    def test_reconcile_requires_notion_edit_and_resolution_provenance(self):
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Notion items.{0,850}(?:page-edit|page edit) history.{0,220}actor"
+            r".{0,160}timestamp",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Notion items.{0,900}resolution.{0,180}(?:resolver|actor).{0,180}timestamp",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Notion items.{0,1100}(?:history|provenance).{0,260}couldn't confirm",
+        )
 
     def test_briefing_persists_and_surfaces_partial_coverage(self):
         for artifact in (
@@ -178,6 +478,51 @@ class TestCommsCoverageConsumers(unittest.TestCase):
             r"(?is)no (?:enabled )?capture streams?.{0,240}"
             r"(?:skip|do not require).{0,160}(?:digest|folder).{0,240}calendar",
         )
+
+
+class TestInstalledCaptureContracts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        contracts = ROOT / "hardened/contract"
+        cls.claude = (contracts / "CLAUDE.base.md").read_text()
+        cls.agents = (contracts / "AGENTS.base.md").read_text()
+        cls.claude_sources = markdown_section(
+            cls.claude,
+            "## Source streams + git mode (`_config/sources.md`)",
+            "## Out of scope (v0.1)",
+        )
+
+    def test_both_installed_contracts_name_every_capture_stream(self):
+        for name, contract in {"CLAUDE.md": self.claude, "AGENTS.md": self.agents}.items():
+            with self.subTest(contract=name):
+                for stream in ("email", "Slack", "Notion", "Jira"):
+                    self.assertIn(stream, contract)
+                self.assertRegex(contract, r"(?is)daily briefing.{0,700}Notion.{0,200}Jira")
+
+    def test_installed_contracts_include_jira_field_mentions(self):
+        for name, contract in {"CLAUDE.md": self.claude, "AGENTS.md": self.agents}.items():
+            with self.subTest(contract=name):
+                self.assertRegex(contract, r"(?is)Jira.{0,120}(?:field )?mentions")
+
+    def test_claude_sources_contract_has_rows_defaults_and_upgrade_guidance(self):
+        for row in ("email:", "slack:", "calendar:", "notion:", "jira:"):
+            self.assertIn(row, self.claude_sources)
+        self.assertRegex(self.claude_sources, r"(?i)notion:\s+\{ enabled: false")
+        self.assertRegex(self.claude_sources, r"(?i)jira:\s+\{ enabled: false")
+        self.assertRegex(
+            self.claude_sources,
+            r"(?is)memex-update.{0,100}appends missing Notion/Jira rows as disabled",
+        )
+        self.assertRegex(
+            self.claude_sources,
+            r"(?is)preserves every existing row.{0,80}user prose",
+        )
+
+    def test_installed_contracts_keep_notion_and_jira_read_only(self):
+        for name, contract in {"CLAUDE.md": self.claude, "AGENTS.md": self.agents}.items():
+            with self.subTest(contract=name):
+                self.assertRegex(contract, r"(?is)(?:never|not do).{0,120}(?:edit|comment).{0,30}Notion")
+                self.assertRegex(contract, r"(?is)(?:never|not do).{0,180}(?:create|edit|transition).{0,80}Jira")
 
 
 class TestTrackerHistoryContract(unittest.TestCase):

@@ -47,6 +47,20 @@ path.write_text(json.dumps(data, indent=2) + "\n")
 PY
 
 "$ENG/bin/memex-init" --target "$VAULT" --packs core --answers "$ENG/tests/fixtures/answers.core.json" >/dev/null
+# Simulate an existing vault whose write-once sources seed predates the
+# Notion/Jira rows, including user prose that the migration must preserve.
+python3 - "$VAULT/_config/sources.md" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+text = "".join(
+    line for line in text.splitlines(keepends=True)
+    if not line.lstrip().startswith(("notion:", "jira:"))
+)
+text = text.replace("# Sources\n", "# Sources\n\nExisting user source note.\n", 1)
+assert "notion:" not in text and "jira:" not in text
+path.write_text(text)
+PY
 git -C "$VAULT" config user.email test@example.com
 git -C "$VAULT" config user.name "Memex Test"
 git -C "$VAULT" add .
@@ -83,6 +97,9 @@ grep -q "Update test marker: America/New_York" "$VAULT/.claude/skills/triage-inb
 grep -q "Local email skill edit that must survive" "$VAULT/.claude/skills/email/SKILL.md" || fail "edited framework file was clobbered"
 grep -q "Never touch this." "$VAULT/Atlas/Projects/User Data.md" || fail "user data was touched"
 grep -q "User-owned collision file" "$VAULT/.claude/skills/collision-skill/SKILL.md" || fail "collision was overwritten"
+grep -q "notion: { enabled: false, mcp: claude_ai_Notion }" "$VAULT/_config/sources.md" || fail "update did not append disabled Notion stream"
+grep -q "jira: { enabled: false, mcp: claude_ai_Atlassian }" "$VAULT/_config/sources.md" || fail "update did not append disabled Jira stream"
+grep -q "Existing user source note." "$VAULT/_config/sources.md" || fail "sources migration clobbered user prose"
 
 PLAN="$(ls "$VAULT"/.memex/update-work/0.2.0-*/plan.json)"
 python3 - "$PLAN" <<'PY'
@@ -96,6 +113,11 @@ assert counts.get("collision", 0) >= 1, counts
 assert counts.get("new", 0) >= 1, counts
 assert counts.get("removed-upstream", 0) >= 1, counts
 assert counts.get("replace-untouched", 0) >= 1, counts
+migrations = [e for e in plan["entries"] if e.get("resolution") == "auto-migrated"]
+assert len(migrations) == 1, migrations
+assert migrations[0]["path"] == "_config/sources.md", migrations[0]
+assert migrations[0]["added_streams"] == ["notion", "jira"], migrations[0]
+assert migrations[0]["applied"] is True, migrations[0]
 PY
 
 # the engine did not change the email skill, so the local edit 3-way-merges

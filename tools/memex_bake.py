@@ -39,7 +39,7 @@ TEXT_EXTS = {
 }
 
 # Source streams + git mode are behavior answers, not {{TOKEN}} placeholders.
-VALID_STREAMS = ["email", "slack", "calendar"]
+VALID_STREAMS = ["email", "slack", "calendar", "notion", "jira"]
 DEFAULT_STREAMS = ["email", "slack"]
 VALID_PROVIDERS = ["google", "microsoft"]
 STREAM_MCP = {
@@ -47,6 +47,8 @@ STREAM_MCP = {
         "email": "claude_ai_Gmail",
         "slack": "claude_ai_Slack",
         "calendar": "claude_ai_Google_Calendar",
+        "notion": "claude_ai_Notion",
+        "jira": "claude_ai_Atlassian",
     },
     # One connector serves both mail and calendar on the Microsoft side. This is
     # an init-time server-id string, not a tool name: skills discover tools from
@@ -55,6 +57,8 @@ STREAM_MCP = {
         "email": "claude_ai_Microsoft_365",
         "slack": "claude_ai_Slack",
         "calendar": "claude_ai_Microsoft_365",
+        "notion": "claude_ai_Notion",
+        "jira": "claude_ai_Atlassian",
     },
 }
 
@@ -300,11 +304,17 @@ streams:
 Which streams the daily loop-closing flow checks. `capture-comms` +
 `reconcile-from-comms` run by default at the top of `daily-briefing`; flip an
 `enabled:` above to turn a stream on or off - no re-init needed. Skills resolve
-their mail/calendar tools from the `mcp:` server ids above at run time - if your
+their connector tools from the `mcp:` server ids above at run time - if your
 connector registers under a different id, edit the `mcp:` values here.
 
 - **email** / **slack** - scanned by `capture-comms` (sent + received). Sent
   messages are the strongest loop-*closing* signals.
+- **notion** - scanned read-only by `capture-comms` for comments, mentions,
+  resolutions, and page edits involving the authenticated user. It defaults off
+  and requires the Notion MCP connector.
+- **jira** - scanned read-only by `capture-comms` for assignments, transitions,
+  comments, and mentions involving the authenticated user. It defaults off and
+  requires the Atlassian Rovo MCP connector.
 - **calendar** (`mode: minimal`) - a Task linked to a calendar event whose end-time
   has passed becomes a "confirm close?" item; no attendee / `last_contact` bumping.
 
@@ -321,12 +331,13 @@ connector registers under a different id, edit the `mcp:` values here.
   inconclusive, not "not sent."
 
 If this file is absent, skills fall back to: email + slack enabled, calendar
-planning-only.
+planning-only, and Notion + Jira disabled.
 
-## Adding a new source (e.g. Notion)
+## Adding a new source (e.g. Linear)
 1. Add a `streams.<name>` entry above with its MCP server id.
-2. Add a scan block for that MCP to `capture-comms` (Step 3/4).
-3. No `reconcile-from-comms` change needed - it reads the same `## Action items` API.
+2. Add a scan block for that MCP to `capture-comms`.
+3. Add a source-native read-only verification block to `reconcile-from-comms` for signals that
+   need live confirmation before a vault change can be proposed.
 """
 
 

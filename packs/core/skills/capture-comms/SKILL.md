@@ -1,14 +1,15 @@
 ---
 name: capture-comms
 description: >-
-  Capture today's mail and Slack activity (whichever of those streams is
+  Capture today's mail, Slack, Notion, and Jira activity (whichever streams are
   enabled in `_config/sources.md`) into `Inbox/comms/YYYY-MM-DD` as a
   structured digest of summaries, action items, routable threads, and filtered
   noise. Use for "capture today's comms", "daily comms summary", "summarize my
-  email and Slack", "what loops did my comms open or close", or
-  `/capture-comms`. Read-only against mail and Slack; never sends, drafts,
-  reacts, or marks read. This is capture-only phase 1: it proposes targets and
-  actions but applies no vault state changes.
+  email, Slack, Notion, and Jira", "what loops did my comms open or close", or
+  `/capture-comms`. Read-only against every external source; never sends,
+  drafts, reacts, comments, transitions, edits, or marks read. This is
+  capture-only phase 1: it proposes targets and actions but applies no vault
+  state changes.
 ---
 
 # capture-comms
@@ -19,9 +20,9 @@ structured, triage-ready material. Mirrors the [[cv-scan]] shape (scan an extern
 skill's broad-search technique.
 
 **The vault's biggest silent-failure mode is state lagging reality** — the user sends an email,
-posts a form in Slack, ships a deploy, and the typed note rots at its old status. This skill
-*observes* the comms that imply those state changes and stages them. It does **not** apply them.
-That's the seam phase 2 consumes (see [[#Phase 2 hook]]).
+posts a form in Slack, resolves a Notion comment, moves a Jira issue to Done, and the typed note
+rots at its old status. This skill *observes* the comms that imply those state changes and stages
+them. It does **not** apply them. That's the seam phase 2 consumes (see [[#Phase 2 hook]]).
 
 You are running as **`agent:capture`** for this skill.
 
@@ -30,9 +31,13 @@ You are running as **`agent:capture`** for this skill.
 - **Capture only — APPLY NOTHING.** Never edit a typed note, close a Task, flip a status, bump
   `last_contact`/`next_touch`, mark a Followup `acted_on`, or touch a Letter. The output is
   staging material in `Inbox/`. All consequential mutation is phase 2 under manual review.
-- **Read-only against mail and Slack.** Never `send`, `create_draft`, `slack_send_message`,
-  `slack_send_message_draft`, `slack_schedule_message`, `slack_add_reaction`, label, or mark
-  read. This skill only searches and reads.
+- **Read-only against every external source.** Never `send`, `create_draft`,
+  `slack_send_message`, `slack_send_message_draft`, `slack_schedule_message`,
+  `slack_add_reaction`, label, mark read, or call Jira write tools such as
+  `createJiraIssue`, `editJiraIssue`, `transitionJiraIssue`,
+  `addCommentToJiraIssue`, or `addWorklogToJiraIssue`. Never call Notion write
+  tools such as `notion-create-*`, `notion-update-*`, `notion-move-pages`,
+  `notion-duplicate-page`, or `notion-create-comment`. This skill only searches and reads.
 - **Honor sensitivity.** Treat all comms as `private` by default (the output frontmatter says
   so). **Summarize one level up; never paste full message bodies.** For anything that reads as
   HR / legal / medical / personnel / clearly sensitive, summarize at a higher level still and
@@ -40,18 +45,26 @@ You are running as **`agent:capture`** for this skill.
   structural: everything under `Inbox/` is gitignored (`.gitignore`: `Inbox/*`, only
   `Inbox/README.md` is tracked), so these files never enter version control — but that is a
   backstop, not a license to quote.
-- **Ruthless on noise.** Most email/Slack is not loop-relevant. Action items are *only* items
-  that open or close a vault loop. Everything else is a one-line count in `## Filtered as noise`
-  — never a silent cap.
-- **No silent caps or truncation.** For every enabled provider stream — including any
-  vault-specific Notion or Jira scan — enumerate the whole resolved window with bounded daily
-  slices and/or pagination to exhaustion. Never treat the first page as complete. If a scan is
+- **Ruthless on noise.** Most email/Slack/Notion/Jira activity is not loop-relevant. Action items
+  are *only* items that open or close a vault loop. Everything else is a one-line count in
+  `## Filtered as noise` — never a silent cap.
+- **Communication-loop invariant.** Before emitting an in-window request as open, read its complete
+  source-native thread or discussion and fold request/reply history chronologically through read
+  time. A later substantive owner response tied to that request supersedes the earlier open
+  candidate; a mere acknowledgement or unrelated owner activity does not. A response after the
+  capture window may suppress the earlier request but is not itself emitted in this digest, while
+  a still-later new request becomes its own candidate. If the source cannot expose or exhaust the
+  required thread history, retain the positive request only as inconclusive under a `coverage
+  gap`; do not recommend creating or updating a vault Task from the unverified open candidate.
+- **No silent caps or truncation.** For every enabled provider stream — including the core
+  Notion/Jira scans and any vault-specific provider — enumerate the whole resolved window with
+  bounded daily slices and/or pagination to exhaustion. Never treat the first page as complete. If a scan is
   interrupted, rate-limited, or otherwise stopped early, record the un-scanned range as an
   explicit `coverage gap`; never turn partial coverage into a claim that the period was quiet.
-- **No fabrication.** Every action item traces to a real message. If you can't find a likely
+- **No fabrication.** Every action item traces to a real external event or message. If you can't find a likely
   vault target, say `(no obvious target)` — don't invent a note name.
 - **Idempotent.** Re-running for the same date regenerates the day's files in place (same path)
-  — never creates a second dated file or appends a duplicate digest. See Step 6.
+  — never creates a second dated file or appends a duplicate digest. See Step 8.
 
 ## Output shape (decided + documented)
 
@@ -60,12 +73,15 @@ You are running as **`agent:capture`** for this skill.
 ```
 Inbox/comms/<YYYY-MM-DD>/email.md
 Inbox/comms/<YYYY-MM-DD>/slack.md
-# A vault-specific provider scan follows the same shape at <source>.md.
+Inbox/comms/<YYYY-MM-DD>/notion.md  # only when streams.notion.enabled: true
+Inbox/comms/<YYYY-MM-DD>/jira.md  # only when streams.jira.enabled: true
+# Another vault-specific provider scan follows the same shape at <source>.md.
 ```
 
-Rationale: (1) the mail and Slack connectors are independently authenticated MCP servers with independent
-failure modes — if Slack auth is absent in a given run, the email file still lands clean and the
-Slack file records the gap, rather than one combined file being half-empty with no signal why;
+Rationale: (1) the mail, Slack, Notion, and Atlassian connectors are independently authenticated
+MCP servers with independent failure modes — if one source is absent in a given run, the
+completed files still land cleanly and that source file records the gap, rather than one combined
+file being half-empty with no signal why;
 (2) it mirrors the shape the source idea note specified; (3) each source gets source-appropriate
 provenance. Phase 2 globs `Inbox/comms/<date>/*.md` and reads the operational `## Coverage` and
 `## Action items` sections from each — the seam is per-section, not per-file, so separate source
@@ -78,7 +94,7 @@ a plausible-looking partial one.
 ```markdown
 ---
 type: comms-digest
-source: email            # or: slack
+source: email            # or: slack | notion | jira
 date: <YYYY-MM-DD>
 window_start: <ISO datetime>   # start of the scan window
 window_end: <ISO datetime>     # the run time
@@ -93,7 +109,7 @@ phase: 1-capture-only          # APPLIES NOTHING; phase 2 reconciles
 - coverage gap: none           # or: <direction + un-scanned time range/slice + reason/next cursor>
 
 ## Summary
-3–6 bullets — the gist of the day's <email|Slack>. What moved, who needs what.
+3–6 bullets — the gist of the day's <email|Slack|Notion|Jira>. What moved, who needs what.
 
 ## Action items
 <loop-relevant items only — the phase-2 API; see format below>
@@ -102,7 +118,7 @@ phase: 1-capture-only          # APPLIES NOTHING; phase 2 reconciles
 <things that should become a Source / Person / Task via an existing ingest skill>
 
 ## Filtered as noise
-<count> messages/threads filtered as non-loop-relevant (newsletters, FYIs, automated, social).
+<count> messages/pages/issues/events filtered as non-loop-relevant (newsletters, FYIs, automated, social).
 ```
 
 ### Action item format (the phase-2 API — keep it parseable)
@@ -111,24 +127,25 @@ Mirror cv-scan's checkbox + provenance shape (one parseable `↳ key: value` lin
 
 ```markdown
 - [ ] **<one-line description of the loop>**
-      ↳ signal: <sent email to Alex / Slack DM I sent to Jordan / received from Riley>  ·  <date/time>
-      ↳ thread: <mail thread id for email items (Gmail: `threadId`) — lets phase 2 confirm with a full-thread read without re-searching; `n/a` for Slack>
+      ↳ signal: <sent email / Slack DM / Notion comment or edit / Jira assignment, comment, transition, or field mention>  ·  <date/time>
+      ↳ thread: <source locator: email thread id, Notion page id/URL, Jira issue key, or `n/a` for Slack>
       ↳ likely target: [[<Task or Person or Letter or Followup>]] (<type>)  — or `(no obvious target)`
       ↳ suggested action: <close task | bump last_contact | flip Letter drafting→submitted | mark Followup acted_on | create task>
       ↳ confidence: high | medium | low
       ↳ apply: NOTHING — phase 2
 ```
 
-**Sent comms are the strongest loop-*closing* signals** ("I sent the form to Riley in Slack",
-"emailed Dana the revised draft") — surface these first and label the signal as sent vs
-received. Received comms more often *open* loops (someone asks you for something).
+**The user's own outbound activity is the strongest loop-*closing* signal** ("I sent the form to
+Riley in Slack", "emailed Dana the revised draft", "resolved the Notion review comment", "moved
+ABC-123 to Done") — surface these first and label the actor and direction. Incoming mail/Slack,
+Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
 
 ## Steps
 
 0. **Read enabled streams.** Read `_config/sources.md` and look at `streams.*.enabled`.
    Only scan streams marked `enabled: true`. If the file is absent (older vault),
-   default to **email + slack enabled** (calendar is not a capture stream — it has its
-   own loop-closing path in the briefing; see [[reconcile-from-comms]]). If a stream is
+   default to **email + slack enabled, Notion + Jira disabled** (calendar is not a capture stream — it
+   has its own loop-closing path in the briefing; see [[reconcile-from-comms]]). If a stream is
    disabled, skip its scan entirely and don't write that source's file. This is the
    per-stream gate the default daily-briefing flow relies on. **Ignore stale digests from
    disabled sources.** Do not delete an existing same-day file when its source is disabled — it
@@ -142,17 +159,22 @@ received. Received comms more often *open* loops (someone asks you for something
    — dedupe handles it; missing a loop is worse than re-listing one). Record `window_start` /
    `window_end` in frontmatter.
 
-2. **Load the MCP tools** (they're deferred). Resolve the mail server id from
-   `streams.email.mcp` in `_config/sources.md`, then one ToolSearch per source:
+2. **Load the MCP tools** (they're deferred). Resolve each enabled source's server id from
+   `streams.<source>.mcp` in `_config/sources.md`, then one ToolSearch per source:
    ```
    ToolSearch: +<mail-server-id> search thread     (Gmail example: select:mcp__claude_ai_Gmail__search_threads,mcp__claude_ai_Gmail__get_thread)
    ToolSearch: select:mcp__claude_ai_Slack__slack_search_public_and_private,mcp__claude_ai_Slack__slack_read_channel,mcp__claude_ai_Slack__slack_read_thread,mcp__claude_ai_Slack__slack_read_user_profile,mcp__claude_ai_Slack__slack_search_users
+   ToolSearch: +<notion-server-id> notion-get-users notion-get-self notion-search notion-fetch notion-get-comments
+   ToolSearch: +<jira-server-id> atlassianUserInfo getAccessibleAtlassianResources searchJiraIssuesUsingJql getJiraIssue
    ```
-   If either server is unavailable (interactive auth absent — a documented caveat for
-   headless/cron runs), **do not fail the whole run**: write that source's standard digest with
+   Load only the tools for enabled sources. For Notion, do not load or call `notion-create-*`,
+   `notion-update-*`, `notion-move-pages`, `notion-duplicate-page`, or
+   `notion-create-comment`. For Jira, do not load or call any tool in the connector's
+   `write_jira` permission group. If any enabled server is unavailable (interactive auth absent —
+   a documented caveat for headless/cron runs), **do not fail the whole run**: write that source's standard digest with
    `status: partial`, a `coverage gap` naming the full un-scanned window, and a
    `> ⚠️ <source> unavailable this run (auth/connection)` note at the top. Then proceed with the
-   other source. This is exactly the partial-failure case the two-file split exists to handle.
+   other sources. This is exactly the partial-failure case the per-source split exists to handle.
 
 3. **Scan mail — both directions** (only if `email` is enabled per Step 0). Use the [[email]] broad-search technique (don't start
    narrow; on Microsoft 365 use the connector's own search parameters, not Gmail operators). Cover sent AND received in the window:
@@ -245,7 +267,179 @@ received. Received comms more often *open* loops (someone asks you for something
    > completeness claim on the strength of a search result alone. Those sentences require a
    > `slack_read_channel` read.
 
-5. **Classify every surviving item into exactly one bucket:**
+5. **Scan Jira — assignments, transitions, comments, and mentions** (only if `jira` is enabled
+   per Step 0).
+   - **Resolve identity and site first.** Call `atlassianUserInfo` to get the authenticated
+     account id/display identity, then `getAccessibleAtlassianResources` to get the Jira site's
+     `cloudId`. If no Jira-capable site is available, write `jira.md` as partial with the whole
+     window as the coverage gap and continue with the other sources. Never guess an account or
+     `cloudId`.
+   - **Enumerate a bounded JQL window.** Use `searchJiraIssuesUsingJql` with explicit lower and
+     upper bounds, the resolved `cloudId`, and a query equivalent to:
+     ```text
+     updated >= "<slice_start>" AND updated < "<slice_end>"
+       ORDER BY updated DESC
+     ```
+     This broad updated-set query is deliberate. **Do not pre-filter discovery** by current or
+     historical assignee, reporter, watcher, participant, or mention: the owner may have commented
+     on or transitioned an otherwise unrelated issue, and those relationships are not guaranteed
+     to be present. Use relationship fields only to classify or prioritize after reading history.
+     Resolve the Jira site's timezone when a read-only site/project response exposes it and
+     convert the exact slice bounds into that timezone before formatting the JQL query bounds. If
+     the site timezone is unavailable or JQL date precision is coarse/unknown, widen each provider
+     query with two calendar days of padding on both sides. In every case, discard returned events
+     outside the exact slice boundaries by their timestamps locally. Never format vault-local
+     boundaries as Jira-local values and assume they describe the same instants.
+   - **No silent result-page caps.** Split windows over 2 days into non-overlapping calendar-day
+     slices and paginate every slice until `nextPageToken` (or the provider's equivalent) is
+     absent. Build one global map keyed by Jira issue key across every slice and page. Merge slice
+     provenance before reading each unique issue once. If pagination or a slice stops early, mark
+     `jira.md` partial and record the exact un-scanned slice plus next token in `coverage gap`; the
+     first result page is never complete coverage.
+   - **Read enough history and field context to classify.** For every issue in the global map,
+     call `getJiraIssue` with comments; the current summary, description, environment, and custom
+     editable text/rich-text fields; and changelog/history expansion (or the connector's closest
+     read-only equivalent).
+     Compare each event's author account id with the authenticated account id. Emit only events
+     inside the exact window, but retain later assignment, status, comment, and reply events
+     through read time when they can suppress an in-window candidate. **Inspect mention-bearing
+     field changes, not only comments:** for
+     every in-window changelog/history item that changes one of those editable fields, compare its
+     old/new field values when available and inspect raw ADF mention nodes or the connector's
+     equivalent structured mention representation in the new/current value. Count a mention only
+     when its stable account id matches the authenticated user; display-name text alone is not
+     identity evidence. For an issue created in the window, attribute a mention in its initial
+     field values to creation only when `creator.accountId`, the `created` timestamp, and exhaustive
+     history establish another actor and show no intervening field rewrite that obscures
+     provenance; later mention additions require the corresponding field-change event. Classify a
+     field mention as an open-loop signal only when creation/history ties its addition/request to
+     another actor and timestamp in the window. Current fields alone cannot prove who added a
+     mention or when.
+     If the connector omits old/new field bodies or field values, retain any positive candidate
+     but mark that issue and time range as a `coverage gap`; never turn an unprovable field delta
+     into negative evidence. If comments or changelog/history are paginated or report a total
+     larger than the returned entries, follow their cursors/pages to exhaustion. If the connector
+     cannot expose or exhaust that history, preserve positive hits but mark the affected issue and
+     time range as a `coverage gap`; never treat partial issue history as negative evidence.
+     **Stateful-signal invariant.** Sort exhaustive assignment and status history chronologically,
+     then fold it through read time before classifying any assignment, actionable-transition, or
+     terminal-transition candidate. Later changes outside the requested capture window may
+     invalidate an in-window candidate even though they are not emitted as new in-window signals.
+     Emit only a candidate whose actor/event provenance remains consistent with both the issue's
+     current assignee and current status; an earlier candidate is `superseded` when either current
+     field no longer satisfies its row below. A later qualifying event may become a new candidate
+     with its own actor and timestamp.
+
+     | Candidate event | Current assignee | Current status | Result |
+     | --- | --- | --- | --- |
+     | Assignment to owner | Owner | Actionable/non-terminal | Open |
+     | Assignment to owner | Owner | Terminal | Superseded |
+     | Assignment to owner | Other or unassigned | Any | Superseded |
+     | Actionable transition for owner | Owner or still-relevant request context | Actionable/non-terminal | Open |
+     | Actionable transition for owner | Any | Terminal | Superseded |
+     | Owner terminal transition | Any | Terminal, no later reversal | Close |
+     | Owner terminal transition | Any | Actionable/reopened | Superseded |
+     | Reopen then owner reclose | Any | Terminal | Only the later owner close |
+
+     Here, a still-relevant request context means exhaustive history still ties the actionable
+     transition to work requested from the owner even when Jira does not use the assignee field.
+     Reconcile the chronological fold against the current assignee and current status. For an
+     assignment, compare the current assignee: a later reassignment away from the owner supersedes
+     the candidate. For an actionable transition, compare the current status: a later transition
+     to terminal supersedes the candidate. A terminal transition close candidate is superseded by
+     any later transition to a non-terminal/actionable state, including a reopen; a close requires
+     the current status to be terminal. The latest unsuperseded transition into terminal must
+     belong to the owner, so a later close by another actor does not revive an earlier owner close.
+     For each comment request or field-mention request, also apply the communication-loop
+     invariant: order exhaustive comment history through read time and tie replies to the request
+     by reply ancestry and issue context. A later substantive owner comment/reply that fulfills
+     the request supersedes its open candidate. A later new request is independent. An owner reply
+     after the capture window may suppress the earlier request but is not emitted as a new close
+     signal; only an in-window reply may be emitted. If comment history cannot be exhausted, keep
+     the request only as inconclusive under the `coverage gap` and do not recommend creating or
+     updating a vault Task from it. If assignment/status history cannot prove its fold or current
+     fields, apply the same fail-closed treatment to that stateful candidate.
+   - **Open-loop signals:** a new assignment to the user; another user's comment or mention-bearing
+     editable text/rich-text field change that mentions, asks, or requests action from the
+     user; or a transition by someone else that puts work back into an actionable state for the
+     user. **Close-loop signals:** the user's own transition to
+     Done/Resolved (using the site's actual terminal statuses), or the user's own substantive
+     comment/reply that fulfills the communication loop. A reply may close the response loop
+     without proving the whole Jira issue is complete; phrase the suggested action accordingly.
+   - Write the standard digest to `Inbox/comms/<date>/jira.md`. Put the Jira issue key in the
+     unchanged `↳ thread:` field so phase 2 can re-read it without searching, and include the
+     event actor and event type in `↳ signal:`. Never call `createJiraIssue`, `editJiraIssue`,
+     `transitionJiraIssue`, `addCommentToJiraIssue`, or any other write tool.
+
+6. **Scan Notion — comments, mentions, resolutions, and page edits** (only if `notion` is
+   enabled per Step 0).
+   - **Resolve the user's identity first.** Use `notion-get-users` (or the connector's compatible
+     current-user/self read) to obtain the stable Notion user id used in page and comment actor
+     fields, matching uniquely against the owner identity / `{{OWNER_PRIMARY_EMAIL}}` when the
+     connector returns those fields. `notion-get-self` may identify only the integration/bot; if
+     that cannot be mapped unambiguously to the authenticated person, do not guess. Write
+     `notion.md` as partial with an actor-classification coverage gap, because own activity cannot
+     safely be separated from others' activity.
+   - **Enumerate pages edited in the window.** Use `notion-search` with the connector's
+     last-edited filters/sort when available. Split windows over 2 days into bounded,
+     non-overlapping calendar-day slices, widen provider queries when necessary, and discard
+     results outside each exact slice by `last_edited_time`. Paginate each slice and query variant
+     through every `next_cursor`/`has_more` (or equivalent), then build one global map by page id
+     across all slices and pages before fetching each unique page once. If the connector exposes
+     only a capped search with no exhaustive cursor or bounded timestamp filter, preserve the hits
+     but mark the unprovable remainder as a `coverage gap`; never call the first result page
+     complete coverage.
+   - **Discover comment-only activity independently when possible.** A comment or resolution may
+     not change its parent page's `last_edited_time`, so page search alone cannot prove comment
+     coverage. If the connector exposes a read-only, workspace-wide comment/activity listing,
+     enumerate and paginate it over the same bounded slices and add every referenced page id to
+     the global map. Otherwise write `notion.md` as partial and record this explicit `coverage
+     gap`: comment-only activity on pages not returned by the last-edited search was
+     undiscoverable for the full window. Preserve positive page/comment hits, but never use this
+     partial scope as negative evidence.
+   - **Fetch page and comment context read-only.** For every page in the global map, call
+     `notion-fetch`, then `notion-get-comments` with resolved threads included. Paginate comments
+     to exhaustion too. Also enumerate page-edit history/activity with actor ids and timestamps
+     when a read-only connector surface exposes it. If the connector returns only the current
+     `last_edited_by`/`last_edited_time` and cannot provide exhaustive page-edit history with actor
+     ids and timestamps, preserve positive current-editor hits but record page-edit history for the
+     full window as a `coverage gap`; an overwritten owner edit must not disappear behind a later
+     editor while `notion.md` claims complete coverage. Keep page id/URL, edit timestamp/actor,
+     discussion id, comment timestamp, author id, mention targets, reply ancestry, resolved state,
+     resolver actor id, and resolution timestamp as provenance. If a resolved thread exposes only
+     its current state without the resolution actor/resolver and timestamp, preserve the positive
+     candidate but record resolution provenance for that page and time range as a `coverage gap`;
+     do not attribute the resolution to the owner. Emit only events inside the exact window, but
+     retain later replies, resolutions, and reversals through read time when they can suppress an
+     in-window candidate. If any page's edit history or comment pagination cannot finish, record
+     that page and remainder as a `coverage gap`. Summarize one level up; never paste page or
+     comment bodies.
+     Reconcile resolution/reopen activity in chronological order when that history is available.
+     A resolution is a close candidate only while the discussion's current state is still
+     resolved and no later reopen or reversal supersedes it. Discard an earlier resolution after
+     a reopen; a later owner resolution with its own actor and timestamp may become the new
+     candidate. If reversal history is unavailable, retain a currently resolved event only as an
+     inconclusive positive candidate under the resolution-provenance gap, not as a recommendation
+     to close a vault Task.
+     Apply the communication-loop invariant to comment requests too: a later substantive owner
+     reply tied by ancestry and request context supersedes the earlier open comment even if the
+     discussion remains unresolved; a later new request is independent.
+   - **Open-loop signals:** an unresolved comment by another user that mentions the owner or asks
+     them for action and has no later substantive owner reply, or a loop-relevant page
+     edit/automation update that creates a review or
+     approval request for them. **Close-loop signals:** the owner's own reply or resolution — for
+     a resolution, its resolver stable user id and resolution timestamp must identify the owner in
+     the window — or their own page edit that substantively fulfills a captured request. An edit is
+     not a close merely
+     because `last_edited_by` is the owner: tie it to the request/comment context, and do not infer
+     overwritten edit history when the connector exposes only the latest editor.
+   - Write the standard digest to `Inbox/comms/<date>/notion.md`. Put the Notion page id/URL in
+     the unchanged `↳ thread:` field and the discussion/comment id plus actor/event type in
+     `↳ signal:` so phase 2 can re-read the page and comments without searching. Never call
+     `notion-create-*`, `notion-update-*`, `notion-move-pages`, `notion-duplicate-page`,
+     `notion-create-comment`, or another write tool.
+
+7. **Classify every surviving item into exactly one bucket:**
    - **Action item** — opens or closes a vault loop. Extract per the format above; do the
      best-effort match to an existing vault note (search `Ops/Tasks/`, `Atlas/People/`,
      `Atlas/Letters/`, `Ops/Followups/` by person name + subject keyword, the way
@@ -255,7 +449,7 @@ received. Received comms more often *open* loops (someone asks you for something
      correspondent, `create-task` for a concrete new action).
    - **Noise** — everything else. Count it; one line in `## Filtered as noise`.
 
-6. **Write the per-source files (idempotent).** First, run the **completeness self-check for every
+8. **Write the per-source files (idempotent).** First, run the **completeness self-check for every
    enabled source or stream**. Retry a recoverable gap before writing; if auth, rate limits, tool
    failure, or time prevents completion, still write the digest as partial rather than losing the
    successfully captured material:
@@ -267,14 +461,27 @@ received. Received comms more often *open* loops (someone asks you for something
    3. For Slack, did the author-search use `after:<window_start date − 1 day>` rather than the
       window's own date, and did `slack_read_channel` cover every distinct conversation ID the
       search surfaced? If not, retry Step 4 or record the exact unscanned remainder as a gap.
-   4. Does the digest contain any completeness claim — "quiet", "no DMs besides X", "nothing from
+   4. For Jira, did identity + `cloudId` resolution succeed, did the unfiltered updated-set query
+      and every JQL slice paginate to exhaustion, and did classification use exhaustive
+      changelog/comments through read time plus mention-bearing field changes with event authors
+      and timestamps? Did later owner replies suppress the requests they fulfilled? If not, retry
+      Step 5 or record the exact un-scanned remainder as a gap.
+   5. For Notion, did user identity resolution succeed; did page search, independent comment
+      discovery (when supported), per-page comment reads, and available page-edit history paginate
+      to exhaustion; and did close classification use actor + request context? If exhaustive edit
+      history with edit actors/timestamps is unavailable, is the full-window page-edit-history
+      scope recorded as a gap? If resolution provenance lacks a resolver actor or resolution
+      timestamp, is that page/time range recorded as a gap? If no independent comment discovery
+      exists, is the full-window comment-only scope explicitly recorded as a coverage gap? If not,
+      retry Step 6 or record the exact un-scanned remainder as a gap.
+   6. Does the digest contain any completeness claim — "quiet", "no DMs besides X", "nothing from
       Y" — resting on a search result or a partial scan? Verify it with the source read or delete it.
-   5. Sanity-check the magnitude against the window length and this user's activity. **Three
+   7. Sanity-check the magnitude against the window length and this user's activity. **Three
       messages for a workday is a bug, not a quiet day.** An implausible count requires another
       pass or an explicit coverage gap; nothing inside a truncated digest looks wrong by itself.
 
-   Apply the same self-check to any additional enabled provider scan supplied by the vault (for
-   example Notion or Jira): bounded slices or cursor exhaustion, never a first-page assumption,
+   Apply the same self-check to any additional enabled provider scan supplied by the vault:
+   bounded slices or cursor exhaustion, never a first-page assumption,
    and an explicit un-scanned remainder whenever coverage is partial.
 
    Then: `mkdir -p Inbox/comms/<date>` once. For each source: if
@@ -284,9 +491,9 @@ received. Received comms more often *open* loops (someone asks you for something
    (the file is a derived view of the day's comms — a re-run reflects the latest state). Never
    write a second dated file or a duplicate digest.
 
-7. **Log once.** Append one line to `log.md`:
+9. **Log once.** Append one line to `log.md`:
    ```
-   <datetime> — agent:capture — capture — Inbox/comms/<date>/ — capture-comms: <A> action items (email <E>, slack <S>), <R> to route, <F> filtered
+   <datetime> — agent:capture — capture — Inbox/comms/<date>/ — capture-comms: <A> action items (email <E>, slack <S>, notion <N>, jira <J>), <R> to route, <F> filtered
    ```
 
 ## Phase 2 hook
@@ -318,7 +525,9 @@ Phase 1 (this skill) **never** does step 2 or 3. It only produces step 1's input
 
 - Edit any typed note; close/advance any Task; flip any status; bump `last_contact`/`next_touch`;
   mark a Followup `acted_on`; touch a Letter. (All phase 2.)
-- Send / draft / react-to / schedule / mark-read any email or Slack message.
+- Send / draft / react-to / schedule / mark-read any email or Slack message; create / update /
+  move / duplicate / comment in Notion; or create / edit / transition / comment on / add worklogs
+  to any Jira issue.
 - Quote full private message bodies, or detail sensitive (HR/legal/medical) content.
 - Lower a note's sensitivity, or write anything outside `Inbox/comms/<date>/` + one `log.md` line.
 - Create Person/Source/Task notes — it *proposes* them in `## Threads worth routing` for the

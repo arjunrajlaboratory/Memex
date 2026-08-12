@@ -1,6 +1,6 @@
 ---
 name: reconcile-from-comms
-description: Reconcile the vault against a day's captured communications — read the staged Inbox/comms/<date>/ action items, match each to its real vault note, and either auto-apply the trivial reversible bookkeeping (bump Person last_contact/next_touch, mark a Followup acted_on) or surface the consequential ones (close a Task, flip a Letter to submitted, capture a Decision) for explicit confirmation before applying. Use whenever the user wants their off-vault work folded back into vault state — signaled by phrases like "reconcile my comms", "close the loops from today's comms", "what state changes do my comms imply", "apply the comms digest", "what should I update from today", "did my emails/slack close anything", or direct invocation "/reconcile-from-comms". This is PHASE 2 — it consumes the Inbox/comms/<date>/ files produced by capture-comms (phase 1). It NEVER sends email or Slack (read-only on comms), never auto-closes a Task to done (that stays the user's call), and never lowers sensitivity. Consequential or sensitive changes are always proposed, never auto-applied.
+description: Reconcile the vault against a day's captured communications — read the staged Inbox/comms/<date>/ action items, match each to its real vault note, and either auto-apply the trivial reversible bookkeeping (bump Person last_contact/next_touch, mark a Followup acted_on) or surface the consequential ones (close a Task, flip a Letter to submitted, capture a Decision) for explicit confirmation before applying. Use whenever the user wants their off-vault work folded back into vault state — signaled by phrases like "reconcile my comms", "close the loops from today's comms", "what state changes do my comms imply", "apply the comms digest", "what should I update from today", "did my email/Slack/Notion/Jira activity close anything", or direct invocation "/reconcile-from-comms". This is PHASE 2 — it consumes the Inbox/comms/<date>/ files produced by capture-comms (phase 1). It NEVER writes to email, Slack, Notion, or Jira (read-only on comms), never auto-closes a Task to done (that stays the user's call), and never lowers sensitivity. Consequential or sensitive changes are always proposed, never auto-applied.
 ---
 
 # reconcile-from-comms
@@ -40,8 +40,10 @@ pre-flight — it relied on the user remembering; this reads the captured signal
 - **Never auto-close a Task to `done`.** Closing is the user's call (CLAUDE.md hard-no). When the
   user confirms a close, route it through [[close-task]] (which enforces the Work-log + unblocks
   bookkeeping) — do not hand-edit `status: done`.
-- **Read-only on comms.** Never send / draft / react-to / schedule email or Slack. You may re-read
-  a thread (via the phase-1-loaded MCP tools) to confirm a match, but you never write to mail/Slack.
+- **Read-only on comms.** Never send / draft / react-to / schedule email or Slack; create, update,
+  move, duplicate, or comment in Notion; or create, edit, transition, comment on, or add worklogs
+  to Jira. You may re-read source context (via the phase-1-loaded MCP tools) to confirm a match,
+  but you never write to an external source.
 - **Mailbox access gaps are not negative evidence.** The mail connector searches only the connected
   mailbox recorded in `_config/sources.md` (`mailboxes.connected`; legacy vaults: `mailboxes.gmail_connected`). Sent mail from
   `mailboxes.forwarding_in` or `mailboxes.other_sending_accounts` is invisible unless those
@@ -102,7 +104,7 @@ job, and the mark is the idempotency key. For each reconciled item:
 
 1. **Resolve the date + load the enabled-source files.** Date = today (or the date arg). Read
    `_config/sources.md` and resolve the current enabled capture streams (older vault fallback:
-   email + Slack) plus the independently enabled calendar stream. When one or more capture streams
+   email + Slack enabled, Notion + Jira disabled) plus the independently enabled calendar stream. When one or more capture streams
    are enabled, `ls Inbox/comms/<date>/`; if the folder is missing, tell the user to run
    [[capture-comms]] first and stop comms-item processing. If no capture streams are enabled, skip
    the digest-folder requirement and comms-item processing, but continue to the calendar pass when
@@ -113,12 +115,14 @@ job, and the mark is the idempotency key. For each reconciled item:
    and collect every `status: partial` / `coverage gap`; do not discard a partial file's positive
    signals. Then parse each
    `## Action items` block (checkbox + the `↳ signal / thread / likely
-   target / suggested action / confidence` fields — `thread` is the mail thread id (Gmail: `threadId`) for email
-   items, used in Step 3 to confirm via `get_thread`). Read any existing `## Reconciliation` ledger.
+   target / suggested action / confidence` fields — `thread` is the source locator: a mail thread
+   id (Gmail: `threadId`), Notion page id/URL, Jira issue key, or `n/a` for Slack, used in Step 3
+   for a source-native read). Read any existing `## Reconciliation` ledger.
 
-2. **Merge cross-file duplicates.** The same loop can appear in both `email.md` and `slack.md`
-   (e.g. a PR review requested by email + "ran codex" in Slack). Collapse to one reconciliation
-   item, keeping both signals as provenance. Drop items already marked done in the ledger.
+2. **Merge cross-file duplicates.** The same loop can appear in `email.md`, `slack.md`,
+   `notion.md`, and `jira.md` (e.g. a review requested in Notion + "ran codex" in Slack).
+   Collapse to one reconciliation item, keeping both signals as provenance. Drop items already
+   marked done in the ledger.
 
 3. **Resolve each `likely target` to a real note.** Confirm the wikilink resolves
    (`ls Atlas/... Ops/Tasks/...` or grep). If it says `(no obvious target)`, this is a *create*
@@ -126,6 +130,13 @@ job, and the mark is the idempotency key. For each reconciled item:
    (the way `observe-task-actuals` triangulates) before giving up. To confirm an action truly
    happened, re-read the live thread **on its own channel** — confirmation never crosses sources
    (an item's source is in the digest frontmatter and its `↳ signal`):
+   Apply the **live communication-loop invariant** to every captured open request before proposing
+   work: fold the complete source-native thread or discussion chronologically through the live
+   read time. If a later substantive owner response tied by reply ancestry and request context
+   fulfills it, mark the captured request `superseded` and do not propose a response, Task
+   creation, or Task update. A later new request remains independent. If the source cannot expose
+   or exhaust the required history, demote the request to a Tier-B “couldn't confirm; is this still
+   open?” question rather than making a positive mutation recommendation.
    - **Email items** (`↳ thread:` holds a mail thread id): read it with the connector's
      full-thread read tool (Gmail: `get_thread(threadId)` — the authority on current state). If
      the id is missing (an older digest), re-locate the candidate with the connector's search
@@ -137,6 +148,52 @@ job, and the mark is the idempotency key. For each reconciled item:
    - **Slack items** (`↳ thread: n/a`): confirm from the captured Slack signal, or re-read the
      Slack thread/channel with `slack_read_thread` / `slack_read_channel`. Never route a Slack
      confirmation through the mail connector's search or thread tools.
+   - **Notion items** (`↳ thread:` holds the page id/URL): resolve the owner's stable Notion user
+     id as capture did, then re-read the page with `notion-fetch` and its discussion with
+     `notion-get-comments`, plus exhaustive page-edit history when the connector exposes it.
+     Confirm page-edit history actor ids and timestamps, mention/reply ancestry, the request
+     context, and any resolution through its resolver actor id and resolution timestamp before
+     treating an owner edit or resolution as a close. For a resolution signal, also require the
+     discussion's current state to be resolved and verify in chronological resolution/reopen
+     history that no later reopen or reversal superseded it; if one did, mark the captured close
+     candidate `superseded` and do not propose a vault close. Current `last_edited_by` or resolved
+     state alone is not historical provenance. If the edit history or resolution provenance
+     required by the captured signal is unavailable, retain the positive candidate but demote it
+     to a Tier-B "couldn't confirm; did this happen?" question. Never call a Notion
+     create/update/move/duplicate/comment tool during reconciliation.
+   - **Jira items** (`↳ thread:` holds the issue key): resolve the authenticated account and Jira
+     `cloudId` as capture did, then re-read that key with `getJiraIssue`, including comments; the
+     current summary, description, environment, and custom editable text/rich-text fields; and
+     changelog/history. Confirm the event timestamp, actor account id, and transition/comment
+     semantics. For a creation-time field-mention signal, confirm `creator.accountId`, `created`,
+     and the absence of an intervening field rewrite in exhaustive history. For a later signal,
+     confirm the changelog/history field-change event. In both cases verify that the new field
+     value or raw ADF mention node targets the owner's stable account id; current field text alone
+     does not prove who added the mention, when it was added, or who closed the loop.
+
+     For a Jira comment request or field-mention request, exhaust comments through the live read
+     time and tie any response to the captured request by reply ancestry and issue context. If a
+     later substantive owner comment/reply fulfills it, mark the request `superseded` and do not
+     propose the corresponding response, vault Task creation, or vault Task update. A reply after
+     the capture window still suppresses the earlier request even though it is not a new captured
+     close signal.
+
+     Apply the **Jira stateful-signal invariant** before proposing any change from an assignment,
+     actionable transition, or terminal transition: sort exhaustive assignment/status history and
+     fold it through the live read time, including changes after the captured window that can
+     invalidate its candidate. An assignment candidate remains open only when the current assignee
+     is the owner **and** the current status is actionable/non-terminal; a later assignee change or
+     reassignment away supersedes it. An actionable transition candidate remains open only when
+     the current status is actionable/non-terminal and exhaustive history still ties the request
+     to the owner; a later transition to terminal supersedes it. A close candidate is valid only
+     when the current status is terminal and the latest unsuperseded transition into terminal
+     belongs to the owner; a reopen invalidates the earlier close, and a later terminal transition
+     by another actor does not revive it. If either live field or later history contradicts the
+     captured candidate, mark it `superseded` and do not propose the corresponding vault creation,
+     update, or close. If the exhaustive fold cannot be confirmed, retain the positive event only
+     as a Tier-B “couldn't confirm; did this happen?” question, never as a positive mutation
+     recommendation. Never call a Jira create/edit/transition/comment/worklog tool during
+     reconciliation.
    In every case confirm on the right channel before concluding, and if the action still can't be
    confirmed make it a Tier-B "couldn't confirm; did this happen?" question — never "not sent."
 
@@ -207,7 +264,9 @@ Run standalone (direct `/reconcile-from-comms`), Step 6 stays interactive as wri
 
 ## What this skill never does
 
-- Send / draft / react-to / schedule any email or Slack message.
+- Send / draft / react-to / schedule any email or Slack message; create / update / move /
+  duplicate / comment in Notion; or create / edit / transition / comment on / add worklogs to any
+  Jira issue.
 - Auto-close a Task to `done`, or apply any Tier-B change without explicit confirmation.
 - Auto-apply anything flagged `[sensitive]`, or expand/quote a summarized-up sensitive item.
 - Lower a note's sensitivity.
