@@ -114,6 +114,16 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
             r"(?is)(?:comments or changelog/history).{0,260}(?:exhaustion|coverage gap)",
         )
 
+    def test_jira_query_bounds_cover_timezone_and_precision_edges(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(jira_step, r"(?is)Jira site(?:'s)? timezone.{0,300}(?:convert|query bounds)")
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:timezone.{0,260}(?:unavailable|unknown)|precision.{0,260}(?:coarse|unknown))"
+            r".{0,320}(?:widen|padding).{0,120}(?:two|2) (?:calendar )?days",
+        )
+        self.assertRegex(jira_step, r"(?is)(?:discard|filter).{0,160}exact slice")
+
     def test_jira_scan_captures_mentions_from_editable_fields(self):
         jira_step = numbered_step(self.skill, 5)
         self.assertRegex(
@@ -199,6 +209,22 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         ):
             self.assertIn(tool, write_guard)
 
+    def test_notion_missing_edit_or_resolution_history_is_partial(self):
+        notion_step = numbered_step(self.skill, 6)
+        self.assertRegex(
+            notion_step,
+            r"(?is)(?:page-edit|page edit) history.{0,240}(?:actors|actor ids?)"
+            r".{0,160}timestamps.{0,420}coverage gap",
+        )
+        self.assertRegex(
+            notion_step,
+            r"(?is)resolution.{0,180}(?:actor|resolver).{0,180}timestamp"
+            r".{0,260}coverage gap",
+        )
+        completeness = numbered_step(self.skill, 8)
+        self.assertRegex(completeness, r"(?is)Notion.{0,500}(?:edit history|edit actors)")
+        self.assertRegex(completeness, r"(?is)Notion.{0,600}(?:resolution provenance|resolver)")
+
 
 class TestCommsCoverageConsumers(unittest.TestCase):
     @classmethod
@@ -232,6 +258,21 @@ class TestCommsCoverageConsumers(unittest.TestCase):
         self.assertRegex(
             self.reconcile,
             r"(?is)creation-time field-mention.{0,180}creator\.accountId.{0,180}intervening field rewrite",
+        )
+
+    def test_reconcile_requires_notion_edit_and_resolution_provenance(self):
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Notion items.{0,850}(?:page-edit|page edit) history.{0,220}actor"
+            r".{0,160}timestamp",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Notion items.{0,900}resolution.{0,180}(?:resolver|actor).{0,180}timestamp",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Notion items.{0,1100}(?:history|provenance).{0,260}couldn't confirm",
         )
 
     def test_briefing_persists_and_surfaces_partial_coverage(self):

@@ -143,8 +143,13 @@ job, and the mark is the idempotency key. For each reconciled item:
      confirmation through the mail connector's search or thread tools.
    - **Notion items** (`↳ thread:` holds the page id/URL): resolve the owner's stable Notion user
      id as capture did, then re-read the page with `notion-fetch` and its discussion with
-     `notion-get-comments`. Confirm actor ids, timestamps, mention/reply ancestry, resolution
-     state, and the request context before treating an owner edit as a close. Never call a Notion
+     `notion-get-comments`, plus exhaustive page-edit history when the connector exposes it.
+     Confirm page-edit history actor ids and timestamps, mention/reply ancestry, the request
+     context, and any resolution through its resolver actor id and resolution timestamp before
+     treating an owner edit or resolution as a close. Current `last_edited_by` or resolved state
+     alone is not historical provenance. If the edit history or resolution provenance required by
+     the captured signal is unavailable, retain the positive candidate but demote it to a Tier-B
+     "couldn't confirm; did this happen?" question. Never call a Notion
      create/update/move/duplicate/comment tool during reconciliation.
    - **Jira items** (`↳ thread:` holds the issue key): resolve the authenticated account and Jira
      `cloudId` as capture did, then re-read that key with `getJiraIssue`, including comments; the

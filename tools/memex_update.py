@@ -414,7 +414,7 @@ def pending_update_plans(vault_dir: pathlib.Path) -> list[pathlib.Path]:
 def strip_work_heavy(work_dir: pathlib.Path) -> None:
     """Drop the bulky staged tree + per-file version copies once they are no
     longer needed, keeping the small plan.json for review."""
-    for sub in ("staged", "versions", "merged"):
+    for sub in ("staged", "versions", "merged", "migrated"):
         shutil.rmtree(work_dir / sub, ignore_errors=True)
 
 
@@ -1027,6 +1027,14 @@ def plan_update_paths(plan: dict[str, Any]) -> set[str]:
             entry.get("applied")
             or entry.get("resolved")
             or disposition in SAFE_PATH_DISPOSITIONS
+            # The provisional write-ahead plan is persisted before safe
+            # operations run. If prepare crashes after copying this migration
+            # but before persisting applied=True, abort must still own and
+            # restore the tracked seed path.
+            or (
+                disposition == Disposition.SEED_PRESENT
+                and entry.get("resolution") == "auto-migrated"
+            )
         ):
             paths.add(path)
         if new_path and (entry.get("resolved") or disposition in {Disposition.RENAME_CANDIDATE, Disposition.RENAME_COLLISION}):

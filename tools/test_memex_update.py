@@ -13,6 +13,7 @@ from memex_update import (
     migrate_sources_config_text,
     missing_required_tokens,
     plan_update_paths,
+    strip_work_heavy,
     unresolved_plan_entries,
 )
 
@@ -594,6 +595,31 @@ class TestPlanResolution(unittest.TestCase):
         self.assertIn("scripts/tool.local.py", paths)
         self.assertIn(".claude/skills/old/SKILL.md", paths)
         self.assertIn("scripts/tool.py", paths)
+
+    def test_plan_paths_include_auto_migrated_seed_before_applied_is_persisted(self):
+        plan = {
+            "entries": [
+                {
+                    "disposition": Disposition.SEED_PRESENT,
+                    "path": "_config/sources.md",
+                    "resolution": "auto-migrated",
+                    "applied": False,
+                }
+            ]
+        }
+        self.assertIn("_config/sources.md", plan_update_paths(plan))
+
+    def test_completed_work_cleanup_removes_migrated_tree_but_keeps_undo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = pathlib.Path(tmp)
+            for name in ("staged", "versions", "merged", "migrated", "undo"):
+                write(work / name / "sentinel", name)
+
+            strip_work_heavy(work)
+
+            for name in ("staged", "versions", "merged", "migrated"):
+                self.assertFalse((work / name).exists(), name)
+            self.assertTrue((work / "undo" / "sentinel").exists())
 
 
 if __name__ == "__main__":
