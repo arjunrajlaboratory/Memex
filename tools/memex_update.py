@@ -180,11 +180,44 @@ def _stream_block(text: str) -> tuple[list[str], int, int] | None:
     return lines, streams_index + 1, block_end
 
 
-def _stream_row(text: str, name: str) -> str | None:
+def _standard_stream_mapping(
+    text: str,
+) -> tuple[list[str], int, int, str, set[str]] | None:
+    """Accept only the generated inline-mapping shape used by sources configs."""
     block = _stream_block(text)
     if block is None:
         return None
     lines, start, end = block
+    indent: str | None = None
+    names: set[str] = set()
+    row_pattern = re.compile(
+        r"^(?P<indent> +)(?P<name>[A-Za-z0-9_-]+)\s*:\s*"
+        r"\{[^{}\r\n]*\}\s*(?:#.*)?$"
+    )
+    for index in range(start, end):
+        raw = lines[index].rstrip("\r\n")
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        match = row_pattern.fullmatch(raw)
+        if match is None:
+            return None
+        row_indent = match.group("indent")
+        name = match.group("name")
+        if indent is None:
+            indent = row_indent
+        if row_indent != indent or name in names:
+            return None
+        names.add(name)
+    if indent is None or not names:
+        return None
+    return lines, start, end, indent, names
+
+
+def _stream_row(text: str, name: str) -> str | None:
+    block = _standard_stream_mapping(text)
+    if block is None:
+        return None
+    lines, start, end, _indent, _names = block
     pattern = re.compile(rf"^[ \t]+{re.escape(name)}\s*:")
     return next((lines[index] for index in range(start, end) if pattern.match(lines[index])), None)
 
@@ -196,18 +229,10 @@ def migrate_sources_config_text(current: str, staged: str) -> tuple[str, list[st
     byte-for-byte unchanged. If the seed no longer has a conventional frontmatter
     `streams:` mapping, decline the migration rather than guessing where to write.
     """
-    block = _stream_block(current)
+    block = _standard_stream_mapping(current)
     if block is None:
         return current, []
-    lines, start, end = block
-    present = {
-        name
-        for name in SOURCES_CONFIG_ADDED_STREAMS
-        if any(
-            re.match(rf"^[ \t]+{re.escape(name)}\s*:", lines[index])
-            for index in range(start, end)
-        )
-    }
+    lines, _start, end, indent, present = block
 
     rows: list[str] = []
     added: list[str] = []
@@ -218,15 +243,16 @@ def migrate_sources_config_text(current: str, staged: str) -> tuple[str, list[st
         staged_row = _stream_row(staged, name)
         if staged_row is None:
             continue
-        disabled_row, replacements = re.subn(
+        staged_body = staged_row.lstrip(" \t").rstrip("\r\n")
+        disabled_body, replacements = re.subn(
             r"(\benabled:\s*)(?:true|false)\b",
             r"\1false",
-            staged_row.rstrip("\r\n"),
+            staged_body,
             count=1,
         )
         if replacements != 1:
             continue
-        rows.append(disabled_row + newline)
+        rows.append(indent + disabled_body + newline)
         added.append(name)
 
     if not rows:

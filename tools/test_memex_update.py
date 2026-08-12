@@ -257,11 +257,46 @@ streams:
         self.assertEqual(second_added, [])
 
     def test_declines_nonstandard_seed_instead_of_guessing(self):
-        current = "# Sources\n\nUser-owned prose without frontmatter.\n"
-        self.assertEqual(
-            migrate_sources_config_text(current, self.STAGED_CONFIG),
-            (current, []),
+        configs = {
+            "no frontmatter": "# Sources\n\nUser-owned prose without frontmatter.\n",
+            "sequence": "---\nstreams:\n  - email\n  - slack\n---\n",
+            "block mapping": (
+                "---\nstreams:\n  email:\n    enabled: true\n    mcp: custom_Mail\n---\n"
+            ),
+            "malformed inline mapping": (
+                "---\nstreams:\n  email: { enabled: true } trailing text\n---\n"
+            ),
+            "inconsistent indentation": (
+                "---\nstreams:\n  email: { enabled: true, mcp: custom_Mail }\n"
+                "   slack: { enabled: true, mcp: custom_Slack }\n---\n"
+            ),
+            "duplicate key": (
+                "---\nstreams:\n  email: { enabled: true, mcp: first }\n"
+                "  email: { enabled: false, mcp: second }\n---\n"
+            ),
+            "tab indentation": (
+                "---\nstreams:\n\temail: { enabled: true, mcp: custom_Mail }\n---\n"
+            ),
+        }
+        for name, current in configs.items():
+            with self.subTest(shape=name):
+                self.assertEqual(
+                    migrate_sources_config_text(current, self.STAGED_CONFIG),
+                    (current, []),
+                )
+
+    def test_preserves_a_consistent_nondefault_mapping_indent(self):
+        current = (
+            "---\nstreams:\n"
+            "    email: { enabled: true, mcp: custom_Mail }\n"
+            "    slack: { enabled: false, mcp: custom_Slack }\n"
+            "---\n"
         )
+        migrated, added = migrate_sources_config_text(current, self.STAGED_CONFIG)
+        self.assertEqual(added, ["notion", "jira"])
+        self.assertIn("\n    notion: { enabled: false", migrated)
+        self.assertIn("\n    jira: { enabled: false", migrated)
+        self.assertNotIn("\n  notion:", migrated)
 
     def test_classification_and_apply_preserve_original_in_undo(self):
         with tempfile.TemporaryDirectory() as tmp:
