@@ -154,7 +154,7 @@ Three hooks live in `.claude/hooks/` and are wired up in `.claude/settings.json`
 | --- | --- | --- |
 | `session-start-context.sh` | `SessionStart` (matchers: `startup`, `resume`, `clear`) | Emits a one-time dashboard at session start: 5 most-recent `log.md` entries, open Task counts by status, today's briefing existence, `Inbox/` top-level state, list of `needs_review` Task titles. Removes the cold-scan most agents do at the top of a vault session. |
 | `bump-updated.sh` | `PostToolUse` (matchers: `Edit`, `Write`) | After any `Edit`/`Write` to an `.md` file under `Atlas/`, `Ops/{Tasks,Followups,Briefings,Reviews}/`, walks the YAML frontmatter and sets `updated:` to today. Skips `_archive/`, `Inbox/`, `_schemas/`, `_templates/`, `_workflows/`, `Raw/`. Idempotent. |
-| `log-mutation.sh` | `PostToolUse` (matchers: `Edit`, `Write`) | After any `Edit`/`Write` to a typed note, auto-appends a placeholder line to `log.md` so no mutation goes unrecorded; the agent rewrites the placeholder with a real one-line summary at the end of the workflow. |
+| `log-mutation.sh` | `PostToolUse` (matchers: `Edit`, `Write`) | After any `Edit`/`Write` to a typed note, auto-appends a placeholder line to `log.md` so no semantic mutation goes unrecorded; the agent rewrites the placeholder with a real one-line summary at the end of the workflow. Transaction-internal tracker digests under `Atlas/Trackers/Digests/` are excluded because their authoritative `agent:tracker` line is written only after the run verifies. |
 
 You can still set `updated:` explicitly when writing or editing a typed note — the hook just enforces the rule when you forget. `created:` is never touched by the hook.
 

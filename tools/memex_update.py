@@ -160,16 +160,14 @@ def _stream_block(text: str) -> tuple[list[str], int, int] | None:
     )
     if frontmatter_end is None:
         return None
-    streams_index = next(
-        (
-            index
-            for index in range(1, frontmatter_end)
-            if re.fullmatch(r"streams:\s*(?:#.*)?", lines[index].rstrip("\r\n"))
-        ),
-        None,
-    )
-    if streams_index is None:
+    streams_indexes = [
+        index
+        for index in range(1, frontmatter_end)
+        if re.fullmatch(r"streams:\s*(?:#.*)?", lines[index].rstrip("\r\n"))
+    ]
+    if len(streams_indexes) != 1:
         return None
+    streams_index = streams_indexes[0]
 
     block_end = frontmatter_end
     for index in range(streams_index + 1, frontmatter_end):

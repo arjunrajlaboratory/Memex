@@ -289,6 +289,10 @@ streams:
                 "---\nstreams:\n  email: { enabled: true, mcp: first }\n"
                 "  email: { enabled: false, mcp: second }\n---\n"
             ),
+            "duplicate top-level streams mapping": (
+                "---\nstreams:\n  email: { enabled: true, mcp: custom_Mail }\n"
+                "streams:\n  slack: { enabled: true, mcp: custom_Slack }\n---\n"
+            ),
             "tab indentation": (
                 "---\nstreams:\n\temail: { enabled: true, mcp: custom_Mail }\n---\n"
             ),

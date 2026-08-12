@@ -1,4 +1,5 @@
 import remarkMath from "remark-math"
+import type { Options as RemarkMathOptions } from "remark-math"
 import rehypeKatex from "rehype-katex"
 import rehypeMathjax from "rehype-mathjax/svg"
 //@ts-ignore
@@ -15,6 +16,16 @@ interface Options {
   katexOptions: Omit<KatexOptions, "macros" | "output">
   mathJaxOptions: Omit<MathjaxOptions, "macros">
   typstOptions: TypstOptions
+  /**
+   * Passed straight through to remark-math.
+   *
+   * Set `singleDollarTextMath: false` if the content writes plain dollar
+   * amounts. remark-math treats `$…$` as inline math by default, so any two
+   * unescaped `$` on a page pair up and silently swallow everything between
+   * them — "costs $1.59 vs $1.93 per record" renders as one math span and the
+   * prose disappears. Fenced `$$…$$` display math is unaffected either way.
+   */
+  remarkMathOptions: RemarkMathOptions
 }
 
 // mathjax macros
@@ -29,7 +40,7 @@ export const Latex: QuartzTransformerPlugin<Partial<Options>> = (opts) => {
   return {
     name: "Latex",
     markdownPlugins() {
-      return [remarkMath]
+      return [[remarkMath, opts?.remarkMathOptions ?? {}]]
     },
     htmlPlugins() {
       switch (engine) {

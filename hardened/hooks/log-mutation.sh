@@ -48,9 +48,14 @@ typed = rel.endswith(".md") and (
     or (parts[0] == "Ops" and len(parts) >= 3
         and parts[1] in {"Tasks", "Followups", "Briefings", "Reviews"})
 )
+# Tracker digests are transaction-internal write-ahead records. They emit their
+# authoritative agent:tracker line only after every planned output verifies;
+# logging their planning writes would manufacture false downstream evidence.
+tracker_digest = parts[:3] == ["Atlas", "Trackers", "Digests"]
 # Segment match, not substring: a note legitimately named e.g.
 # "Atlas/Concepts/the_archive_pattern.md" must not be skipped.
-if not typed or {"_archive", "Inbox", "_schemas", "_templates", "_workflows"} & set(parts):
+if (not typed or tracker_digest
+        or {"_archive", "Inbox", "_schemas", "_templates", "_workflows"} & set(parts)):
     sys.exit(0)
 
 base = os.path.basename(rel)[:-3]

@@ -52,7 +52,8 @@ search.
 - Calendar events for today and the next 7 days (from `Ops/Calendars/` if present)
 - All agent jobs with `status: needs_review` or `ready`
 - All due trackers (`status: active` AND `next_check <= today`)
-- All recent tracker digests (`run_at >= today - 1`) where `material: true`
+- All recent tracker digests (`run_at >= today - 1`) where `material: true` AND
+  `status: complete`; exclude `partial` and `failed` write-ahead digests
 - All followups with `surface_on <= today` and `status: pending`
 - All people whose `next_touch <= today` and `status: active`
 

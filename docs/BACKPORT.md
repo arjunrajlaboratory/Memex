@@ -114,3 +114,34 @@ The hand-curated installed contracts (`hardened/contract/CLAUDE.base.md` and
 For existing vaults, `memex-update` preserves `_config/sources.md` and inserts only missing
 Notion/Jira rows as disabled; it records the migration in the update plan and archives the original
 under the run's undo directory before applying it.
+
+# Backport checklist — 2026-08-11 tracker same-day run contract
+
+These files are derive-managed. Mirror every row into the source vault before the next
+`tools/derive.py` run; otherwise derivation will remove the same-day idempotency and recovery
+contract while leaving the engine contract tests behind.
+
+| Engine file changed here | Source-vault location | What to mirror |
+| --- | --- | --- |
+| `packs/core/skills/run-trackers/SKILL.md` | `.claude/skills/run-trackers/SKILL.md` | Detect recovery before eligibility filtering; preserve the authoritative discovery/plan snapshot; fail closed without a usable plan or at incomplete child workflows; create the partial digest before writes; keep direct outputs and bookkeeping idempotent; preserve cadence/miss state on broken searches; finalize last. |
+| `packs/core/workflows/run-tracker.md` | `_workflows/run-tracker.md` | Define the same ordered write-ahead transaction, recovery-state classification, child boundary, and broken-run branch in the canonical procedure. |
+| `packs/core/prompts/run-trackers.md` | `Agents/Prompts/run-trackers.md` | Keep the pasteable prompt aligned with recovery priority, authoritative plans, fail-closed boundaries, partial-first writes, and finalization-last. |
+| `packs/core/schemas/tracker.md` | `_schemas/tracker.md` | Define one run per tracker/date, authoritative-plan recovery, safe broken-run bookkeeping, and the full output/reference/log completion predicate. |
+| `packs/core/schemas/tracker_digest.md` | `_schemas/tracker_digest.md` | Define the partial write-ahead record, authoritative planning snapshot, fail-closed recovery, broken-run state, output verification, and final immutable transition. |
+| `packs/core/templates/tracker_digest.md` | `_templates/tracker_digest.md` | Start new digests at `status: partial` / `plan_status: building` and include structured pre-run/planned cadence, miss-count, planned-output, and verified-output fields. |
+| `packs/pi/skills/cv-scan/SKILL.md` | `.claude/skills/cv-scan/SKILL.md` | Apply the same ordered transaction and authoritative-plan recovery to `[[cv-items]]`, including the dated block and exact `Last scan window:` mutation. |
+| `packs/core/skills/daily-briefing/SKILL.md` | `.claude/skills/daily-briefing/SKILL.md` | Surface fresh material tracker digests only after `status: complete`; exclude write-ahead records. |
+| `packs/core/workflows/daily-briefing.md` | `_workflows/daily-briefing.md` | Apply the same completion filter in the canonical briefing input query. |
+| `packs/core/prompts/daily-briefing.md` | `Agents/Prompts/daily-briefing.md` | Keep the pasteable briefing prompt aligned with the completed-digest-only consumer rule. |
+| `hardened/hooks/log-mutation.sh` | `.claude/hooks/log-mutation.sh` | Exclude transaction-internal tracker digests from automatic placeholders so planning writes cannot masquerade as downstream evidence; the tracker workflow writes its authoritative log line after verification. |
+
+# Backport checklist — 2026-08-11 single-dollar math
+
+These Quartz files are derive-managed. Mirror every row into the source vault before the next
+`tools/derive.py` run so derivation does not restore remark-math's unsafe single-dollar default.
+
+| Engine file changed here | Source-vault location | What to mirror |
+| --- | --- | --- |
+| `hardened/quartz/quartz.config.ts` | `quartz/quartz.config.ts` | Configure `Plugin.Latex` with `remarkMathOptions.singleDollarTextMath: false` so ordinary dollar amounts remain text while `$$...$$` display math continues to work. |
+| `hardened/quartz/quartz/plugins/transformers/latex.ts` | `quartz/quartz/plugins/transformers/latex.ts` | Add the typed `remarkMathOptions` passthrough and preserve remark-math's existing defaults when the option is omitted. |
+| `hardened/quartz/quartz/plugins/transformers/latex.test.ts` | `quartz/quartz/plugins/transformers/latex.test.ts` | Add parser-level regression coverage for default behavior, the option passthrough, the shipped config, and display math. |

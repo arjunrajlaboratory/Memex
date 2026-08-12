@@ -4,7 +4,14 @@ id: {{id}}
 tracker: ""
 run_at: {{datetime}}
 run_by: agent:tracker
-status: complete
+status: partial
+plan_status: building
+pre_run_miss_count: 0
+pre_run_next_check:
+planned_miss_count: 0
+planned_next_check:
+planned_outputs: []
+verified_outputs: []
 material: false
 items_found: 0
 items_material: 0
