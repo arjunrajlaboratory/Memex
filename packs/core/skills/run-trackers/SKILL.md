@@ -45,6 +45,12 @@ references, and `log.md` first.
 
 Classify each candidate before deciding whether it is normally eligible:
 
+Log references to the digest that are all exact generic `agent:auto` PostToolUse placeholders are
+transaction-internal bookkeeping, not downstream writes or completion references, and do not count
+when classifying recovery. The shipped `log-mutation` hook excludes `Atlas/Trackers/Digests/`;
+ignore legacy placeholders only when every matching line has the exact generic auto-placeholder
+format. Any non-placeholder log line or other reference still counts.
+
 - **Completed:** the digest has `status: complete` and `plan_status: complete`,
   `verified_outputs` exactly equals `planned_outputs` in the same order, every target still
   verifies, `last_digest` points to it, `# History` links to it, and `log.md`

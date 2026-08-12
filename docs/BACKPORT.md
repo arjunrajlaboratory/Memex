@@ -113,6 +113,7 @@ contract while leaving the engine contract tests behind.
 | `packs/core/skills/daily-briefing/SKILL.md` | `.claude/skills/daily-briefing/SKILL.md` | Surface fresh material tracker digests only after `status: complete`; exclude write-ahead records. |
 | `packs/core/workflows/daily-briefing.md` | `_workflows/daily-briefing.md` | Apply the same completion filter in the canonical briefing input query. |
 | `packs/core/prompts/daily-briefing.md` | `Agents/Prompts/daily-briefing.md` | Keep the pasteable briefing prompt aligned with the completed-digest-only consumer rule. |
+| `hardened/hooks/log-mutation.sh` | `.claude/hooks/log-mutation.sh` | Exclude transaction-internal tracker digests from automatic placeholders so planning writes cannot masquerade as downstream evidence; the tracker workflow writes its authoritative log line after verification. |
 
 # Backport checklist — 2026-08-11 single-dollar math
 

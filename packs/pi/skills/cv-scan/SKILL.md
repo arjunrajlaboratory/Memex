@@ -68,6 +68,12 @@ LaTeX snippets in [[CV candidates]] for the user to fold into the canonical LaTe
    date → today. If none, use the last 30 days. Also read `[[cv-items]]` `last_checked` as a
    cross-check.
 
+   Log references to the digest that are all exact generic `agent:auto` PostToolUse placeholders
+   are transaction-internal bookkeeping, not downstream writes or completion references, and do
+   not count when classifying recovery. The shipped `log-mutation` hook excludes
+   `Atlas/Trackers/Digests/`; ignore legacy placeholders only when every matching line has the exact
+   generic auto-placeholder format. Any non-placeholder log line or other reference still counts.
+
 4. **Scan Gmail** (broad-search technique — see memory `feedback_gmail_search_technique`; search
    both directions, `in:anywhere`, wide dates, then narrow). Per section:
    - **Publications:** "manuscript accepted", "your paper", "proofs", "published online",

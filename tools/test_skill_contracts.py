@@ -475,6 +475,27 @@ class TestTrackerHistoryContract(unittest.TestCase):
                     r".{0,600}manual",
                 )
 
+    def test_auto_placeholder_is_not_downstream_recovery_evidence(self):
+        for name, recovery in self.plan_recovery_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertIn("agent:auto", recovery)
+                self.assertRegex(
+                    recovery,
+                    r"(?is)placeholder",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)not downstream",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)do(?:es)?\s+not\s+count",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)non-placeholder.{0,100}still counts",
+                )
+
     def test_legacy_completion_and_post_completion_drift_are_non_mutating(self):
         for name, recovery in self.plan_recovery_surfaces.items():
             with self.subTest(surface=name):

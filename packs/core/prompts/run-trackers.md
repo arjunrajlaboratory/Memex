@@ -31,6 +31,12 @@ Determine which trackers to run:
   same order, every target verifies, both tracker references
   exist, and log.md has the matching digest-linked agent:tracker line; then skip
   it and report "already ran today" (or stop for a named tracker).
+- Log references to the digest that are all exact generic agent:auto PostToolUse
+  placeholders are transaction-internal bookkeeping, not downstream writes or
+  completion references, and do not count when classifying recovery. The shipped
+  log-mutation hook excludes Atlas/Trackers/Digests/; ignore legacy placeholders
+  only when every matching line has the exact generic auto-placeholder format.
+  Any non-placeholder log line or other reference still counts.
 - Treat a status: complete legacy digest with no plan_status as completed only
   when last_digest, # History, and its digest-linked agent:tracker log line all
   verify. Skip without mutation, report the legacy evidence, and never upgrade
