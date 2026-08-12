@@ -180,6 +180,116 @@ def _stream_block(text: str) -> tuple[list[str], int, int] | None:
     return lines, streams_index + 1, block_end
 
 
+def _split_unquoted(value: str, delimiter: str, maxsplit: int = -1) -> list[str] | None:
+    """Split a single-line YAML fragment outside balanced scalar quotes."""
+    parts: list[str] = []
+    start = 0
+    quote: str | None = None
+    index = 0
+    splits = 0
+    while index < len(value):
+        char = value[index]
+        if quote == "'":
+            if char == "'":
+                if index + 1 < len(value) and value[index + 1] == "'":
+                    index += 2
+                    continue
+                quote = None
+        elif quote == '"':
+            if char == "\\":
+                index += 2
+                if index > len(value):
+                    return None
+                continue
+            if char == '"':
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif char == delimiter and (maxsplit < 0 or splits < maxsplit):
+            parts.append(value[start:index])
+            start = index + 1
+            splits += 1
+        index += 1
+    if quote is not None:
+        return None
+    parts.append(value[start:])
+    return parts
+
+
+def _valid_flow_scalar(value: str) -> bool:
+    """Validate the conservative scalar subset emitted by sources_config_yaml."""
+    if not value:
+        return False
+    if value.startswith("'"):
+        if len(value) < 2 or not value.endswith("'"):
+            return False
+        index = 1
+        while index < len(value) - 1:
+            char = value[index]
+            if ord(char) < 0x20:
+                return False
+            if char == "'":
+                if index + 1 >= len(value) - 1 or value[index + 1] != "'":
+                    return False
+                index += 2
+                continue
+            index += 1
+        return True
+    if value.startswith('"'):
+        if len(value) < 2 or not value.endswith('"'):
+            return False
+        simple_escapes = set('0abtnvfre "\\/N_LP')
+        hex_lengths = {"x": 2, "u": 4, "U": 8}
+        index = 1
+        while index < len(value) - 1:
+            char = value[index]
+            if ord(char) < 0x20 or char == '"':
+                return False
+            if char != "\\":
+                index += 1
+                continue
+            index += 1
+            if index >= len(value) - 1:
+                return False
+            escape = value[index]
+            if escape in simple_escapes:
+                index += 1
+                continue
+            digits = hex_lengths.get(escape)
+            if digits is None:
+                return False
+            encoded = value[index + 1 : index + 1 + digits]
+            if len(encoded) != digits or re.fullmatch(r"[0-9A-Fa-f]+", encoded) is None:
+                return False
+            codepoint = int(encoded, 16)
+            if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
+                return False
+            index += 1 + digits
+        return True
+    return re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@/+?%~=-]*", value) is not None
+
+
+def _flow_mapping_fields(body: str) -> set[str] | None:
+    """Parse the flat, scalar-only flow mapping used by each generated stream."""
+    items = _split_unquoted(body, ",")
+    if items is None:
+        return None
+    fields: set[str] = set()
+    for item in items:
+        pair = _split_unquoted(item, ":", maxsplit=1)
+        if pair is None or len(pair) != 2:
+            return None
+        key, value = (part.strip() for part in pair)
+        if (
+            re.fullmatch(r"[A-Za-z0-9_-]+", key) is None
+            or key in fields
+            or not _valid_flow_scalar(value)
+        ):
+            return None
+        fields.add(key)
+    return fields or None
+
+
 def _standard_stream_mapping(
     text: str,
 ) -> tuple[list[str], int, int, str, set[str]] | None:
@@ -192,7 +302,7 @@ def _standard_stream_mapping(
     names: set[str] = set()
     row_pattern = re.compile(
         r"^(?P<indent> +)(?P<name>[A-Za-z0-9_-]+)\s*:\s*"
-        r"\{[^{}\r\n]*\}\s*(?:#.*)?$"
+        r"\{(?P<body>[^{}\r\n]*)\}(?:[ \t]+#.*)?[ \t]*$"
     )
     for index in range(start, end):
         raw = lines[index].rstrip("\r\n")
@@ -203,6 +313,8 @@ def _standard_stream_mapping(
             return None
         row_indent = match.group("indent")
         name = match.group("name")
+        if _flow_mapping_fields(match.group("body")) is None:
+            return None
         if indent is None:
             indent = row_indent
         if row_indent != indent or name in names:

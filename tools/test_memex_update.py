@@ -266,6 +266,21 @@ streams:
             "malformed inline mapping": (
                 "---\nstreams:\n  email: { enabled: true } trailing text\n---\n"
             ),
+            "duplicate comma": (
+                "---\nstreams:\n  email: { enabled: true,, mcp: mail }\n---\n"
+            ),
+            "unmatched flow bracket": (
+                "---\nstreams:\n  email: { enabled: [true, mcp: mail }\n---\n"
+            ),
+            "unterminated double quote": (
+                '---\nstreams:\n  email: { enabled: true, mcp: "mail }\n---\n'
+            ),
+            "unterminated single quote": (
+                "---\nstreams:\n  email: { enabled: true, mcp: 'mail }\n---\n"
+            ),
+            "duplicate inner key": (
+                "---\nstreams:\n  email: { enabled: true, enabled: false }\n---\n"
+            ),
             "inconsistent indentation": (
                 "---\nstreams:\n  email: { enabled: true, mcp: custom_Mail }\n"
                 "   slack: { enabled: true, mcp: custom_Slack }\n---\n"
@@ -284,6 +299,18 @@ streams:
                     migrate_sources_config_text(current, self.STAGED_CONFIG),
                     (current, []),
                 )
+
+    def test_accepts_valid_quoted_inline_scalars(self):
+        current = (
+            "---\nstreams:\n"
+            '  email: { enabled: true, mcp: "custom, Mail" }\n'
+            "  slack: { enabled: false, mcp: 'team''s Slack' }\n"
+            "---\n"
+        )
+        migrated, added = migrate_sources_config_text(current, self.STAGED_CONFIG)
+        self.assertEqual(added, ["notion", "jira"])
+        self.assertIn('mcp: "custom, Mail"', migrated)
+        self.assertIn("mcp: 'team''s Slack'", migrated)
 
     def test_preserves_a_consistent_nondefault_mapping_indent(self):
         current = (
