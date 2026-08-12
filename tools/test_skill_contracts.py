@@ -189,6 +189,11 @@ class TestTrackerHistoryContract(unittest.TestCase):
         workflow = (core / "workflows/run-tracker.md").read_text()
         prompt = (core / "prompts/run-trackers.md").read_text()
         tracker_schema = (core / "schemas/tracker.md").read_text()
+        digest_schema = (core / "schemas/tracker_digest.md").read_text()
+        digest_template = (core / "templates/tracker_digest.md").read_text()
+        daily_skill = (core / "skills/daily-briefing/SKILL.md").read_text()
+        daily_workflow = (core / "workflows/daily-briefing.md").read_text()
+        daily_prompt = (core / "prompts/daily-briefing.md").read_text()
         cv_skill = (pi / "skills/cv-scan/SKILL.md").read_text()
         backport = (ROOT / "docs/BACKPORT.md").read_text()
         skill_history = re.search(
@@ -205,11 +210,148 @@ class TestTrackerHistoryContract(unittest.TestCase):
             "schema": numbered_list_step(tracker_schema, 4, indent="  "),
             "cv-scan": numbered_list_step(cv_skill, 11),
         }
+        cls.same_day_guards = {
+            "skill": markdown_section(
+                skill,
+                "## Step 1 — Determine the run set",
+                "## Step 2 — For each selected tracker, follow the recipe",
+            ),
+            "workflow": numbered_list_step(workflow, 1),
+            "prompt": prompt.split("Determine which trackers to run:", 1)[1].split(
+                "For each selected tracker", 1
+            )[0],
+            "cv-scan": numbered_list_step(cv_skill, 3),
+        }
+        cls.same_day_contracts = {
+            "tracker schema": markdown_section(
+                tracker_schema, "## Rules", "## Examples of good tracker subjects"
+            ),
+            "digest schema": markdown_section(digest_schema, "## Rules"),
+        }
+        cls.plan_recovery_surfaces = {
+            **cls.same_day_guards,
+            **cls.same_day_contracts,
+        }
+        cls.selection_surfaces = {
+            "skill": cls.same_day_guards["skill"],
+            "prompt": cls.same_day_guards["prompt"],
+        }
+        cls.source_output_surfaces = {
+            "skill": markdown_section(
+                skill,
+                "### 2.5 Apply or propose `update_targets`",
+                "### 2.6 Update the tracker frontmatter",
+            ),
+            "workflow": numbered_list_step(workflow, 7),
+            "prompt": numbered_list_step(prompt, 5),
+            "tracker schema": numbered_list_step(tracker_schema, 2, indent="  "),
+            "digest schema": markdown_section(digest_schema, "## Rules"),
+        }
+        cls.direct_progress_surfaces = {
+            "skill": cls.source_output_surfaces["skill"],
+            "workflow": numbered_list_step(workflow, 7),
+            "prompt": numbered_list_step(prompt, 5),
+            "tracker schema": numbered_list_step(tracker_schema, 2, indent="  "),
+            "digest schema": cls.source_output_surfaces["digest schema"],
+            "cv-scan": numbered_list_step(cv_skill, 10),
+        }
+        cls.log_surfaces = {
+            "skill": markdown_section(
+                skill,
+                "### 2.8 Per-tracker log line",
+                "### 2.9 Finalize the digest",
+            ),
+            "workflow": numbered_list_step(workflow, 10),
+            "prompt": numbered_list_step(prompt, 8),
+            "cv-scan": numbered_list_step(cv_skill, 12),
+        }
+        cls.transaction_surfaces = {
+            "skill": (
+                skill,
+                "### 2.4 Create or resume the partial digest",
+                "### 2.5 Apply or propose `update_targets`",
+                "### 2.8 Per-tracker log line",
+                "### 2.9 Finalize the digest",
+            ),
+            "workflow": (
+                workflow,
+                "6. Before any side effect",
+                "7. Process the direct-output prefix",
+                "10. Append to `log.md`",
+                "11. Verify the immutable planning snapshot",
+            ),
+            "prompt": (
+                prompt,
+                "4. Before any Source-note",
+                "5. Apply or propose updates",
+                "8. Append to log.md",
+                "9. Verify the immutable planning snapshot",
+            ),
+            "tracker schema": (
+                tracker_schema,
+                "1. Before any other write",
+                "2. Processes planned",
+                "5. Appends the planned line",
+                "6. After verifying `verified_outputs`",
+            ),
+            "cv-scan": (
+                cv_skill,
+                "9. **Create or resume the partial tracker digest.**",
+                "10. **Append to the staging queue idempotently.**",
+                "12. **Log.**",
+                "13. **Finalize the digest.**",
+            ),
+        }
+        cls.planning_surfaces = {
+            "skill": markdown_section(
+                skill,
+                "### 2.4 Create or resume the partial digest",
+                "### 2.5 Apply or propose `update_targets`",
+            ),
+            "workflow": numbered_list_step(workflow, 6),
+            "prompt": numbered_list_step(prompt, 4),
+            "tracker schema": numbered_list_step(tracker_schema, 1, indent="  "),
+            "digest schema": markdown_section(digest_schema, "## Rules"),
+            "cv-scan": numbered_list_step(cv_skill, 9),
+        }
+        cls.transaction_documents = {
+            name: surface[0] for name, surface in cls.transaction_surfaces.items()
+        }
+        cls.digest_schema = digest_schema
+        cls.digest_template = digest_template
+        cls.briefing_digest_consumers = {
+            "skill": numbered_list_step(daily_skill, 8),
+            "workflow": markdown_section(
+                daily_workflow, "## Inputs to read", "## Prompt template"
+            ),
+            "prompt": numbered_list_step(daily_prompt, 8),
+        }
+        cls.broken_run_surfaces = {
+            "skill": markdown_section(
+                skill, "## Step 5 — Broken-source guard", "## Step 6 — Wrap-up"
+            ),
+            "workflow": workflow,
+            "prompt": prompt,
+            "tracker schema": cls.same_day_contracts["tracker schema"],
+            "digest schema": cls.same_day_contracts["digest schema"],
+        }
+        cls.cv_window_surfaces = {
+            "recovery": numbered_list_step(cv_skill, 3),
+            "plan": numbered_list_step(cv_skill, 9),
+            "apply": numbered_list_step(cv_skill, 10),
+            "finalize": numbered_list_step(cv_skill, 13),
+        }
         cls.tracker_backport = markdown_section(
-            backport, "# Backport checklist — 2026-08-11 tracker history contract"
+            backport,
+            "# Backport checklist — 2026-08-11 tracker history contract",
+            "# Backport checklist — 2026-08-11 tracker same-day run contract",
+        )
+        cls.same_day_backport = markdown_section(
+            backport,
+            "# Backport checklist — 2026-08-11 tracker same-day run contract",
         )
         cls.cv_output_contract = cv_skill.split("## Steps", 1)[0]
-        cls.cv_digest_step = numbered_list_step(cv_skill, 10)
+        cls.cv_digest_step = numbered_list_step(cv_skill, 9)
 
     def test_every_run_surface_requires_a_history_entry(self):
         for name, artifact in self.run_surfaces.items():
@@ -254,6 +396,316 @@ class TestTrackerHistoryContract(unittest.TestCase):
         self.assertIn("_schemas/tracker_digest.md", self.cv_digest_step)
         self.assertRegex(self.cv_digest_step, r"(?i)including[^\n]*material.{0,12}false")
 
+    def test_every_entry_point_blocks_completed_runs_and_resumes_incomplete_runs(self):
+        for name, guard in self.same_day_guards.items():
+            with self.subTest(surface=name):
+                self.assertRegex(guard, r"(?is)today.{0,120}digest|digest.{0,120}today")
+                self.assertIn("status: complete", guard)
+                self.assertIn("last_digest", guard)
+                self.assertIn("# History", guard)
+                self.assertIn("log.md", guard)
+                self.assertRegex(guard, r"(?i)agent:tracker")
+                self.assertRegex(guard, r"(?is)planned.{0,80}output")
+                self.assertRegex(guard, r"(?i)fresh")
+                self.assertRegex(guard, r"(?i)(?:stop|skip|do not run)")
+                self.assertRegex(guard, r"(?i)resume")
+                self.assertRegex(guard, r"(?i)partial|failed|missing")
+                self.assertRegex(guard, r"(?is)(?:explicit|force).{0,120}(?:not|never)")
+                self.assertRegex(
+                    guard,
+                    r"(?is)(?:do\s+not|never).{0,80}overwrite.{0,80}(?:complete|completed)",
+                )
+
+    def test_recovery_detection_precedes_normal_eligibility_filtering(self):
+        for name, selection in self.selection_surfaces.items():
+            with self.subTest(surface=name):
+                inspection = re.search(r"(?i)(?:inspect|resolve)[^\n]*digest", selection)
+                eligibility = re.search(r"status: active", selection)
+                self.assertIsNotNone(inspection)
+                self.assertIsNotNone(eligibility)
+                self.assertLess(inspection.start(), eligibility.start())
+                self.assertRegex(
+                    selection,
+                    r"(?is)(?:before|prior to).{0,100}(?:status|eligibility).{0,40}(?:filter|filtering)",
+                )
+                self.assertRegex(
+                    selection,
+                    r"(?is)(?:advanced|already advanced).{0,100}next_check|"
+                    r"next_check.{0,100}(?:advanced|already advanced)",
+                )
+
+    def test_recovery_reuses_complete_plans_and_fails_closed_without_them(self):
+        for name, recovery in self.plan_recovery_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertRegex(recovery, r"(?i)authoritative")
+                self.assertIn("plan_status: complete", recovery)
+                self.assertIn("plan_status: building", recovery)
+                self.assertRegex(
+                    recovery,
+                    r"(?is)(?:do\s+not|skip).{0,100}(?:rerun|re-run|rescan|Steps 4–8)",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)plan_status: building.{0,180}no\s+(?:downstream\s+)?(?:write|output|artifact)",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)(?:plan_status.{0,80}missing|plan_status: building)"
+                    r".{0,220}(?:write|output|reference).{0,180}manual",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)(?:partial.{0,40}(?:or|\|).{0,40}failed|partial.{0,80}failed)"
+                    r".{0,180}plan_status: complete",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)(?:final.{0,80}status.{0,80}(?:missing|transition)|"
+                    r"status.{0,40}complete.{0,80}(?:transition.{0,40}missing|write.{0,40}missing))",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)(?:partial.{0,40}(?:or|\|).{0,40}failed|partial.{0,80}failed)"
+                    r".{0,180}plan_status: building.{0,220}(?:empty.{0,120}progress mirror|"
+                    r"progress mirror.{0,120}empty)",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)incomplete\s+digest.{0,80}(?:no|without).{0,40}plan_status"
+                    r".{0,600}manual",
+                )
+
+    def test_legacy_completion_and_post_completion_drift_are_non_mutating(self):
+        for name, recovery in self.plan_recovery_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertRegex(recovery, r"(?i)legacy")
+                self.assertIn("status: complete", recovery)
+                self.assertRegex(recovery, r"(?is)(?:no.{0,12}plan_status|plan_status.{0,40}absent)")
+                self.assertRegex(
+                    recovery,
+                    r"(?is)legacy.{0,300}skip.{0,80}(?:without|no) mutat",
+                )
+                self.assertRegex(recovery, r"(?i)drifted[- ]complete")
+                self.assertRegex(
+                    recovery,
+                    r"(?is)(?:do\s+not|never).{0,80}(?:reapply|repair)",
+                )
+                self.assertRegex(
+                    recovery,
+                    r"(?is)drifted[- ]complete.{0,320}manual integrity|manual integrity.{0,320}drifted[- ]complete",
+                )
+
+    def test_every_runner_creates_partial_digest_before_side_effects_and_finalizes_last(
+        self,
+    ):
+        for name, (
+            document,
+            partial,
+            side_effect,
+            log,
+            finalize,
+        ) in self.transaction_surfaces.items():
+            with self.subTest(surface=name):
+                positions = [
+                    document.index(marker)
+                    for marker in (partial, side_effect, log, finalize)
+                ]
+                self.assertEqual(sorted(positions), positions)
+                partial_step = document[positions[0] : positions[1]]
+                final_step = document[positions[3] :]
+                self.assertIn("status: partial", partial_step)
+                self.assertIn("plan_status: building", partial_step)
+                self.assertIn("plan_status: complete", partial_step)
+                self.assertLess(
+                    partial_step.index("plan_status: building"),
+                    partial_step.index("plan_status: complete"),
+                )
+                self.assertRegex(partial_step, r"(?i)before (?:any|creating|changing)")
+                self.assertIn("status: complete", final_step)
+                self.assertRegex(final_step, r"(?i)final write")
+                self.assertRegex(final_step, r"(?i)log(?:\.md| line)")
+
+    def test_every_runner_freezes_an_ordered_output_plan_before_side_effects(self):
+        for name, plan in self.planning_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertIn("planned_outputs", plan)
+                self.assertIn("verified_outputs", plan)
+                self.assertRegex(
+                    plan,
+                    r"(?is)(?:empty.{0,120}progress mirror|progress mirror.{0,120}empty)",
+                )
+                self.assertRegex(
+                    plan,
+                    r"(?is)(?:# What I changed.{0,120}empty|empty.{0,120}# What I changed)",
+                )
+                self.assertRegex(plan, r"(?i)descriptor")
+                self.assertRegex(
+                    plan,
+                    r"(?is)planned_outputs.{0,320}(?:tracker.{0,100}History.{0,100}log|History.{0,100}log)",
+                )
+
+    def test_every_runner_uses_verified_outputs_as_an_ordered_prefix(self):
+        for name, document in self.transaction_documents.items():
+            with self.subTest(surface=name):
+                self.assertRegex(
+                    document,
+                    r"(?is)planned_outputs.{0,500}immutable|immutable.{0,500}planned_outputs",
+                )
+                self.assertRegex(document, r"(?is)verified_outputs.{0,80}ordered prefix")
+                self.assertRegex(
+                    document,
+                    r"(?is)(?:append|appends).{0,120}identical descriptor.{0,120}verified_outputs|"
+                    r"verified_outputs.{0,120}(?:append|appends).{0,120}identical descriptor",
+                )
+                self.assertRegex(
+                    document,
+                    r"(?is)verified_outputs.{0,100}(?:exactly equals|exactly equal).{0,100}planned_outputs",
+                )
+
+    def test_direct_output_verification_marker_is_written_after_progress_mirrors(self):
+        for name, direct_step in self.direct_progress_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertRegex(
+                    direct_step,
+                    r"(?is)update.{0,180}(?:# What I changed|progress)"
+                    r".{0,180}then.{0,100}append.{0,180}verified_outputs",
+                )
+
+    def test_recovery_verifies_outputs_and_reuses_pre_run_bookkeeping(self):
+        for name, (document, *_markers) in self.transaction_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertRegex(
+                    document,
+                    r"(?is)verify.{0,160}(?:instead of|rather than).{0,80}(?:repeat|duplicat)",
+                )
+                self.assertRegex(
+                    document,
+                    r"(?is)(?:pre[_ -]run.{0,160}miss_count|miss_count.{0,160}pre[_ -]run)",
+                )
+                self.assertRegex(
+                    document,
+                    r"(?is)miss_count.{0,320}(?:never.{0,60}increment|reuse.{0,80}instead)",
+                )
+
+    def test_incomplete_source_ingests_fail_closed_at_the_child_boundary(self):
+        for name, source_contract in self.source_output_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertRegex(
+                    source_contract,
+                    r"(?is)(?:Source[ -]note|primary note).{0,40}existence alone.{0,40}not\s+completion",
+                )
+                self.assertRegex(
+                    source_contract,
+                    r"(?i)canonical raw",
+                )
+                self.assertRegex(
+                    source_contract,
+                    r"(?is)(?:already.{0,80}completed plan|completed plan.{0,80}already|while.{0,40}plan_status: building)",
+                )
+                self.assertRegex(
+                    source_contract,
+                    r"(?is)never.{0,60}extend.{0,40}plan",
+                )
+                self.assertRegex(
+                    source_contract,
+                    r"(?is)(?:Source[\s-]+note.{0,40}fully populated|fully populated Source[\s-]+note)",
+                )
+                self.assertIn("agent:librarian", source_contract)
+                self.assertIn("log.md", source_contract)
+                self.assertRegex(
+                    source_contract,
+                    r"(?is)(?:do\s+not|never).{0,60}consume.{0,60}raw",
+                )
+                self.assertRegex(
+                    source_contract,
+                    r"(?is)(?:do\s+not|never).{0,100}(?:auto-resume|resume automatically)",
+                )
+                self.assertRegex(
+                    source_contract,
+                    r"(?is)(?:leave|remain).{0,80}(?:tracker |this )?digest.{0,40}(?:partial|failed)",
+                )
+                self.assertRegex(
+                    source_contract,
+                    r"(?is)surface.{0,80}manual.{0,60}(?:source-ingest|child-workflow) recovery",
+                )
+
+    def test_broken_searches_write_ahead_without_advancing_cadence_or_misses(self):
+        for name, broken_contract in self.broken_run_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertRegex(broken_contract, r"(?i)status:\s*broken")
+                self.assertRegex(
+                    broken_contract,
+                    r"(?is)(?:partial digest.{0,100}first|after.{0,100}partial digest)",
+                )
+                self.assertRegex(
+                    broken_contract,
+                    r"(?is)preserv(?:e|ing).{0,100}next_check.{0,100}miss_count",
+                )
+                self.assertRegex(
+                    broken_contract,
+                    r"(?is)planned_next_check.{0,100}(?:equal|pre[_ -]run).{0,160}planned_miss_count"
+                    r"|planned_miss_count.{0,100}(?:equal|pre[_ -]run).{0,160}planned_next_check",
+                )
+                self.assertRegex(
+                    broken_contract,
+                    r"(?is)broken.{0,240}(?:precedence|do not apply).{0,120}needs_review",
+                )
+
+    def test_cv_scan_plans_applies_and_verifies_last_scan_window(self):
+        for name, surface in self.cv_window_surfaces.items():
+            with self.subTest(surface=name):
+                if name == "recovery":
+                    self.assertRegex(surface, r"(?i)safe-to-re-plan.{0,160}scan window")
+                    continue
+                self.assertIn("Last scan window:", surface)
+                self.assertRegex(surface, r"(?i)(?:exact|planned|verify)")
+
+    def test_every_tracker_log_format_contains_the_required_digest_link(self):
+        for name, log_step in self.log_surfaces.items():
+            with self.subTest(surface=name):
+                self.assertRegex(log_step, r"(?i)agent:tracker")
+                self.assertRegex(
+                    log_step,
+                    r"\[\[(?:Tracker Digest - [^\]\n]+ - <today>|<digest note>)\]\]",
+                )
+
+    def test_digest_schema_and_template_start_partial(self):
+        self.assertRegex(self.digest_schema, r"(?m)^status: partial\s+#")
+        self.assertRegex(self.digest_template, r"(?m)^status: partial$")
+        self.assertRegex(self.digest_schema, r"(?m)^plan_status: building\s+#")
+        self.assertRegex(self.digest_template, r"(?m)^plan_status: building$")
+        for field in (
+            "pre_run_miss_count",
+            "pre_run_next_check",
+            "planned_miss_count",
+            "planned_next_check",
+            "planned_outputs",
+            "verified_outputs",
+        ):
+            with self.subTest(field=field):
+                self.assertRegex(self.digest_schema, rf"(?m)^{field}:")
+                self.assertRegex(self.digest_template, rf"(?m)^{field}:")
+
+    def test_briefing_consumers_surface_only_completed_material_digests(self):
+        for name, consumer in self.briefing_digest_consumers.items():
+            with self.subTest(surface=name):
+                self.assertIn("material: true", consumer)
+                self.assertIn("status: complete", consumer)
+                self.assertRegex(consumer, r"(?i)(?:exclude|never surface).{0,80}partial")
+                self.assertRegex(consumer, r"(?i)(?:exclude|never surface).{0,100}failed")
+
+    def test_schemas_define_one_resumable_digest_per_day(self):
+        for name, contract in self.same_day_contracts.items():
+            with self.subTest(surface=name):
+                self.assertRegex(contract, r"(?i)at most one[^\n]*run[^\n]*(?:day|date)")
+                self.assertRegex(contract, r"(?i)resume")
+                self.assertRegex(contract, r"(?i)partial|failed|missing")
+                self.assertIn("log.md", contract)
+                self.assertRegex(
+                    contract,
+                    r"(?is)(?:do\s+not|never).{0,80}overwrite.{0,80}(?:complete|completed)",
+                )
+
     def test_backport_lists_every_derive_managed_tracker_surface(self):
         expected = {
             "packs/core/skills/run-trackers/SKILL.md",
@@ -265,6 +717,23 @@ class TestTrackerHistoryContract(unittest.TestCase):
         for path in expected:
             with self.subTest(path=path):
                 self.assertIn(f"`{path}`", self.tracker_backport)
+
+    def test_same_day_backport_lists_every_derive_managed_surface(self):
+        expected = {
+            "packs/core/skills/run-trackers/SKILL.md",
+            "packs/core/workflows/run-tracker.md",
+            "packs/core/prompts/run-trackers.md",
+            "packs/core/schemas/tracker.md",
+            "packs/core/schemas/tracker_digest.md",
+            "packs/core/templates/tracker_digest.md",
+            "packs/pi/skills/cv-scan/SKILL.md",
+            "packs/core/skills/daily-briefing/SKILL.md",
+            "packs/core/workflows/daily-briefing.md",
+            "packs/core/prompts/daily-briefing.md",
+        }
+        for path in expected:
+            with self.subTest(path=path):
+                self.assertIn(f"`{path}`", self.same_day_backport)
 
 
 if __name__ == "__main__":

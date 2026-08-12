@@ -75,7 +75,8 @@ Run these reads in parallel — one message, multiple tool calls. Read only what
 5. **Calendar events** — `Ops/Calendars/` for today + the next 7 days. (If a calendar-connector read is available and recently authorized, pull from there too — but the vault copy is the source of truth.)
 6. **Agent jobs** — `Agents/Jobs/*.md` where `status` in `[ready, needs_review]`.
 7. **Due trackers** — `Atlas/Trackers/*.md` where `status: active` AND `next_check <= <date>`.
-8. **Fresh digests** — tracker digest notes where `run_at >= <date> - 1` AND `material: true`.
+8. **Fresh digests** — tracker digest notes where `run_at >= <date> - 1` AND `material: true` AND
+   `status: complete`. Never surface a `partial` or `failed` write-ahead digest.
 9. **Surfaced followups** — `Ops/Followups/*.md` where `surface_on <= <date>` AND `status: pending`.
 10. **People needing a touch** — `Atlas/People/*.md` where `next_touch <= <date>` AND `status: active`.
 
