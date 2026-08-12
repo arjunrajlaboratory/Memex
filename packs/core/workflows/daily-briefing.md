@@ -11,7 +11,7 @@ skill version automates this; pasting the prompt, do it by hand): read `_config/
 for enabled streams and split capture streams (email, Slack, Notion, Jira, and future providers) from
 calendar, which is reconciliation-only. When at least one capture stream is enabled, run
 `capture-comms` (email/Slack in both directions plus Notion comments/edits and Jira assignments,
-comments, and transitions) with only those streams, then run
+comments, transitions, and field mentions) with only those streams, then run
 `reconcile-from-comms` for all enabled streams. When no capture streams are enabled, skip capture
 and stale digest parsing but still reconcile an enabled calendar; set `includes_comms: false` and
 `comms_coverage: skipped`. Tier-A reversible bookkeeping auto-applies; Tier-B task

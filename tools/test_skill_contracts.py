@@ -114,6 +114,28 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
             r"(?is)(?:comments or changelog/history).{0,260}(?:exhaustion|coverage gap)",
         )
 
+    def test_jira_scan_captures_mentions_from_editable_fields(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:description|editable text/rich-text fields?).{0,300}mention",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)changelog/history.{0,500}field changes?.{0,300}mention",
+        )
+        self.assertRegex(jira_step, r"(?is)mention.{0,180}stable account id")
+        self.assertRegex(
+            jira_step,
+            r"(?is)created in the window.{0,220}creator\.accountId.{0,220}intervening field rewrite",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:field bodies|field values).{0,260}coverage gap",
+        )
+        completeness = numbered_step(self.skill, 8)
+        self.assertRegex(completeness, r"(?i)mention-bearing field changes")
+
     def test_jira_scan_is_read_only_and_writes_standard_digest(self):
         jira_step = numbered_step(self.skill, 5)
         self.assertIn("Inbox/comms/<date>/jira.md", jira_step)
@@ -197,6 +219,20 @@ class TestCommsCoverageConsumers(unittest.TestCase):
         )
         briefing_mode = self.reconcile.split("## When invoked by daily-briefing", 1)[1]
         self.assertRegex(briefing_mode, r"(?i)coverage gaps?.*briefing")
+
+    def test_reconcile_rechecks_jira_field_mentions(self):
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,700}(?:description|editable text/rich-text field).{0,260}mention",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,700}changelog/history.{0,300}(?:field-change|field change)",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)creation-time field-mention.{0,180}creator\.accountId.{0,180}intervening field rewrite",
+        )
 
     def test_briefing_persists_and_surfaces_partial_coverage(self):
         for artifact in (
@@ -291,6 +327,11 @@ class TestInstalledCaptureContracts(unittest.TestCase):
                 for stream in ("email", "Slack", "Notion", "Jira"):
                     self.assertIn(stream, contract)
                 self.assertRegex(contract, r"(?is)daily briefing.{0,700}Notion.{0,200}Jira")
+
+    def test_installed_contracts_include_jira_field_mentions(self):
+        for name, contract in {"CLAUDE.md": self.claude, "AGENTS.md": self.agents}.items():
+            with self.subTest(contract=name):
+                self.assertRegex(contract, r"(?is)Jira.{0,120}(?:field )?mentions")
 
     def test_claude_sources_contract_has_rows_defaults_and_upgrade_guidance(self):
         for row in ("email:", "slack:", "calendar:", "notion:", "jira:"):

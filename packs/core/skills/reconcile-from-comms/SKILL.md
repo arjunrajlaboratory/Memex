@@ -147,9 +147,14 @@ job, and the mark is the idempotency key. For each reconciled item:
      state, and the request context before treating an owner edit as a close. Never call a Notion
      create/update/move/duplicate/comment tool during reconciliation.
    - **Jira items** (`↳ thread:` holds the issue key): resolve the authenticated account and Jira
-     `cloudId` as capture did, then re-read that key with `getJiraIssue`, including comments and
+     `cloudId` as capture did, then re-read that key with `getJiraIssue`, including comments; the
+     current summary, description, environment, and custom editable text/rich-text fields; and
      changelog/history. Confirm the event timestamp, actor account id, and transition/comment
-     semantics; the current status alone does not prove who closed the loop. Never call a Jira
+     semantics. For a creation-time field-mention signal, confirm `creator.accountId`, `created`,
+     and the absence of an intervening field rewrite in exhaustive history. For a later signal,
+     confirm the changelog/history field-change event. In both cases verify that the new field
+     value or raw ADF mention node targets the owner's stable account id; current field text alone
+     does not prove who added the mention, when it was added, or who closed the loop. Never call a Jira
      create/edit/transition/comment/worklog tool during reconciliation.
    In every case confirm on the right channel before concluding, and if the action still can't be
    confirmed make it a Tier-B "couldn't confirm; did this happen?" question — never "not sent."

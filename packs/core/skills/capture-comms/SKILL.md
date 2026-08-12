@@ -284,18 +284,33 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      provenance before reading each unique issue once. If pagination or a slice stops early, mark
      `jira.md` partial and record the exact un-scanned slice plus next token in `coverage gap`; the
      first result page is never complete coverage.
-   - **Read enough history to classify.** For every issue in the global map, call
-     `getJiraIssue` with comments and changelog/history expansion (or the connector's closest
-     read-only equivalent). Compare each event's author account id with the authenticated account
-     id and ignore events outside the exact window. Do not classify from the issue's current
-     fields alone: they do not identify who assigned, commented, or transitioned it during the
-     window. If comments or changelog/history are paginated or report a total larger than the
-     returned entries, follow their cursors/pages to exhaustion. If the connector cannot expose
-     or exhaust that history, preserve positive hits but mark the affected issue and time range as
-     a `coverage gap`; never treat partial issue history as negative evidence.
-   - **Open-loop signals:** a new assignment to the user; another user's comment that mentions,
-     asks, or requests action from the user; or a transition by someone else that puts work back
-     into an actionable state for the user. **Close-loop signals:** the user's own transition to
+   - **Read enough history and field context to classify.** For every issue in the global map,
+     call `getJiraIssue` with comments; the current summary, description, environment, and custom
+     editable text/rich-text fields; and changelog/history expansion (or the connector's closest
+     read-only equivalent).
+     Compare each event's author account id with the authenticated account id and ignore events
+     outside the exact window. **Inspect mention-bearing field changes, not only comments:** for
+     every in-window changelog/history item that changes one of those editable fields, compare its
+     old/new field values when available and inspect raw ADF mention nodes or the connector's
+     equivalent structured mention representation in the new/current value. Count a mention only
+     when its stable account id matches the authenticated user; display-name text alone is not
+     identity evidence. For an issue created in the window, attribute a mention in its initial
+     field values to creation only when `creator.accountId`, the `created` timestamp, and exhaustive
+     history establish another actor and show no intervening field rewrite that obscures
+     provenance; later mention additions require the corresponding field-change event. Classify a
+     field mention as an open-loop signal only when creation/history ties its addition/request to
+     another actor and timestamp in the window. Current fields alone cannot prove who added a
+     mention or when.
+     If the connector omits old/new field bodies or field values, retain any positive candidate
+     but mark that issue and time range as a `coverage gap`; never turn an unprovable field delta
+     into negative evidence. If comments or changelog/history are paginated or report a total
+     larger than the returned entries, follow their cursors/pages to exhaustion. If the connector
+     cannot expose or exhaust that history, preserve positive hits but mark the affected issue and
+     time range as a `coverage gap`; never treat partial issue history as negative evidence.
+   - **Open-loop signals:** a new assignment to the user; another user's comment or mention-bearing
+     editable text/rich-text field change that mentions, asks, or requests action from the
+     user; or a transition by someone else that puts work back into an actionable state for the
+     user. **Close-loop signals:** the user's own transition to
      Done/Resolved (using the site's actual terminal statuses), or the user's own substantive
      comment/reply that fulfills the communication loop. A reply may close the response loop
      without proving the whole Jira issue is complete; phrase the suggested action accordingly.
@@ -372,8 +387,8 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
       search surfaced? If not, retry Step 4 or record the exact unscanned remainder as a gap.
    4. For Jira, did identity + `cloudId` resolution succeed, did the unfiltered updated-set query
       and every JQL slice paginate to exhaustion, and did classification use exhaustive
-      changelog/comments with event authors and timestamps? If not, retry Step 5 or record the
-      exact un-scanned remainder as a gap.
+      changelog/comments plus mention-bearing field changes with event authors and timestamps? If
+      not, retry Step 5 or record the exact un-scanned remainder as a gap.
    5. For Notion, did user identity resolution succeed; did page search, independent comment
       discovery (when supported), and per-page comment reads paginate to exhaustion; and did close
       classification use actor + request context? If no independent comment discovery exists, is

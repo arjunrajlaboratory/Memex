@@ -121,7 +121,7 @@ Given a raw source in `Raw/sources/`:
 
 ### Daily briefing — see [[_workflows/daily-briefing]]
 
-Generate `Ops/Briefings/<today>.md` per the briefing schema, including the People section and the tracker-digest section. By default the briefing first runs the **loop-closing pass** (Step 1b): `capture-comms` then `reconcile-from-comms` over the capture streams enabled in `_config/sources.md` (sent + received email/Slack plus Notion comments/edits and Jira assignments/comments/transitions, and calendar if enabled), so state that lagged reality is reconciled before synthesis. Every external source read is read-only. Tier-A reversible bookkeeping auto-applies; Tier-B task closes are confirmed in one batch and routed through `close-task` (agents never self-close).
+Generate `Ops/Briefings/<today>.md` per the briefing schema, including the People section and the tracker-digest section. By default the briefing first runs the **loop-closing pass** (Step 1b): `capture-comms` then `reconcile-from-comms` over the capture streams enabled in `_config/sources.md` (sent + received email/Slack plus Notion comments/edits and Jira assignments/comments/transitions/field mentions, and calendar if enabled), so state that lagged reality is reconciled before synthesis. Every external source read is read-only. Tier-A reversible bookkeeping auto-applies; Tier-B task closes are confirmed in one batch and routed through `close-task` (agents never self-close).
 
 ### Weekly review — see [[_workflows/weekly-review]]
 
