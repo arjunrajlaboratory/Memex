@@ -32,7 +32,8 @@ fi
 # fake vault's .claude/hooks/ and point the payload at a typed note in it.
 BASH_BIN="/bin/bash"; [ -x "$BASH_BIN" ] || BASH_BIN="$(command -v bash)"
 VAULT="$TMP/vault"
-mkdir -p "$VAULT/.claude/hooks" "$VAULT/Ops/Tasks" "$VAULT/Inbox"
+mkdir -p "$VAULT/.claude/hooks" "$VAULT/Ops/Tasks" "$VAULT/Inbox" \
+  "$VAULT/Atlas/Trackers/Digests"
 cp "$HOOK_SRC" "$VAULT/.claude/hooks/log-mutation.sh"
 printf '# Log\n\npreamble\n' > "$VAULT/log.md"
 HOOK="$VAULT/.claude/hooks/log-mutation.sh"
@@ -55,6 +56,15 @@ run_hook "$VAULT/Ops/Tasks/x.md" || fail "hook exited non-zero on dedupe path"
 run_hook "$VAULT/Inbox/note.md" || fail "hook exited non-zero on Inbox skip"
 run_hook "$VAULT/log.md"        || fail "hook exited non-zero on log.md skip"
 [ "$(grep -c 'auto-placeholder' "$VAULT/log.md")" -eq 1 ] || fail "skipped paths still mutated log.md"
+
+# Tracker digests are write-ahead transaction records. Logging their planning
+# writes would look like downstream evidence and strand safe re-planning.
+DIGEST="$VAULT/Atlas/Trackers/Digests/Tracker Digest - test - 2026-08-11.md"
+run_hook "$DIGEST" || fail "hook exited non-zero on tracker-digest skip"
+[ "$(grep -c 'auto-placeholder' "$VAULT/log.md")" -eq 1 ] || fail "tracker digest emitted a placeholder"
+if grep -q '\[\[Tracker Digest - test - 2026-08-11\]\]' "$VAULT/log.md"; then
+  fail "tracker digest leaked a log reference"
+fi
 
 # Empty / file_path-less payloads must be skipped by the prefilter (exit 0).
 printf '%s' '{"tool_input":{}}' | "$BASH_BIN" "$HOOK" || fail "hook exited non-zero on payload without file_path"
