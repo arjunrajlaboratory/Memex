@@ -48,6 +48,14 @@ You are running as **`agent:capture`** for this skill.
 - **Ruthless on noise.** Most email/Slack/Notion/Jira activity is not loop-relevant. Action items
   are *only* items that open or close a vault loop. Everything else is a one-line count in
   `## Filtered as noise` — never a silent cap.
+- **Communication-loop invariant.** Before emitting an in-window request as open, read its complete
+  source-native thread or discussion and fold request/reply history chronologically through read
+  time. A later substantive owner response tied to that request supersedes the earlier open
+  candidate; a mere acknowledgement or unrelated owner activity does not. A response after the
+  capture window may suppress the earlier request but is not itself emitted in this digest, while
+  a still-later new request becomes its own candidate. If the source cannot expose or exhaust the
+  required thread history, retain the positive request only as inconclusive under a `coverage
+  gap`; do not recommend creating or updating a vault Task from the unverified open candidate.
 - **No silent caps or truncation.** For every enabled provider stream — including the core
   Notion/Jira scans and any vault-specific provider — enumerate the whole resolved window with
   bounded daily slices and/or pagination to exhaustion. Never treat the first page as complete. If a scan is
@@ -292,8 +300,10 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      call `getJiraIssue` with comments; the current summary, description, environment, and custom
      editable text/rich-text fields; and changelog/history expansion (or the connector's closest
      read-only equivalent).
-     Compare each event's author account id with the authenticated account id and ignore events
-     outside the exact window. **Inspect mention-bearing field changes, not only comments:** for
+     Compare each event's author account id with the authenticated account id. Emit only events
+     inside the exact window, but retain later assignment, status, comment, and reply events
+     through read time when they can suppress an in-window candidate. **Inspect mention-bearing
+     field changes, not only comments:** for
      every in-window changelog/history item that changes one of those editable fields, compare its
      old/new field values when available and inspect raw ADF mention nodes or the connector's
      equivalent structured mention representation in the new/current value. Count a mention only
@@ -340,10 +350,15 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      any later transition to a non-terminal/actionable state, including a reopen; a close requires
      the current status to be terminal. The latest unsuperseded transition into terminal must
      belong to the owner, so a later close by another actor does not revive an earlier owner close.
-     Comments, substantive replies, and field mentions remain event-level signals rather than
-     stateful candidates. If history cannot prove the fold or current fields, retain an otherwise
-     positive event only as inconclusive under the `coverage gap`; never recommend a vault Task
-     creation, update, or close from that unverified stateful candidate.
+     For each comment request or field-mention request, also apply the communication-loop
+     invariant: order exhaustive comment history through read time and tie replies to the request
+     by reply ancestry and issue context. A later substantive owner comment/reply that fulfills
+     the request supersedes its open candidate. A later new request is independent. An owner reply
+     after the capture window may suppress the earlier request but is not emitted as a new close
+     signal; only an in-window reply may be emitted. If comment history cannot be exhausted, keep
+     the request only as inconclusive under the `coverage gap` and do not recommend creating or
+     updating a vault Task from it. If assignment/status history cannot prove its fold or current
+     fields, apply the same fail-closed treatment to that stateful candidate.
    - **Open-loop signals:** a new assignment to the user; another user's comment or mention-bearing
      editable text/rich-text field change that mentions, asks, or requests action from the
      user; or a transition by someone else that puts work back into an actionable state for the
@@ -394,9 +409,11 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      resolver actor id, and resolution timestamp as provenance. If a resolved thread exposes only
      its current state without the resolution actor/resolver and timestamp, preserve the positive
      candidate but record resolution provenance for that page and time range as a `coverage gap`;
-     do not attribute the resolution to the owner. Ignore events outside the exact window. If any
-     page's edit history or comment pagination cannot finish, record that page and remainder as a
-     `coverage gap`. Summarize one level up; never paste page or comment bodies.
+     do not attribute the resolution to the owner. Emit only events inside the exact window, but
+     retain later replies, resolutions, and reversals through read time when they can suppress an
+     in-window candidate. If any page's edit history or comment pagination cannot finish, record
+     that page and remainder as a `coverage gap`. Summarize one level up; never paste page or
+     comment bodies.
      Reconcile resolution/reopen activity in chronological order when that history is available.
      A resolution is a close candidate only while the discussion's current state is still
      resolved and no later reopen or reversal supersedes it. Discard an earlier resolution after
@@ -404,8 +421,12 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      candidate. If reversal history is unavailable, retain a currently resolved event only as an
      inconclusive positive candidate under the resolution-provenance gap, not as a recommendation
      to close a vault Task.
+     Apply the communication-loop invariant to comment requests too: a later substantive owner
+     reply tied by ancestry and request context supersedes the earlier open comment even if the
+     discussion remains unresolved; a later new request is independent.
    - **Open-loop signals:** an unresolved comment by another user that mentions the owner or asks
-     them for action, or a loop-relevant page edit/automation update that creates a review or
+     them for action and has no later substantive owner reply, or a loop-relevant page
+     edit/automation update that creates a review or
      approval request for them. **Close-loop signals:** the owner's own reply or resolution — for
      a resolution, its resolver stable user id and resolution timestamp must identify the owner in
      the window — or their own page edit that substantively fulfills a captured request. An edit is
@@ -442,8 +463,9 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
       search surfaced? If not, retry Step 4 or record the exact unscanned remainder as a gap.
    4. For Jira, did identity + `cloudId` resolution succeed, did the unfiltered updated-set query
       and every JQL slice paginate to exhaustion, and did classification use exhaustive
-      changelog/comments plus mention-bearing field changes with event authors and timestamps? If
-      not, retry Step 5 or record the exact un-scanned remainder as a gap.
+      changelog/comments through read time plus mention-bearing field changes with event authors
+      and timestamps? Did later owner replies suppress the requests they fulfilled? If not, retry
+      Step 5 or record the exact un-scanned remainder as a gap.
    5. For Notion, did user identity resolution succeed; did page search, independent comment
       discovery (when supported), per-page comment reads, and available page-edit history paginate
       to exhaustion; and did close classification use actor + request context? If exhaustive edit

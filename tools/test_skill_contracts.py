@@ -192,6 +192,26 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         for row in expected_rows:
             self.assertRegex(jira_step, rf"(?i){row}")
 
+    def test_jira_requests_are_suppressed_after_a_later_owner_reply(self):
+        hard_rules = self.skill.split("## Output shape", 1)[0]
+        self.assertRegex(hard_rules, r"(?i)communication-loop invariant")
+        self.assertRegex(
+            hard_rules,
+            r"(?is)(?:thread|discussion).{0,220}through read\s+time.{0,420}"
+            r"later substantive owner (?:response|reply).{0,220}supersed",
+        )
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:comment|field-mention) request.{0,260}exhaustive comment"
+            r".{0,260}later substantive owner (?:comment|reply).{0,220}supersed",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)after (?:the )?(?:capture )?window.{0,220}suppress"
+            r".{0,180}(?:not|never).{0,120}emit",
+        )
+
     def test_jira_scan_is_read_only_and_writes_standard_digest(self):
         jira_step = numbered_step(self.skill, 5)
         self.assertIn("Inbox/comms/<date>/jira.md", jira_step)
@@ -244,7 +264,7 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         self.assertRegex(notion_step, r"(?is)open-loop signals:.*unresolved comment")
         self.assertRegex(notion_step, r"(?i)owner's own reply or resolution")
         self.assertRegex(notion_step, r"(?i)summarize one level up")
-        self.assertRegex(notion_step, r"(?i)never paste page or comment bodies")
+        self.assertRegex(notion_step, r"(?i)never paste page or\s+comment bodies")
         write_guard = notion_step.split("Never call", 1)[1]
         for tool in (
             "notion-create-*",
@@ -355,6 +375,19 @@ class TestCommsCoverageConsumers(unittest.TestCase):
         self.assertRegex(
             self.reconcile,
             r"(?is)(?:contradicts|fails).{0,180}superseded.{0,220}do not propose",
+        )
+
+    def test_reconcile_rechecks_later_replies_before_proposing_open_work(self):
+        self.assertRegex(self.reconcile, r"(?i)live communication-loop invariant")
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)(?:thread|discussion).{0,220}through (?:the )?live\s+read\s+time"
+            r".{0,420}later substantive owner (?:response|reply).{0,220}superseded",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)For a Jira (?:comment request or field-mention request)"
+            r".{0,360}later substantive owner (?:comment|reply).{0,260}do not\s+propose",
         )
 
     def test_reconcile_requires_notion_edit_and_resolution_provenance(self):

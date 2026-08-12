@@ -130,6 +130,13 @@ job, and the mark is the idempotency key. For each reconciled item:
    (the way `observe-task-actuals` triangulates) before giving up. To confirm an action truly
    happened, re-read the live thread **on its own channel** — confirmation never crosses sources
    (an item's source is in the digest frontmatter and its `↳ signal`):
+   Apply the **live communication-loop invariant** to every captured open request before proposing
+   work: fold the complete source-native thread or discussion chronologically through the live
+   read time. If a later substantive owner response tied by reply ancestry and request context
+   fulfills it, mark the captured request `superseded` and do not propose a response, Task
+   creation, or Task update. A later new request remains independent. If the source cannot expose
+   or exhaust the required history, demote the request to a Tier-B “couldn't confirm; is this still
+   open?” question rather than making a positive mutation recommendation.
    - **Email items** (`↳ thread:` holds a mail thread id): read it with the connector's
      full-thread read tool (Gmail: `get_thread(threadId)` — the authority on current state). If
      the id is missing (an older digest), re-locate the candidate with the connector's search
@@ -163,6 +170,13 @@ job, and the mark is the idempotency key. For each reconciled item:
      confirm the changelog/history field-change event. In both cases verify that the new field
      value or raw ADF mention node targets the owner's stable account id; current field text alone
      does not prove who added the mention, when it was added, or who closed the loop.
+
+     For a Jira comment request or field-mention request, exhaust comments through the live read
+     time and tie any response to the captured request by reply ancestry and issue context. If a
+     later substantive owner comment/reply fulfills it, mark the request `superseded` and do not
+     propose the corresponding response, vault Task creation, or vault Task update. A reply after
+     the capture window still suppresses the earlier request even though it is not a new captured
+     close signal.
 
      Apply the **Jira stateful-signal invariant** before proposing any change from an assignment,
      actionable transition, or terminal transition: sort exhaustive assignment/status history and
