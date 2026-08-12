@@ -175,6 +175,23 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
             r".{0,180}(?:discard|suppress|supersed)",
         )
 
+    def test_jira_stateful_signal_matrix_covers_cross_field_outcomes(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(jira_step, r"(?i)stateful-signal invariant")
+        self.assertRegex(jira_step, r"(?is)fold.{0,160}through read time")
+        expected_rows = (
+            r"Assignment to owner\s*\|\s*Owner\s*\|\s*Actionable/non-terminal\s*\|\s*Open",
+            r"Assignment to owner\s*\|\s*Owner\s*\|\s*Terminal\s*\|\s*Superseded",
+            r"Assignment to owner\s*\|\s*Other or unassigned\s*\|\s*Any\s*\|\s*Superseded",
+            r"Actionable transition for owner\s*\|[^\n]*\|\s*Actionable/non-terminal\s*\|\s*Open",
+            r"Actionable transition for owner\s*\|[^\n]*\|\s*Terminal\s*\|\s*Superseded",
+            r"Owner terminal transition\s*\|[^\n]*\|\s*Terminal, no later reversal\s*\|\s*Close",
+            r"Owner terminal transition\s*\|[^\n]*\|\s*Actionable/reopened\s*\|\s*Superseded",
+            r"Reopen then owner reclose\s*\|[^\n]*\|\s*Terminal\s*\|\s*Only the later owner close",
+        )
+        for row in expected_rows:
+            self.assertRegex(jira_step, rf"(?i){row}")
+
     def test_jira_scan_is_read_only_and_writes_standard_digest(self):
         jira_step = numbered_step(self.skill, 5)
         self.assertIn("Inbox/comms/<date>/jira.md", jira_step)
@@ -322,6 +339,22 @@ class TestCommsCoverageConsumers(unittest.TestCase):
             self.reconcile,
             r"(?is)Jira items.{0,2400}actionable transition.{0,260}current\s+status"
             r".{0,260}later\s+transition",
+        )
+
+    def test_reconcile_applies_one_jira_stateful_signal_invariant(self):
+        self.assertRegex(self.reconcile, r"(?i)Jira stateful-signal invariant")
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)fold.{0,180}through (?:the )?live read time.{0,600}"
+            r"current assignee.{0,180}actionable/non-terminal",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)latest unsuperseded.{0,220}terminal.{0,180}owner",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)(?:contradicts|fails).{0,180}superseded.{0,220}do not propose",
         )
 
     def test_reconcile_requires_notion_edit_and_resolution_provenance(self):

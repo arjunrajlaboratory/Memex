@@ -162,17 +162,24 @@ job, and the mark is the idempotency key. For each reconciled item:
      and the absence of an intervening field rewrite in exhaustive history. For a later signal,
      confirm the changelog/history field-change event. In both cases verify that the new field
      value or raw ADF mention node targets the owner's stable account id; current field text alone
-     does not prove who added the mention, when it was added, or who closed the loop. For a
-     transition-based close, sort exhaustive transition history chronologically, require the
-     current status to remain terminal, and confirm that no later transition reopens the issue or
-     moves it to another non-terminal/actionable state. Mark a reversed close candidate
-     `superseded` and do not propose closing the vault Task; only a later unsuperseded owner
-     transition into terminal can replace it. For an assignment candidate, require the current
-     assignee to remain the owner and verify that no later assignee change or reassignment moved it
-     away; otherwise mark it `superseded`. For an actionable transition candidate, require the
-     current status to remain actionable for the owner and verify that no later transition
-     superseded it; otherwise mark it `superseded`. Never call a Jira
-     create/edit/transition/comment/worklog tool during reconciliation.
+     does not prove who added the mention, when it was added, or who closed the loop.
+
+     Apply the **Jira stateful-signal invariant** before proposing any change from an assignment,
+     actionable transition, or terminal transition: sort exhaustive assignment/status history and
+     fold it through the live read time, including changes after the captured window that can
+     invalidate its candidate. An assignment candidate remains open only when the current assignee
+     is the owner **and** the current status is actionable/non-terminal; a later assignee change or
+     reassignment away supersedes it. An actionable transition candidate remains open only when
+     the current status is actionable/non-terminal and exhaustive history still ties the request
+     to the owner; a later transition to terminal supersedes it. A close candidate is valid only
+     when the current status is terminal and the latest unsuperseded transition into terminal
+     belongs to the owner; a reopen invalidates the earlier close, and a later terminal transition
+     by another actor does not revive it. If either live field or later history contradicts the
+     captured candidate, mark it `superseded` and do not propose the corresponding vault creation,
+     update, or close. If the exhaustive fold cannot be confirmed, retain the positive event only
+     as a Tier-B “couldn't confirm; did this happen?” question, never as a positive mutation
+     recommendation. Never call a Jira create/edit/transition/comment/worklog tool during
+     reconciliation.
    In every case confirm on the right channel before concluding, and if the action still can't be
    confirmed make it a Tier-B "couldn't confirm; did this happen?" question — never "not sent."
 

@@ -168,6 +168,7 @@ class TestSourcesConfigYaml(unittest.TestCase):
         self.assertIn('forwarding_in: ""', out)
         self.assertIn('other_sending_accounts: ["jane@lab.example.edu", "jane@hospital.example.org"]', out)
         self.assertIn("Treat missing sent-mail evidence for them as", out)
+        self.assertIn("source-native read-only verification block", out)
 
     def test_calendar_carries_minimal_mode_when_enabled(self):
         out = sources_config_yaml(["calendar"], "remote", "2026-06-04")

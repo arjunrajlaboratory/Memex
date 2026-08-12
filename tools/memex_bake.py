@@ -336,7 +336,8 @@ planning-only, and Notion + Jira disabled.
 ## Adding a new source (e.g. Linear)
 1. Add a `streams.<name>` entry above with its MCP server id.
 2. Add a scan block for that MCP to `capture-comms`.
-3. No `reconcile-from-comms` change needed - it reads the same `## Action items` API.
+3. Add a source-native read-only verification block to `reconcile-from-comms` for signals that
+   need live confirmation before a vault change can be proposed.
 """
 
 

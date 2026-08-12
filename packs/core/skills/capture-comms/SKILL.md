@@ -311,20 +311,39 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      larger than the returned entries, follow their cursors/pages to exhaustion. If the connector
      cannot expose or exhaust that history, preserve positive hits but mark the affected issue and
      time range as a `coverage gap`; never treat partial issue history as negative evidence.
-     Sort transition history in chronological timestamp order and reconcile every terminal
-     transition candidate against all later transitions plus the issue's current status. Treat an
-     owner transition into a terminal status as a close candidate only when the current status is
-     still terminal and no later transition moved the issue back to a non-terminal/actionable
-     status. A later reopen or other transition out of terminal supersedes and discards the earlier
-     close candidate; a still-later owner transition back into terminal may become the new
-     candidate. If history cannot prove this ordering, retain the event only as an inconclusive
-     positive hit under the coverage gap, never as a recommendation to close the vault Task.
-     Reconcile stateful open candidates the same way. Keep an assignment candidate only while the
-     current assignee is the owner; a later reassignment away from the owner supersedes and
-     discards that candidate. Keep an actionable transition candidate only while the current
-     status remains actionable for the owner and no later transition supersedes it; discard it
-     after a later terminal or otherwise non-actionable transition. A newly current assignment or
-     actionable transition may become its own candidate with its own actor and timestamp.
+     **Stateful-signal invariant.** Sort exhaustive assignment and status history chronologically,
+     then fold it through read time before classifying any assignment, actionable-transition, or
+     terminal-transition candidate. Later changes outside the requested capture window may
+     invalidate an in-window candidate even though they are not emitted as new in-window signals.
+     Emit only a candidate whose actor/event provenance remains consistent with both the issue's
+     current assignee and current status; an earlier candidate is `superseded` when either current
+     field no longer satisfies its row below. A later qualifying event may become a new candidate
+     with its own actor and timestamp.
+
+     | Candidate event | Current assignee | Current status | Result |
+     | --- | --- | --- | --- |
+     | Assignment to owner | Owner | Actionable/non-terminal | Open |
+     | Assignment to owner | Owner | Terminal | Superseded |
+     | Assignment to owner | Other or unassigned | Any | Superseded |
+     | Actionable transition for owner | Owner or still-relevant request context | Actionable/non-terminal | Open |
+     | Actionable transition for owner | Any | Terminal | Superseded |
+     | Owner terminal transition | Any | Terminal, no later reversal | Close |
+     | Owner terminal transition | Any | Actionable/reopened | Superseded |
+     | Reopen then owner reclose | Any | Terminal | Only the later owner close |
+
+     Here, a still-relevant request context means exhaustive history still ties the actionable
+     transition to work requested from the owner even when Jira does not use the assignee field.
+     Reconcile the chronological fold against the current assignee and current status. For an
+     assignment, compare the current assignee: a later reassignment away from the owner supersedes
+     the candidate. For an actionable transition, compare the current status: a later transition
+     to terminal supersedes the candidate. A terminal transition close candidate is superseded by
+     any later transition to a non-terminal/actionable state, including a reopen; a close requires
+     the current status to be terminal. The latest unsuperseded transition into terminal must
+     belong to the owner, so a later close by another actor does not revive an earlier owner close.
+     Comments, substantive replies, and field mentions remain event-level signals rather than
+     stateful candidates. If history cannot prove the fold or current fields, retain an otherwise
+     positive event only as inconclusive under the `coverage gap`; never recommend a vault Task
+     creation, update, or close from that unverified stateful candidate.
    - **Open-loop signals:** a new assignment to the user; another user's comment or mention-bearing
      editable text/rich-text field change that mentions, asks, or requests action from the
      user; or a transition by someone else that puts work back into an actionable state for the
