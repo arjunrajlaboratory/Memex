@@ -146,10 +146,13 @@ job, and the mark is the idempotency key. For each reconciled item:
      `notion-get-comments`, plus exhaustive page-edit history when the connector exposes it.
      Confirm page-edit history actor ids and timestamps, mention/reply ancestry, the request
      context, and any resolution through its resolver actor id and resolution timestamp before
-     treating an owner edit or resolution as a close. Current `last_edited_by` or resolved state
-     alone is not historical provenance. If the edit history or resolution provenance required by
-     the captured signal is unavailable, retain the positive candidate but demote it to a Tier-B
-     "couldn't confirm; did this happen?" question. Never call a Notion
+     treating an owner edit or resolution as a close. For a resolution signal, also require the
+     discussion's current state to be resolved and verify in chronological resolution/reopen
+     history that no later reopen or reversal superseded it; if one did, mark the captured close
+     candidate `superseded` and do not propose a vault close. Current `last_edited_by` or resolved
+     state alone is not historical provenance. If the edit history or resolution provenance
+     required by the captured signal is unavailable, retain the positive candidate but demote it
+     to a Tier-B "couldn't confirm; did this happen?" question. Never call a Notion
      create/update/move/duplicate/comment tool during reconciliation.
    - **Jira items** (`↳ thread:` holds the issue key): resolve the authenticated account and Jira
      `cloudId` as capture did, then re-read that key with `getJiraIssue`, including comments; the
@@ -159,7 +162,16 @@ job, and the mark is the idempotency key. For each reconciled item:
      and the absence of an intervening field rewrite in exhaustive history. For a later signal,
      confirm the changelog/history field-change event. In both cases verify that the new field
      value or raw ADF mention node targets the owner's stable account id; current field text alone
-     does not prove who added the mention, when it was added, or who closed the loop. Never call a Jira
+     does not prove who added the mention, when it was added, or who closed the loop. For a
+     transition-based close, sort exhaustive transition history chronologically, require the
+     current status to remain terminal, and confirm that no later transition reopens the issue or
+     moves it to another non-terminal/actionable state. Mark a reversed close candidate
+     `superseded` and do not propose closing the vault Task; only a later unsuperseded owner
+     transition into terminal can replace it. For an assignment candidate, require the current
+     assignee to remain the owner and verify that no later assignee change or reassignment moved it
+     away; otherwise mark it `superseded`. For an actionable transition candidate, require the
+     current status to remain actionable for the owner and verify that no later transition
+     superseded it; otherwise mark it `superseded`. Never call a Jira
      create/edit/transition/comment/worklog tool during reconciliation.
    In every case confirm on the right channel before concluding, and if the action still can't be
    confirmed make it a Tier-B "couldn't confirm; did this happen?" question — never "not sent."

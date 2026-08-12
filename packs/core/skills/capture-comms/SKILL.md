@@ -311,6 +311,20 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      larger than the returned entries, follow their cursors/pages to exhaustion. If the connector
      cannot expose or exhaust that history, preserve positive hits but mark the affected issue and
      time range as a `coverage gap`; never treat partial issue history as negative evidence.
+     Sort transition history in chronological timestamp order and reconcile every terminal
+     transition candidate against all later transitions plus the issue's current status. Treat an
+     owner transition into a terminal status as a close candidate only when the current status is
+     still terminal and no later transition moved the issue back to a non-terminal/actionable
+     status. A later reopen or other transition out of terminal supersedes and discards the earlier
+     close candidate; a still-later owner transition back into terminal may become the new
+     candidate. If history cannot prove this ordering, retain the event only as an inconclusive
+     positive hit under the coverage gap, never as a recommendation to close the vault Task.
+     Reconcile stateful open candidates the same way. Keep an assignment candidate only while the
+     current assignee is the owner; a later reassignment away from the owner supersedes and
+     discards that candidate. Keep an actionable transition candidate only while the current
+     status remains actionable for the owner and no later transition supersedes it; discard it
+     after a later terminal or otherwise non-actionable transition. A newly current assignment or
+     actionable transition may become its own candidate with its own actor and timestamp.
    - **Open-loop signals:** a new assignment to the user; another user's comment or mention-bearing
      editable text/rich-text field change that mentions, asks, or requests action from the
      user; or a transition by someone else that puts work back into an actionable state for the
@@ -364,6 +378,13 @@ Notion comments/mentions, and Jira assignments/mentions more often *open* loops.
      do not attribute the resolution to the owner. Ignore events outside the exact window. If any
      page's edit history or comment pagination cannot finish, record that page and remainder as a
      `coverage gap`. Summarize one level up; never paste page or comment bodies.
+     Reconcile resolution/reopen activity in chronological order when that history is available.
+     A resolution is a close candidate only while the discussion's current state is still
+     resolved and no later reopen or reversal supersedes it. Discard an earlier resolution after
+     a reopen; a later owner resolution with its own actor and timestamp may become the new
+     candidate. If reversal history is unavailable, retain a currently resolved event only as an
+     inconclusive positive candidate under the resolution-provenance gap, not as a recommendation
+     to close a vault Task.
    - **Open-loop signals:** an unresolved comment by another user that mentions the owner or asks
      them for action, or a loop-relevant page edit/automation update that creates a review or
      approval request for them. **Close-loop signals:** the owner's own reply or resolution — for

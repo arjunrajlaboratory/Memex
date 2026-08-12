@@ -146,6 +146,35 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         completeness = numbered_step(self.skill, 8)
         self.assertRegex(completeness, r"(?i)mention-bearing field changes")
 
+    def test_jira_close_is_suppressed_after_a_later_reopen(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:chronological|timestamp order).{0,260}(?:current status|current state)",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:close candidate|terminal transition).{0,320}later transition"
+            r".{0,260}(?:non-terminal|actionable|reopen).{0,220}(?:discard|suppress|supersed)",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)(?:current status|current state).{0,180}(?:terminal|Done/Resolved)",
+        )
+
+    def test_jira_open_state_candidates_must_still_be_current(self):
+        jira_step = numbered_step(self.skill, 5)
+        self.assertRegex(
+            jira_step,
+            r"(?is)assignment.{0,260}current assignee.{0,260}(?:later|subsequent)"
+            r".{0,180}(?:away|different|reassign).{0,180}(?:discard|suppress|supersed)",
+        )
+        self.assertRegex(
+            jira_step,
+            r"(?is)actionable transition.{0,300}current\s+status.{0,260}later transition"
+            r".{0,180}(?:discard|suppress|supersed)",
+        )
+
     def test_jira_scan_is_read_only_and_writes_standard_digest(self):
         jira_step = numbered_step(self.skill, 5)
         self.assertIn("Inbox/comms/<date>/jira.md", jira_step)
@@ -225,6 +254,17 @@ class TestCaptureCommsCoverageContract(unittest.TestCase):
         self.assertRegex(completeness, r"(?is)Notion.{0,500}(?:edit history|edit actors)")
         self.assertRegex(completeness, r"(?is)Notion.{0,600}(?:resolution provenance|resolver)")
 
+    def test_notion_resolution_is_suppressed_after_a_reopen(self):
+        notion_step = numbered_step(self.skill, 6)
+        self.assertRegex(
+            notion_step,
+            r"(?is)resolution.{0,360}(?:currently|current state).{0,120}resolved",
+        )
+        self.assertRegex(
+            notion_step,
+            r"(?is)(?:reopen|later reversal).{0,220}(?:discard|suppress|supersed)",
+        )
+
 
 class TestCommsCoverageConsumers(unittest.TestCase):
     @classmethod
@@ -249,15 +289,39 @@ class TestCommsCoverageConsumers(unittest.TestCase):
     def test_reconcile_rechecks_jira_field_mentions(self):
         self.assertRegex(
             self.reconcile,
-            r"(?is)Jira items.{0,700}(?:description|editable text/rich-text field).{0,260}mention",
+            r"(?is)Jira items.{0,1500}(?:description|editable text/rich-text field).{0,260}mention",
         )
         self.assertRegex(
             self.reconcile,
-            r"(?is)Jira items.{0,700}changelog/history.{0,300}(?:field-change|field change)",
+            r"(?is)Jira items.{0,1500}changelog/history.{0,300}(?:field-change|field change)",
         )
         self.assertRegex(
             self.reconcile,
             r"(?is)creation-time field-mention.{0,180}creator\.accountId.{0,180}intervening field rewrite",
+        )
+
+    def test_reconcile_rechecks_stateful_close_candidates(self):
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,1800}(?:current status|current state).{0,260}terminal"
+            r".{0,320}(?:later transition|reopen)",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Notion items.{0,1000}(?:currently|current state).{0,160}resolved"
+            r".{0,320}(?:reopen|later reversal)",
+        )
+
+    def test_reconcile_rechecks_jira_open_state_candidates(self):
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,2000}assignment.{0,220}current\s+assignee"
+            r".{0,260}(?:reassign|later\s+assignee change|moved away)",
+        )
+        self.assertRegex(
+            self.reconcile,
+            r"(?is)Jira items.{0,2400}actionable transition.{0,260}current\s+status"
+            r".{0,260}later\s+transition",
         )
 
     def test_reconcile_requires_notion_edit_and_resolution_provenance(self):
