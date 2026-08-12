@@ -37,9 +37,36 @@ LaTeX snippets in [[CV candidates]] for the user to fold into the canonical LaTe
    citations** — far cleaner than email. Use it both to dedupe (skip papers already in
    `publications.tex`) and as a primary publications signal in its own right.
 
-3. **Determine the scan window.** Read the last `## <date> scan` block in
-   `Ops/Followups/CV candidates.md`; the window is (that date → today). If none, use the last
-   30 days. Also read `[[cv-items]]` `last_checked` as a cross-check.
+3. **Determine the scan window.** Resolve today's expected digest and inspect it, `[[cv-items]]`
+   `last_digest`, `# History`, `log.md`, and every planned output. A same-day run is completed only
+   when the digest has `status: complete` and `plan_status: complete`, `verified_outputs`
+   exactly equals `planned_outputs` in the same order, every target verifies, both tracker
+   references exist, and `log.md` has the matching digest-linked
+   `agent:tracker` line; then stop and report "already ran today." A force request does not bypass
+   this guard. Treat a legacy `status: complete` digest with no `plan_status` as completed only
+   when both tracker references and the digest-linked `agent:tracker` log line verify; skip it
+   without mutation and surface that outputs cannot be re-verified. If any `status: complete`
+   digest is missing required output/reference evidence, do not reapply outputs, repair
+   references, rescan, or rewrite it; surface drifted-complete manual integrity review. If a
+   `status: partial` or `failed` digest has `plan_status: complete`, process it before
+   cadence/status filtering—even when only the final status transition is missing—and treat the
+   snapshot as authoritative:
+   skip Steps 4–8, require `verified_outputs` to be an ordered prefix of `planned_outputs`, and
+   resume at the first incomplete write. A duplicate, unplanned descriptor, or non-prefix order
+   requires manual integrity review. If a partial or failed digest has
+   `plan_status: building`, every progress mirror (`verified_outputs`, the output arrays, and
+   `# What I changed`) empty, and no downstream
+   write/reference, re-run only the read-only
+   Steps 4–8, finish that same digest's plan, and set `plan_status: complete`. If an incomplete
+   digest has no `plan_status`; the digest is missing while a same-day
+   write/reference exists; or `plan_status: building` has any nonempty progress field, write, or
+   reference, do not rescan, reconstruct, or mutate anything; surface manual recovery.
+   A run is fresh only when the digest is absent and no same-day artifact/reference exists.
+   Never overwrite a completed digest or create a second same-day digest. For a fresh or
+   safe-to-re-plan run, reuse the scan window already recorded in the building digest when present;
+   otherwise read the last `## <date> scan` block in `Ops/Followups/CV candidates.md` and use that
+   date → today. If none, use the last 30 days. Also read `[[cv-items]]` `last_checked` as a
+   cross-check.
 
 4. **Scan Gmail** (broad-search technique — see memory `feedback_gmail_search_technique`; search
    both directions, `in:anywhere`, wide dates, then narrow). Per section:
@@ -78,8 +105,37 @@ LaTeX snippets in [[CV candidates]] for the user to fold into the canonical LaTe
    Use `TBD — <field>?` for genuinely unknown fields rather than guessing (e.g. an unknown talk
    title); never fabricate an author list.
 
-9. **Append to the staging queue.** Append one dated block to
-   `Ops/Followups/CV candidates.md`:
+9. **Create or resume the partial tracker digest.** Before changing the staging queue, followup,
+   tracker, History, or log, write
+   `Atlas/Trackers/Digests/Tracker Digest - cv-items - <today>.md` with `status: partial` and
+   `plan_status: building`,
+   conforming to `_schemas/tracker_digest.md` and including `material: false` runs. Record the
+   `pre_run_miss_count`, `pre_run_next_check`, `planned_miss_count`, `planned_next_check`, and
+   ordered `planned_outputs` descriptors for the exact intended dated
+   block, exact `Last scan window: <window-start> → <today>` line, `surface_on` value, tracker-field
+   bundle, History bullet, and log line. Each descriptor names a stable target and exact expected
+   content or field values so recovery can verify it instead of repeating it. Initialize every
+   progress mirror (`verified_outputs`, the output arrays, and `# What I changed`) empty. Count all
+   fresh, deduped candidates in `items_found`; count high- and medium-confidence candidates in
+   `items_material`. Populate every required body section:
+   - `# What I looked at` — scan window and Gmail, Calendar, lab-website, and vault signals checked.
+   - `# What's new` — every fresh, deduped candidate, including low-confidence items.
+   - `# What's material` — high- and medium-confidence candidates staged for the CV.
+   - `# What I changed` — starts empty; add the dated block, scan-window line, and `surface_on`
+     only as each target verifies.
+   - `# What needs review` — the low-confidence / FYI candidates.
+   - `# Next-run recommendations` — useful query, source, or cadence adjustments.
+   Set `plan_status: complete` as the final planning write before Step 10; never infer plan
+   completion from whether any section is empty. Afterward, keep the discovery/materiality
+   snapshot, bookkeeping, and `planned_outputs` immutable. Process the descriptors in execution
+   order; `verified_outputs` may only be an append-only ordered prefix containing identical
+   descriptors.
+
+10. **Append to the staging queue idempotently.** Check whether the exact dated block already
+    exists in `Ops/Followups/CV candidates.md`. Verify it instead of duplicating it; otherwise
+    append it once. After the exact block verifies, update the matching digest progress fields,
+    then append its identical planned descriptor to `verified_outputs` if absent as the last
+    per-output digest write:
    ```markdown
    ## <today> scan (covers <window-start> → <today>)
 
@@ -92,32 +148,39 @@ LaTeX snippets in [[CV candidates]] for the user to fold into the canonical LaTe
    ### Low-confidence / FYI
    - [ ] **<label>** ↳ <why uncertain> ↳ <provenance>
    ```
-   Update the note's "Last scan window:" line.
+   Verify the exact planned `Last scan window: <window-start> → <today>` line instead of repeating
+   it; otherwise update it once. After it verifies, update the matching digest progress fields,
+   then append its identical planned descriptor to `verified_outputs` if absent as the last
+   per-output digest write.
 
-10. **Create the tracker digest.** Write
-    `Atlas/Trackers/Digests/Tracker Digest - cv-items - <today>.md` conforming to
-    `_schemas/tracker_digest.md`, including `material: false` runs. Count all fresh,
-    deduped candidates in `items_found`; count high- and medium-confidence candidates in
-    `items_material`. Populate every required body section:
-    - `# What I looked at` — scan window and Gmail, Calendar, lab-website, and vault signals checked.
-    - `# What's new` — every fresh, deduped candidate, including low-confidence items.
-    - `# What's material` — high- and medium-confidence candidates staged for the CV.
-    - `# What I changed` — the dated [[CV candidates]] block and `surface_on` update.
-    - `# What needs review` — the low-confidence / FYI candidates.
-    - `# Next-run recommendations` — useful query, source, or cadence adjustments.
-
-11. **Update the tracker and its history.** Set `[[cv-items]]` `last_checked: <today>`,
+11. **Update the tracker and its history idempotently.** Set `[[cv-items]]` `last_checked: <today>`,
     `next_check: <today + 7d>`, `last_digest: [[Tracker Digest - cv-items - <today>]]`,
-    and `updated: <today>`. If the run found nothing material, increment `miss_count`;
-    otherwise reset it to 0. If `miss_count >= 5`, set `status: needs_review`. Also bump
-    the [[CV candidates]] followup's `surface_on` to the new `next_check`.
+    and `updated: <today>`. If the run found nothing material, set `miss_count` to the pre-run
+    value recorded in the partial digest plus one; otherwise reset it to 0. On recovery, reuse
+    that result instead of incrementing again. If `miss_count >= 5`, set `status: needs_review`.
+    Also set the [[CV candidates]] followup's `surface_on` to the new `next_check`, verifying an
+    already-applied value rather than repeating work. After each complete planned field bundle
+    verifies, append its identical descriptor to `verified_outputs` if absent.
 
     `last_digest` is state; `# History` is provenance. Append one bullet linking to the
-    digest—one line per run, including `material: false` runs:
+    digest—one line per run, including `material: false` runs. On recovery, verify the existing
+    bullet with this digest link instead of duplicating it:
     `- <today> — Run. material=<bool>, <N> items (<H+M> material). <headline, or "nothing material">. Staged <N> candidates in [[CV candidates]]. → [[Tracker Digest - cv-items - <today>]].`
+    After the exact planned bullet verifies, append its identical descriptor to
+    `verified_outputs` if absent.
 
-12. **Log.** Append to `log.md`:
+12. **Log.** Append to `log.md`, or verify the matching digest-linked `agent:tracker` line instead
+    of appending it twice on recovery:
     `<datetime> — agent:tracker — scan — [[CV candidates]] — cv-scan: <N> candidates (<H> high, <M> med, <L> fyi); [[Tracker Digest - cv-items - <today>]] created`
+    After the exact planned line verifies, append its identical descriptor to `verified_outputs`
+    if absent.
+
+13. **Finalize the digest.** Verify the immutable planning snapshot, `verified_outputs` exactly
+    equals `planned_outputs` in the same order, the dated staging block, exact `Last scan window:`
+    line, `surface_on`, tracker fields, digest-linked History bullet, and matching log line. Only then set the digest to
+    `status: complete` as the final write. Otherwise leave it `partial` (or mark it `failed` with
+    the reason) for recovery. A completed digest is immutable; missing evidence is
+    drifted-complete manual review, never automatic repair.
 
 ## What this skill never does
 

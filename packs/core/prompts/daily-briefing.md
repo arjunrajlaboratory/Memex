@@ -63,7 +63,8 @@ Gather the following inputs (read only what exists; skip gracefully if absent):
 5. Calendar events — `Ops/Calendars/` for today and the next 7 days
 6. Agent jobs — `Agents/Jobs/*.md` where `status` in [ready, needs_review]
 7. Due trackers — `Atlas/Trackers/*.md` where `status: active` AND `next_check <= {{date}}`
-8. Fresh digests — tracker digest notes where `run_at >= {{date}} - 1` AND `material: true`
+8. Fresh digests — tracker digest notes where `run_at >= {{date}} - 1` AND `material: true` AND
+   `status: complete`; exclude `partial` and `failed` write-ahead digests
 9. Surfaced followups — `Ops/Followups/*.md` where `surface_on <= {{date}}` AND `status: pending`
 10. People needing a touch — `Atlas/People/*.md` where `next_touch <= {{date}}` AND `status: active`
 

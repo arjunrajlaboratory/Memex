@@ -95,6 +95,25 @@ protections while leaving the engine contract tests behind.
 | `packs/core/schemas/tracker.md` | `_schemas/tracker.md` | Require a digest-linked history entry after every run. |
 | `packs/pi/skills/cv-scan/SKILL.md` | `.claude/skills/cv-scan/SKILL.md` | Bring the specialized `[[cv-items]]` runner under the canonical digest/history contract and expand its allowed writes accordingly. |
 
+# Backport checklist — 2026-08-11 tracker same-day run contract
+
+These files are derive-managed. Mirror every row into the source vault before the next
+`tools/derive.py` run; otherwise derivation will remove the same-day idempotency and recovery
+contract while leaving the engine contract tests behind.
+
+| Engine file changed here | Source-vault location | What to mirror |
+| --- | --- | --- |
+| `packs/core/skills/run-trackers/SKILL.md` | `.claude/skills/run-trackers/SKILL.md` | Detect recovery before eligibility filtering; preserve the authoritative discovery/plan snapshot; fail closed without a usable plan or at incomplete child workflows; create the partial digest before writes; keep direct outputs and bookkeeping idempotent; preserve cadence/miss state on broken searches; finalize last. |
+| `packs/core/workflows/run-tracker.md` | `_workflows/run-tracker.md` | Define the same ordered write-ahead transaction, recovery-state classification, child boundary, and broken-run branch in the canonical procedure. |
+| `packs/core/prompts/run-trackers.md` | `Agents/Prompts/run-trackers.md` | Keep the pasteable prompt aligned with recovery priority, authoritative plans, fail-closed boundaries, partial-first writes, and finalization-last. |
+| `packs/core/schemas/tracker.md` | `_schemas/tracker.md` | Define one run per tracker/date, authoritative-plan recovery, safe broken-run bookkeeping, and the full output/reference/log completion predicate. |
+| `packs/core/schemas/tracker_digest.md` | `_schemas/tracker_digest.md` | Define the partial write-ahead record, authoritative planning snapshot, fail-closed recovery, broken-run state, output verification, and final immutable transition. |
+| `packs/core/templates/tracker_digest.md` | `_templates/tracker_digest.md` | Start new digests at `status: partial` / `plan_status: building` and include structured pre-run/planned cadence, miss-count, planned-output, and verified-output fields. |
+| `packs/pi/skills/cv-scan/SKILL.md` | `.claude/skills/cv-scan/SKILL.md` | Apply the same ordered transaction and authoritative-plan recovery to `[[cv-items]]`, including the dated block and exact `Last scan window:` mutation. |
+| `packs/core/skills/daily-briefing/SKILL.md` | `.claude/skills/daily-briefing/SKILL.md` | Surface fresh material tracker digests only after `status: complete`; exclude write-ahead records. |
+| `packs/core/workflows/daily-briefing.md` | `_workflows/daily-briefing.md` | Apply the same completion filter in the canonical briefing input query. |
+| `packs/core/prompts/daily-briefing.md` | `Agents/Prompts/daily-briefing.md` | Keep the pasteable briefing prompt aligned with the completed-digest-only consumer rule. |
+
 # Backport checklist — 2026-08-11 single-dollar math
 
 These Quartz files are derive-managed. Mirror every row into the source vault before the next
