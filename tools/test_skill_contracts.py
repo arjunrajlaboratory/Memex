@@ -273,6 +273,46 @@ class TestCommsCoverageConsumers(unittest.TestCase):
         )
 
 
+class TestInstalledCaptureContracts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        contracts = ROOT / "hardened/contract"
+        cls.claude = (contracts / "CLAUDE.base.md").read_text()
+        cls.agents = (contracts / "AGENTS.base.md").read_text()
+        cls.claude_sources = markdown_section(
+            cls.claude,
+            "## Source streams + git mode (`_config/sources.md`)",
+            "## Out of scope (v0.1)",
+        )
+
+    def test_both_installed_contracts_name_every_capture_stream(self):
+        for name, contract in {"CLAUDE.md": self.claude, "AGENTS.md": self.agents}.items():
+            with self.subTest(contract=name):
+                for stream in ("email", "Slack", "Notion", "Jira"):
+                    self.assertIn(stream, contract)
+                self.assertRegex(contract, r"(?is)daily briefing.{0,700}Notion.{0,200}Jira")
+
+    def test_claude_sources_contract_has_rows_defaults_and_upgrade_guidance(self):
+        for row in ("email:", "slack:", "calendar:", "notion:", "jira:"):
+            self.assertIn(row, self.claude_sources)
+        self.assertRegex(self.claude_sources, r"(?i)notion:\s+\{ enabled: false")
+        self.assertRegex(self.claude_sources, r"(?i)jira:\s+\{ enabled: false")
+        self.assertRegex(
+            self.claude_sources,
+            r"(?is)memex-update.{0,100}appends missing Notion/Jira rows as disabled",
+        )
+        self.assertRegex(
+            self.claude_sources,
+            r"(?is)preserves every existing row.{0,80}user prose",
+        )
+
+    def test_installed_contracts_keep_notion_and_jira_read_only(self):
+        for name, contract in {"CLAUDE.md": self.claude, "AGENTS.md": self.agents}.items():
+            with self.subTest(contract=name):
+                self.assertRegex(contract, r"(?is)(?:never|not do).{0,120}(?:edit|comment).{0,30}Notion")
+                self.assertRegex(contract, r"(?is)(?:never|not do).{0,180}(?:create|edit|transition).{0,80}Jira")
+
+
 class TestTrackerHistoryContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

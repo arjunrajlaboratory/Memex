@@ -76,6 +76,10 @@ PY
 grep -q "^\.memex/$" "$TMP/core/.gitignore" || fail ".memex/ (manifest answers + local state) should be gitignored"
 [ -f "$TMP/core/AGENTS.md" ] || fail "AGENTS.md missing"
 [ -f "$TMP/core/CLAUDE.md" ] || fail "CLAUDE.md missing"
+grep -q "Notion" "$TMP/core/AGENTS.md" || fail "installed AGENTS.md omits Notion capture"
+grep -q "Jira" "$TMP/core/AGENTS.md" || fail "installed AGENTS.md omits Jira capture"
+grep -q "notion:.*enabled: false" "$TMP/core/CLAUDE.md" || fail "installed CLAUDE.md omits disabled Notion stream"
+grep -q "jira:.*enabled: false" "$TMP/core/CLAUDE.md" || fail "installed CLAUDE.md omits disabled Jira stream"
 [ -x "$TMP/core/scripts/serve_quartz.sh" ] || fail "serve_quartz.sh not at scripts/ or not executable"
 [ -x "$TMP/core/scripts/memex-doctor.sh" ] || fail "memex-doctor.sh not installed/executable"
 (cd "$TMP/core" && ./scripts/memex-doctor.sh >/dev/null) || fail "doctor reports FAIL on a fresh vault"
@@ -120,7 +124,7 @@ grep -qF "ExecStart=/usr/bin/env bash \"$TMP/core%%pct/scripts/serve_quartz.sh\"
   || fail "percent-path systemd ExecStart should escape % to %% (else systemd reads it as a specifier)"
 grep -qF "WorkingDirectory=$TMP/core%%pct/quartz" "$PCT_UNIT" \
   || fail "percent-path systemd WorkingDirectory should escape % to %%"
-# sources config seed: present, default streams (email+slack on, calendar off), local git
+# sources config seed: email+slack on, calendar+notion+jira off, local git
 [ -f "$TMP/core/_config/sources.md" ] || fail "_config/sources.md seed missing"
 grep -q "email: { enabled: true" "$TMP/core/_config/sources.md" || fail "email stream not enabled by default"
 grep -q "slack: { enabled: true" "$TMP/core/_config/sources.md" || fail "slack stream not enabled by default"

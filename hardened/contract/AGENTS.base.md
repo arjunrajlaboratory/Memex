@@ -33,7 +33,7 @@ If your role is not declared at the start of a session, ask. Do not assume.
 
 The vault has two kinds of durable customization:
 
-- **User data and config** live in `Atlas/`, `Ops/`, `Inbox/`, `Drafts/`, `Raw/`, `outputs/`, and `_config/`. The engine update flow never rewrites user data. `_config/overrides.md` and `_config/sources.md` take precedence over framework defaults when a skill or workflow needs local preferences.
+- **User data and config** live in `Atlas/`, `Ops/`, `Inbox/`, `Drafts/`, `Raw/`, `outputs/`, and `_config/`. The engine update flow never rewrites user data. Its only automatic config edits are narrow, documented, idempotent schema migrations: for example, appending newly supported source-stream rows as disabled while preserving existing rows and prose. `_config/overrides.md` and `_config/sources.md` take precedence over framework defaults when a skill or workflow needs local preferences.
 - **Framework files** live in `.claude/skills/`, `_schemas/`, `_templates/`, `_workflows/`, `Agents/Prompts/`, `scripts/`, `quartz/`, `AGENTS.md`, and `CLAUDE.md`. Treat them as engine-owned and read-only by default. If you edit them in place, that is a local fork: the next `/update` will detect it and ask/merge instead of silently overwriting it.
 
 Prefer putting standing local behavior in `_config/overrides.md` over editing framework files.
@@ -53,7 +53,7 @@ Prefer putting standing local behavior in `_config/overrides.md` over editing fr
 | `Agents/` | all agents | jobs, runs, prompts (paste-able), approvals |
 | `Drafts/` | executors, librarian, user | git-tracked staging area for finalize-later text drafts (LLM prose, code, reports). Text is committed; heavy binaries are gitignored. Promote finished drafts into typed `Atlas/` notes, then archive/delete the draft. |
 | `outputs/` | executors | generated **binary** artifacts (report PDFs, letterhead `.docx`, CV PDFs). Folder + `README.md` tracked; contents (`outputs/**`) gitignored — don't commit binaries. |
-| `_config/` | user (curated), setup wizard | instance config the skills read. `_config/sources.md` records which streams (`email`/`slack`/`calendar`) the default daily loop-closing flow checks + the git mode. `_config/overrides.md` records local behavior that takes precedence over framework defaults. |
+| `_config/` | user (curated), setup wizard | instance config the skills read. `_config/sources.md` records which streams (`email`/`slack`/`calendar`/`notion`/`jira`) the default daily loop-closing flow checks + the git mode. Missing Notion/Jira rows are appended disabled during a standard `memex-update`. `_config/overrides.md` records local behavior that takes precedence over framework defaults. |
 | `_schemas/` | engine-owned; user forks are surfaced by `/update` | governance rules; prefer local exceptions in `_config/overrides.md` |
 | `_templates/` | engine-owned; user forks are surfaced by `/update` | one per most types (a few — e.g. idea, letter, grant — are schema-only) |
 | `_workflows/` | engine-owned; user forks are surfaced by `/update` | step-by-step workflow prompts |
@@ -121,7 +121,7 @@ Given a raw source in `Raw/sources/`:
 
 ### Daily briefing — see [[_workflows/daily-briefing]]
 
-Generate `Ops/Briefings/<today>.md` per the briefing schema, including the People section and the tracker-digest section. By default the briefing first runs the **loop-closing pass** (Step 1b): `capture-comms` then `reconcile-from-comms` over the streams enabled in `_config/sources.md` (sent + received email/Slack, and calendar if enabled), so state that lagged reality is reconciled before synthesis. Tier-A reversible bookkeeping auto-applies; Tier-B task closes are confirmed in one batch and routed through `close-task` (agents never self-close).
+Generate `Ops/Briefings/<today>.md` per the briefing schema, including the People section and the tracker-digest section. By default the briefing first runs the **loop-closing pass** (Step 1b): `capture-comms` then `reconcile-from-comms` over the capture streams enabled in `_config/sources.md` (sent + received email/Slack plus Notion comments/edits and Jira assignments/comments/transitions, and calendar if enabled), so state that lagged reality is reconciled before synthesis. Every external source read is read-only. Tier-A reversible bookkeeping auto-applies; Tier-B task closes are confirmed in one batch and routed through `close-task` (agents never self-close).
 
 ### Weekly review — see [[_workflows/weekly-review]]
 
@@ -187,7 +187,10 @@ So **before** a title becomes a filename or wikilink target, run `safe_title` an
 
 ## What you may not do
 
-- Send email, post to Slack, commit calendar events, make purchases, or call external services *unless* the active agent_job lists those tools in `allowed_tools:` and `human_approval_required: true` has been satisfied by an entry in `Agents/Approvals/`.
+- Send email, post to Slack, edit/comment in Notion, create/edit/transition/comment on Jira
+  issues, commit calendar events, make purchases, or perform other external writes *unless* the active
+  agent_job lists those tools in `allowed_tools:` and `human_approval_required: true` has been
+  satisfied by an entry in `Agents/Approvals/`.
 - Modify `Raw/` content.
 - Delete files. Use `_archive/` instead.
 - Quote `private` notes in `Drafts/` or `outputs/` artifacts that are intended to leave the vault.

@@ -108,3 +108,9 @@ generated `_config/sources.md` continues to advertise the streams.
 | `packs/core/skills/daily-briefing/SKILL.md` | `.claude/skills/daily-briefing/SKILL.md` | Include enabled Notion/Jira activity in the default loop-closing pass and source-neutral read-only guarantees. |
 | `packs/core/workflows/daily-briefing.md` | `_workflows/daily-briefing.md` | Describe Notion comments/edits and Jira assignments/comments/transitions as capture inputs. |
 | `packs/core/prompts/daily-briefing.md` | `Agents/Prompts/daily-briefing.md` | List Notion and Jira as first-class capture streams in the pasteable daily flow. |
+
+The hand-curated installed contracts (`hardened/contract/CLAUDE.base.md` and
+`hardened/contract/AGENTS.base.md`) document all five streams and their read-only guarantees.
+For existing vaults, `memex-update` preserves `_config/sources.md` and inserts only missing
+Notion/Jira rows as disabled; it records the migration in the update plan and archives the original
+under the run's undo directory before applying it.

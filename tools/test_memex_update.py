@@ -6,9 +6,11 @@ from unittest import mock
 from memex_bake import BakeResult, sha256_file
 from memex_update import (
     Disposition,
+    apply_safe_operations,
     classify_update,
     detect_renames,
     fill_new_answers,
+    migrate_sources_config_text,
     missing_required_tokens,
     plan_update_paths,
     unresolved_plan_entries,
@@ -213,6 +215,139 @@ class TestUpdateClassification(unittest.TestCase):
             self.assertIsNone(entries[0]["current_path"])
             self.assertIsNotNone(entries[0]["baseline_path"])
             self.assertIsNotNone(entries[0]["staged_path"])
+
+
+class TestSourcesConfigMigration(unittest.TestCase):
+    OLD_CONFIG = """---
+type: config
+scope: sources
+streams:
+  email: { enabled: true, mcp: custom_Mail }
+  slack: { enabled: false, mcp: custom_Slack }
+  calendar: { enabled: true, mcp: custom_Calendar, mode: minimal }
+custom_setting: keep-me
+---
+
+# User-edited sources prose
+"""
+    STAGED_CONFIG = """---
+type: config
+scope: sources
+streams:
+  email: { enabled: true, mcp: claude_ai_Gmail }
+  slack: { enabled: true, mcp: claude_ai_Slack }
+  calendar: { enabled: false, mcp: claude_ai_Google_Calendar, mode: minimal }
+  notion: { enabled: true, mcp: claude_ai_Notion }
+  jira: { enabled: false, mcp: claude_ai_Atlassian }
+---
+"""
+
+    def test_adds_only_missing_streams_as_disabled_and_is_idempotent(self):
+        migrated, added = migrate_sources_config_text(self.OLD_CONFIG, self.STAGED_CONFIG)
+        self.assertEqual(added, ["notion", "jira"])
+        self.assertIn("  email: { enabled: true, mcp: custom_Mail }", migrated)
+        self.assertIn("  calendar: { enabled: true, mcp: custom_Calendar, mode: minimal }", migrated)
+        self.assertIn("  notion: { enabled: false, mcp: claude_ai_Notion }", migrated)
+        self.assertIn("  jira: { enabled: false, mcp: claude_ai_Atlassian }", migrated)
+        self.assertLess(migrated.index("  jira:"), migrated.index("custom_setting:"))
+        self.assertTrue(migrated.endswith("# User-edited sources prose\n"))
+
+        second_pass, second_added = migrate_sources_config_text(migrated, self.STAGED_CONFIG)
+        self.assertEqual(second_pass, migrated)
+        self.assertEqual(second_added, [])
+
+    def test_declines_nonstandard_seed_instead_of_guessing(self):
+        current = "# Sources\n\nUser-owned prose without frontmatter.\n"
+        self.assertEqual(
+            migrate_sources_config_text(current, self.STAGED_CONFIG),
+            (current, []),
+        )
+
+    def test_classification_and_apply_preserve_original_in_undo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            baseline = root / "baseline"
+            vault = root / "vault"
+            staged = root / "staged"
+            work = root / "work"
+            rel = "_config/sources.md"
+            write(vault / rel, self.OLD_CONFIG)
+            (vault / rel).chmod(0o640)
+            write(staged / rel, self.STAGED_CONFIG)
+            source_map = BakeResult()
+            source_map.record(rel, None)
+            layout = {
+                "framework": {"prose": [], "code": []},
+                "hybrid": [],
+                "seed": [rel],
+                "data": [],
+            }
+
+            entries, unresolved, _meta = classify_update(
+                manifest={"files": {}},
+                layout=layout,
+                baseline_dir=baseline,
+                vault_dir=vault,
+                staged_dir=staged,
+                source_map=source_map,
+                work_dir=work,
+            )
+
+            self.assertEqual(unresolved, [])
+            self.assertEqual(len(entries), 1)
+            entry = entries[0]
+            self.assertEqual(entry["disposition"], Disposition.SEED_PRESENT)
+            self.assertEqual(entry["resolution"], "auto-migrated")
+            self.assertEqual(entry["added_streams"], ["notion", "jira"])
+
+            apply_safe_operations(
+                entries,
+                vault_dir=vault,
+                staged_dir=staged,
+                work_dir=work,
+                prune_removed=False,
+            )
+            self.assertTrue(entry["applied"])
+            self.assertEqual((work / "undo" / rel).read_text(), self.OLD_CONFIG)
+            installed = (vault / rel).read_text()
+            self.assertIn("notion: { enabled: false", installed)
+            self.assertIn("jira: { enabled: false", installed)
+            self.assertEqual((vault / rel).stat().st_mode & 0o777, 0o640)
+
+    def test_classification_never_follows_a_sources_config_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            outside = root / "outside.md"
+            vault = root / "vault"
+            staged = root / "staged"
+            rel = "_config/sources.md"
+            write(outside, self.OLD_CONFIG)
+            (vault / rel).parent.mkdir(parents=True)
+            (vault / rel).symlink_to(outside)
+            write(staged / rel, self.STAGED_CONFIG)
+            source_map = BakeResult()
+            source_map.record(rel, None)
+            layout = {
+                "framework": {"prose": [], "code": []},
+                "hybrid": [],
+                "seed": [rel],
+                "data": [],
+            }
+
+            entries, unresolved, _meta = classify_update(
+                manifest={"files": {}},
+                layout=layout,
+                baseline_dir=root / "baseline",
+                vault_dir=vault,
+                staged_dir=staged,
+                source_map=source_map,
+                work_dir=root / "work",
+            )
+
+            self.assertEqual(unresolved, [])
+            self.assertEqual(entries[0]["disposition"], Disposition.SEED_PRESENT)
+            self.assertNotIn("resolution", entries[0])
+            self.assertEqual(outside.read_text(), self.OLD_CONFIG)
 
 
 class TestDetectRenames(unittest.TestCase):

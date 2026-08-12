@@ -5,6 +5,8 @@ The updater deliberately has a deterministic core. It replaces only framework
 files that still match the recorded baseline, seeds absent seed files, prunes
 untouched files removed upstream, and writes a plan for anything requiring
 judgement: local edits, collisions, config/code choices, and likely renames.
+Present seeds stay user-owned except for explicit, idempotent schema migrations
+that preserve existing content and add only disabled/default-safe fields.
 """
 from __future__ import annotations
 
@@ -44,6 +46,8 @@ from memex_bake import (
 RENAME_SIMILARITY_THRESHOLD = 0.82
 ENGINE_FILE_CLASSES = {"framework", "hybrid"}
 DRIVE_RE = re.compile(r"^[A-Za-z]:")
+SOURCES_CONFIG_PATH = "_config/sources.md"
+SOURCES_CONFIG_ADDED_STREAMS = ("notion", "jira")
 
 
 def assert_safe_rel_path(rel: str, origin: str) -> None:
@@ -143,6 +147,94 @@ def parse_set_values(items: list[str] | None) -> dict[str, str]:
         key, value = item.split("=", 1)
         out[key.strip()] = value
     return out
+
+
+def _stream_block(text: str) -> tuple[list[str], int, int] | None:
+    """Return lines plus the [start, end) bounds of frontmatter `streams:` rows."""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return None
+    frontmatter_end = next(
+        (index for index in range(1, len(lines)) if lines[index].strip() == "---"),
+        None,
+    )
+    if frontmatter_end is None:
+        return None
+    streams_index = next(
+        (
+            index
+            for index in range(1, frontmatter_end)
+            if re.fullmatch(r"streams:\s*(?:#.*)?", lines[index].rstrip("\r\n"))
+        ),
+        None,
+    )
+    if streams_index is None:
+        return None
+
+    block_end = frontmatter_end
+    for index in range(streams_index + 1, frontmatter_end):
+        raw = lines[index].rstrip("\r\n")
+        if raw and not raw[0].isspace() and not raw.startswith("#"):
+            block_end = index
+            break
+    return lines, streams_index + 1, block_end
+
+
+def _stream_row(text: str, name: str) -> str | None:
+    block = _stream_block(text)
+    if block is None:
+        return None
+    lines, start, end = block
+    pattern = re.compile(rf"^[ \t]+{re.escape(name)}\s*:")
+    return next((lines[index] for index in range(start, end) if pattern.match(lines[index])), None)
+
+
+def migrate_sources_config_text(current: str, staged: str) -> tuple[str, list[str]]:
+    """Append newly supported streams as disabled without rewriting user config.
+
+    Existing rows, comments, frontmatter fields, prose, and newline style remain
+    byte-for-byte unchanged. If the seed no longer has a conventional frontmatter
+    `streams:` mapping, decline the migration rather than guessing where to write.
+    """
+    block = _stream_block(current)
+    if block is None:
+        return current, []
+    lines, start, end = block
+    present = {
+        name
+        for name in SOURCES_CONFIG_ADDED_STREAMS
+        if any(
+            re.match(rf"^[ \t]+{re.escape(name)}\s*:", lines[index])
+            for index in range(start, end)
+        )
+    }
+
+    rows: list[str] = []
+    added: list[str] = []
+    newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
+    for name in SOURCES_CONFIG_ADDED_STREAMS:
+        if name in present:
+            continue
+        staged_row = _stream_row(staged, name)
+        if staged_row is None:
+            continue
+        disabled_row, replacements = re.subn(
+            r"(\benabled:\s*)(?:true|false)\b",
+            r"\1false",
+            staged_row.rstrip("\r\n"),
+            count=1,
+        )
+        if replacements != 1:
+            continue
+        rows.append(disabled_row + newline)
+        added.append(name)
+
+    if not rows:
+        return current, []
+    if end > 0 and lines[end - 1] and not lines[end - 1].endswith(("\n", "\r")):
+        lines[end - 1] += newline
+    lines[end:end] = rows
+    return "".join(lines), added
 
 
 def prune_finished_work_dirs(vault_dir: pathlib.Path) -> None:
@@ -742,16 +834,41 @@ def classify_update(
         if meta.get("class") != "seed":
             continue
         disposition = Disposition.SEED_PRESENT if (vault_dir / rel).exists() else Disposition.SEED_IF_ABSENT
-        entries.append(
-            {
-                "disposition": disposition,
-                "path": rel,
-                "class": "seed",
-                "kind": meta.get("kind"),
-                "pack": meta.get("pack"),
-                "applied": False,
-            }
-        )
+        entry = {
+            "disposition": disposition,
+            "path": rel,
+            "class": "seed",
+            "kind": meta.get("kind"),
+            "pack": meta.get("pack"),
+            "applied": False,
+        }
+        if disposition == Disposition.SEED_PRESENT and rel == SOURCES_CONFIG_PATH:
+            current_path = vault_dir / rel
+            staged_path = staged_dir / rel
+            if current_path.is_symlink() or not current_path.is_file():
+                entries.append(entry)
+                continue  # Never follow a user-controlled config symlink.
+            try:
+                current_text = current_path.read_bytes().decode("utf-8")
+                staged_text = staged_path.read_bytes().decode("utf-8")
+            except (OSError, UnicodeDecodeError):
+                pass  # A nonstandard seed is user-owned; decline rather than rewrite it.
+            else:
+                migrated_text, added_streams = migrate_sources_config_text(current_text, staged_text)
+                if added_streams:
+                    migrated_path = work_dir / "migrated" / rel
+                    migrated_path.parent.mkdir(parents=True, exist_ok=True)
+                    migrated_path.write_bytes(migrated_text.encode("utf-8"))
+                    shutil.copymode(current_path, migrated_path)
+                    entry.update(
+                        {
+                            "resolution": "auto-migrated",
+                            "migration": "add-disabled-source-streams",
+                            "added_streams": added_streams,
+                            "migrated_path": migrated_path.as_posix(),
+                        }
+                    )
+        entries.append(entry)
 
     return entries, unresolved, staged_meta
 
@@ -827,6 +944,19 @@ def apply_safe_operations(
             entry["applied"] = True
         elif disposition == Disposition.NEW:
             copy_file(staged_dir / rel, vault_dir / rel)
+            entry["applied"] = True
+        elif (
+            disposition == Disposition.SEED_PRESENT
+            and entry.get("resolution") == "auto-migrated"
+            and entry.get("migrated_path")
+        ):
+            # This migration only inserts missing, disabled stream rows. Preserve
+            # the complete original for non-git recovery before changing the seed.
+            target = vault_dir / rel
+            if target.is_symlink() or not target.is_file():
+                raise RuntimeError(f"refusing to migrate non-regular seed: {rel}")
+            copy_file(target, work_dir / "undo" / rel)
+            copy_file(pathlib.Path(entry["migrated_path"]), vault_dir / rel)
             entry["applied"] = True
         elif disposition == Disposition.SEED_IF_ABSENT:
             if not (vault_dir / rel).exists():
