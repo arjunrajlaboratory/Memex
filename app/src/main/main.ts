@@ -17,6 +17,7 @@ import { localDatePlusDays, localDateString } from './date';
 import { copyPathsIntoInbox, writeInboxNote } from './inbox';
 import { invalidateSearchIndex, searchVault } from './search';
 import { clearVaultToolGrants, grantTool, hasToolGrant, type ToolGrantState } from './grants';
+import { setVaultModel, vaultModel, type ModelPreferenceState } from './model-preferences';
 import { isSafeExternalUrl, isTrustedFileUrl, resolveInside, resolvedStaysInside } from './security';
 import { hardenMarkdownRenderer, wikilinkMarkdown } from './markdown';
 import { externalNavigationPolicy, installDenyByDefaultPermissions } from './web-policy';
@@ -52,7 +53,7 @@ if (!process.env.MEMEX_ENGINE_DIR) process.env.MEMEX_ENGINE_DIR = ENGINE_ROOT;
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 const LEGAL_DIR = path.join(__dirname, '..', 'legal');
 
-interface PersistedConfig extends ToolGrantState { recent?: string[]; last?: string; terms?: TermsAcceptance; }
+interface PersistedConfig extends ToolGrantState, ModelPreferenceState { recent?: string[]; last?: string; terms?: TermsAcceptance; }
 
 // Node's fs does not expand a leading ~, but the user's placeholder path is ~/…,
 // so expand it wherever a user-supplied path enters the main process.
@@ -809,6 +810,10 @@ async function startSession(vault: string): Promise<void> {
     requestPermission: (request) => requestAgentPermission(vault, nextSession, request),
     openInClaudeCode: (dirPath: string) => launchClaudeCode(dirPath, vault),
     claudeExecutable: bundledClaudeExecutable(),
+    // Like tool grants, the choice lives in the app's own config keyed by vault
+    // path — not in the agent-writable vault — and defaults to inheriting
+    // whatever the user's Claude Code configuration says.
+    model: vaultModel(loadConfig(), vault) ?? undefined,
   });
   session = nextSession;
   try {
@@ -1135,6 +1140,27 @@ function registerIpc(): void {
   handle('agent:interrupt', async () => {
     if (!activeVaultPath()) return { ok: false };
     if (session) await session.interrupt();
+    return { ok: true };
+  });
+
+  handle('agent:models', async (): Promise<ModelState> => {
+    const vault = activeVaultPath();
+    if (!vault || !session || !session.running) return { models: [], selected: null };
+    let models: ModelOption[] = [];
+    try { models = await session.supportedModels(); } catch (_) {}
+    return { models, selected: vaultModel(loadConfig(), vault) };
+  });
+
+  handle('agent:setModel', async (_e, model: string | null): Promise<SendResult> => {
+    const vault = activeVaultPath();
+    if (!vault) return { ok: false, error: 'Vault is switching' };
+    if (!session || !session.running) return { ok: false, error: 'No active session' };
+    const normalized = typeof model === 'string' && model.trim() ? model.trim() : null;
+    try { await session.setModel(normalized ?? undefined); }
+    catch (e) { return { ok: false, error: String((e as Error)?.message || e) }; }
+    // Persist only after the live switch succeeded, so the stored preference
+    // never names a model the CLI refused.
+    saveConfig(setVaultModel(loadConfig(), vault, normalized));
     return { ok: true };
   });
 

@@ -217,6 +217,7 @@ async function openVault(p: string): Promise<void> {
       const errors = deferredAgentErrors;
       deferredAgentErrors = [];
       for (const message of errors) flashChat('⚠ ' + message);
+      if (committed) void refreshModelPicker();
       const iconDrops = deferredIconDrops;
       deferredIconDrops = [];
       for (const drop of iconDrops) reportIconDrop(drop.copied, drop.error);
@@ -514,6 +515,12 @@ function resetVaultScopedUi(): void {
   resetVaultUiModel(state);
   closeTabSettings();
   clearThinking();
+  // Invalidate any in-flight picker populate from the previous vault; the new
+  // session's init event (or openVault's re-sync) rebuilds it.
+  modelPickerToken++;
+  sessionModel = '';
+  modelTag.style.display = 'none';
+  modelTag.textContent = '';
   currentArtifact = null;
   liveQuickNote = null;
   document.querySelectorAll('.tab[data-custom="1"], .chip[data-custom="1"]').forEach((element) => element.remove());
@@ -638,6 +645,45 @@ function setBusy(b: boolean): void {
   $('statusLine').textContent = b ? 'Thinking…' : 'Ready';
 }
 
+// ---------------- model picker ----------------
+// The titlebar tag doubles as a dropdown: the "default" entry inherits whatever
+// the user's Claude Code configuration says (the pre-picker behaviour), and an
+// explicit choice is applied live and persisted per vault by the main process.
+const modelTag = $('modelTag') as HTMLSelectElement;
+let sessionModel = '';           // model reported by the session init event
+let modelPickerToken = 0;        // ignore stale populates across vault switches
+
+async function refreshModelPicker(): Promise<void> {
+  const token = ++modelPickerToken;
+  const state = await M.agentModels().catch((): ModelState => ({ models: [], selected: null }));
+  if (token !== modelPickerToken) return;
+  if (!state.models.length && !sessionModel) { modelTag.style.display = 'none'; return; }
+  modelTag.textContent = '';
+  const shortName = sessionModel.replace('claude-', '');
+  // With no override active, the session runs on the inherited model — name it.
+  const defaultLabel = !state.selected && shortName ? `default (${shortName})` : 'default';
+  modelTag.appendChild(new Option(defaultLabel, ''));
+  // The CLI lists its own "default" row; our inherit option already covers it.
+  for (const m of state.models.filter((m) => m.value !== 'default')) {
+    const opt = new Option(m.label, m.value);
+    if (m.description) opt.title = m.description;
+    modelTag.appendChild(opt);
+  }
+  // A persisted value the CLI no longer lists must still round-trip visibly.
+  if (state.selected && !state.models.some((m) => m.value === state.selected)) {
+    modelTag.appendChild(new Option(state.selected, state.selected));
+  }
+  modelTag.value = state.selected || '';
+  modelTag.style.display = '';
+}
+
+modelTag.onchange = async () => {
+  const r = await M.setAgentModel(modelTag.value || null).catch(() => ({ ok: false, error: 'Could not switch models' }));
+  if (!r.ok) flashChat('⚠ ' + (r.error || 'Could not switch models'));
+  // Re-sync either way: on failure this reverts the visible selection.
+  void refreshModelPicker();
+};
+
 // A dim, single-line trace of the model's extended thinking so long thinking
 // stretches aren't a silent "Thinking…" with no sign of life.
 let thinkingBuf = '';
@@ -659,7 +705,9 @@ M.onAgentEvent((evt) => {
     return;
   }
   switch (evt.kind) {
-    case 'session': $('modelTag').textContent = evt.model ? evt.model.replace('claude-', '') : ''; break;
+    // While a vault open is in flight the main process reports no active vault,
+    // so hold the refresh; openVault re-syncs the picker once the open commits.
+    case 'session': sessionModel = evt.model || ''; if (!vaultOpening) void refreshModelPicker(); break;
     case 'turn_start': setBusy(true); break;
     case 'thinking_delta': onThinkingDelta(evt.text); break;
     case 'assistant_delta': clearThinking(); onAssistantDelta(evt.text); break;

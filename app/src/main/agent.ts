@@ -5,7 +5,7 @@
 // The SDK is ESM-only, so its VALUES are loaded with a dynamic import() (preserved
 // by module:node16); its TYPES are erased at compile time, so importing them
 // statically is safe and keeps this file honest against SDK upgrades.
-import type { Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk' with { 'resolution-mode': 'import' };
+import type { ModelInfo, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk' with { 'resolution-mode': 'import' };
 
 type QueueResult = IteratorResult<SDKUserMessage, undefined>;
 
@@ -63,6 +63,7 @@ export class AgentSession {
   private requestPermission: (request: AgentPermissionRequest) => Promise<boolean>;
   private openInClaudeCode: (dirPath: string) => Promise<{ ok: boolean; message: string }>;
   private claudeExecutable: string | undefined;
+  private model: string | undefined;
   private queue = new MessageQueue();
   private query: Query | null = null;
   running = false;
@@ -74,6 +75,7 @@ export class AgentSession {
     requestPermission,
     openInClaudeCode,
     claudeExecutable,
+    model,
   }: {
     cwd: string;
     onEvent: (evt: AgentEvent) => void;
@@ -82,6 +84,10 @@ export class AgentSession {
     // Absolute path to the bundled `claude` binary. The host supplies this in
     // packaged builds, where the SDK's own resolution points into app.asar.
     claudeExecutable?: string;
+    // Model alias or id to run on. Omitted = whatever the SDK inherits from the
+    // user's Claude Code configuration, which was the only behaviour before the
+    // in-app picker existed.
+    model?: string;
   }) {
     this.cwd = cwd;
     this.onEvent = onEvent || (() => {});
@@ -90,6 +96,7 @@ export class AgentSession {
     // Fail closed if a host does not supply a launcher.
     this.openInClaudeCode = openInClaudeCode || (async () => ({ ok: false, message: 'Claude Code hand-off is not available in this host.' }));
     this.claudeExecutable = claudeExecutable;
+    this.model = model;
   }
 
   async start(): Promise<void> {
@@ -133,6 +140,7 @@ export class AgentSession {
       options: {
         cwd: this.cwd,
         ...(this.claudeExecutable ? { pathToClaudeCodeExecutable: this.claudeExecutable } : {}),
+        ...(this.model ? { model: this.model } : {}),
         settingSources: ['user', 'project'],
         systemPrompt: { type: 'preset', preset: 'claude_code', append: APPEND_PROMPT },
         permissionMode: 'acceptEdits',
@@ -182,7 +190,10 @@ export class AgentSession {
     switch (msg.type) {
       case 'system':
         if (msg.subtype === 'init') {
-          this.onEvent({ kind: 'session', sessionId: msg.session_id, tools: msg.tools, model: msg.model });
+          // When a model override is active, init reports the override — not the
+          // configuration default the picker's "default" entry falls back to —
+          // so only pass the model on as the inherited one when nothing was set.
+          this.onEvent({ kind: 'session', sessionId: msg.session_id, tools: msg.tools, model: this.model ? undefined : msg.model });
         }
         break;
 
@@ -253,6 +264,24 @@ export class AgentSession {
     this.onEvent({ kind: 'turn_start' });
     this.queue.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
     return true;
+  }
+
+  /** Switch the model for subsequent turns; undefined returns to the inherited default. */
+  async setModel(model?: string): Promise<void> {
+    if (!this.query || !this.running) throw new Error('No active session');
+    await this.query.setModel(model);
+    this.model = model;
+  }
+
+  /** The models the underlying CLI reports as selectable, mapped for the renderer. */
+  async supportedModels(): Promise<ModelOption[]> {
+    if (!this.query || !this.running) return [];
+    const models: ModelInfo[] = await this.query.supportedModels();
+    return models.map((m) => ({
+      value: m.value,
+      label: m.displayName || m.value,
+      description: m.description || undefined,
+    }));
   }
 
   async interrupt(): Promise<void> {

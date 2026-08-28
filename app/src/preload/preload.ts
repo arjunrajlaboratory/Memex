@@ -42,6 +42,8 @@ const api: MemexApi = {
   // agent chat
   sendMessage: (text) => invoke('agent:send', text),
   interrupt: () => invoke('agent:interrupt'),
+  agentModels: () => invoke('agent:models'),
+  setAgentModel: (model) => invoke('agent:setModel', model),
 
   // inbox / outbox
   addInboxNote: (text) => invoke('inbox:addNote', text),
