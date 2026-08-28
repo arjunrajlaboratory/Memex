@@ -671,7 +671,11 @@ async function refreshModelPicker(): Promise<void> {
   const inheritedName = state.inherited ? state.inherited.replace('claude-', '') : '';
   modelTag.appendChild(new Option(inheritedName ? `default (${inheritedName})` : 'default', ''));
   // The CLI lists its own "default" row; our inherit option already covers it.
-  for (const m of state.models.filter((m) => m.value !== 'default')) {
+  // Rows are filtered once and reused for the selection lookup below — resolving
+  // against the unfiltered list could match the omitted "default" row (its
+  // resolvedModel names a real model) and select a value the <select> lacks.
+  const rows = state.models.filter((m) => m.value !== 'default');
+  for (const m of rows) {
     const opt = new Option(m.label, m.value);
     if (m.description) opt.title = m.description;
     modelTag.appendChild(opt);
@@ -680,7 +684,7 @@ async function refreshModelPicker(): Promise<void> {
   if (state.selected) {
     // A persisted explicit id (e.g. "claude-sonnet-5") may be covered by an
     // alias row ("sonnet") — resolvedModel is the SDK's bridge between the two.
-    const row = state.models.find((m) => m.value === state.selected || m.resolvedModel === state.selected);
+    const row = rows.find((m) => m.value === state.selected || m.resolvedModel === state.selected);
     if (row) selectedValue = row.value;
     else {
       // A persisted value the CLI no longer lists must still round-trip visibly.
