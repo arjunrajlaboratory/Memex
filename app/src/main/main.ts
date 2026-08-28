@@ -138,6 +138,13 @@ function loadConfig(): PersistedConfig {
 function saveConfig(cfg: PersistedConfig): void {
   try { fs.mkdirSync(path.dirname(CONFIG_PATH()), { recursive: true }); fs.writeFileSync(CONFIG_PATH(), JSON.stringify(cfg, null, 2)); } catch (_) {}
 }
+// saveConfig swallows write errors (see the legal:accept note), so persistence
+// is verified by re-reading from disk — the same question a restart will ask.
+function persistVaultModel(vault: string, model: string | null): boolean {
+  saveConfig(setVaultModel(loadConfig(), vault, model));
+  return vaultModel(loadConfig(), vault) === model;
+}
+
 function rememberVault(p: string): void {
   const cfg = loadConfig();
   cfg.recent = [p, ...(cfg.recent || []).filter((x) => x !== p)].slice(0, 8);
@@ -1159,10 +1166,18 @@ function registerIpc(): void {
     const selected = vaultModel(loadConfig(), vault);
     const inherited = session ? session.inheritedModel : null;
     if (!session || !session.running) return { models: [], selected, inherited };
-    if (!sessionModelsCache || !sessionModelsCache.length) {
-      try { sessionModelsCache = await session.supportedModels(); } catch (_) {}
+    let models = sessionModelsCache || [];
+    if (!models.length) {
+      const queried = session;
+      try {
+        models = await queried.supportedModels();
+        // A vault switch can replace the session while this awaits; a stale
+        // list must not be committed as the new session's cache. (The stale
+        // response itself is discarded by the renderer's refresh token.)
+        if (session === queried) sessionModelsCache = models;
+      } catch (_) { models = []; }
     }
-    return { models: sessionModelsCache || [], selected, inherited };
+    return { models, selected, inherited };
   });
 
   handle('agent:setModel', (_e, model: string | null, expectedVault: string): Promise<SendResult> => modelSwitchQueue.run(async (): Promise<SendResult> => {
@@ -1176,19 +1191,25 @@ function registerIpc(): void {
       // No live session to switch — most likely a persisted model the CLI
       // refused at startup. Persist the new choice and restart on it, so the
       // picker is the recovery path rather than hand-editing config.json.
-      saveConfig(setVaultModel(loadConfig(), vault, normalized));
+      if (!persistVaultModel(vault, normalized)) return { ok: false, error: 'The model choice could not be saved.' };
+      // Take the transition gate so this restart and a concurrent vault:open
+      // can't interleave their session swaps.
+      if (!vaultTransition.begin()) return { ok: false, error: 'Vault is switching' };
       try { await startSession(vault); }
       catch (e) { return { ok: false, error: 'Saved, but the session could not restart: ' + String((e as Error)?.message || e) }; }
+      finally { vaultTransition.finish(); }
       return { ok: true };
     }
     try { await session.setModel(normalized ?? undefined); }
     catch (e) { return { ok: false, error: String((e as Error)?.message || e) }; }
-    // Persist only after the live switch succeeded, so the stored preference
-    // never names a model the CLI refused.
-    saveConfig(setVaultModel(loadConfig(), vault, normalized));
     // The CLI's list includes the session's configured custom model (when one is
     // set), so a switch can change it — refetch on the next refresh.
     sessionModelsCache = null;
+    // Persist only after the live switch succeeded, so the stored preference
+    // never names a model the CLI refused.
+    if (!persistVaultModel(vault, normalized)) {
+      return { ok: false, error: 'The model switched for this session, but the choice could not be saved and will be lost on restart.' };
+    }
     return { ok: true };
   }));
 
