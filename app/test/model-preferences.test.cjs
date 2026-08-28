@@ -32,3 +32,7 @@ test('malformed or blank stored values read as no preference', () => {
   assert.equal(vaultModel({ modelByVault: { '/vaults/a': '  ' } }, '/vaults/a'), null);
   assert.equal(vaultModel({ modelByVault: { '/vaults/a': 42 } }, '/vaults/a'), null);
 });
+
+test('a whitespace-padded stored value reads back trimmed', () => {
+  assert.equal(vaultModel({ modelByVault: { '/vaults/a': ' opus ' } }, '/vaults/a'), 'opus');
+});

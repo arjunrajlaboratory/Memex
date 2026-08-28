@@ -11,7 +11,9 @@ function modelsByVault(state: ModelPreferenceState): Record<string, string> {
 /** The model chosen for one vault, or null to inherit the SDK's own default. */
 export function vaultModel(state: ModelPreferenceState, vault: string): string | null {
   const model = modelsByVault(state)[vault];
-  return typeof model === 'string' && model.trim() ? model : null;
+  // Return the trimmed form: a hand-edited padded value must not reach the SDK.
+  const trimmed = typeof model === 'string' ? model.trim() : '';
+  return trimmed || null;
 }
 
 /** Return a new config with the vault's model set, or cleared with model=null. */

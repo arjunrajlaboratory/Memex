@@ -176,6 +176,10 @@ async function openVault(p: string): Promise<void> {
   vaultOpening = true;
   $('workspace').inert = true;
   $('onboard').inert = true;
+  // The picker lives in the titlebar, outside the inert-ed regions — disarm it
+  // for the whole switch so a click can't write the old vault's choice onto the
+  // new one (the main process also rejects a vault mismatch).
+  modelTag.disabled = true;
   try {
     const res = await M.openVault(p);
     if (request !== vaultOpenEpochs.request) return;
@@ -217,7 +221,9 @@ async function openVault(p: string): Promise<void> {
       const errors = deferredAgentErrors;
       deferredAgentErrors = [];
       for (const message of errors) flashChat('⚠ ' + message);
-      if (committed) void refreshModelPicker();
+      // Re-sync (and re-arm) the picker: for the newly committed vault, or for
+      // the still-open previous vault when the switch failed.
+      if (committed || state.vault) void refreshModelPicker();
       const iconDrops = deferredIconDrops;
       deferredIconDrops = [];
       for (const drop of iconDrops) reportIconDrop(drop.copied, drop.error);
@@ -518,7 +524,6 @@ function resetVaultScopedUi(): void {
   // Invalidate any in-flight picker populate from the previous vault; the new
   // session's init event (or openVault's re-sync) rebuilds it.
   modelPickerToken++;
-  sessionModel = '';
   modelTag.style.display = 'none';
   modelTag.textContent = '';
   currentArtifact = null;
@@ -649,38 +654,55 @@ function setBusy(b: boolean): void {
 // The titlebar tag doubles as a dropdown: the "default" entry inherits whatever
 // the user's Claude Code configuration says (the pre-picker behaviour), and an
 // explicit choice is applied live and persisted per vault by the main process.
+// All model facts (list, selection, inherited name) come from the main process
+// on every refresh — nothing session-scoped is cached on this side, so vault
+// resets and event ordering can't lose state.
 const modelTag = $('modelTag') as HTMLSelectElement;
-let sessionModel = '';           // model reported by the session init event
 let modelPickerToken = 0;        // ignore stale populates across vault switches
 
 async function refreshModelPicker(): Promise<void> {
   const token = ++modelPickerToken;
-  const state = await M.agentModels().catch((): ModelState => ({ models: [], selected: null }));
+  const state = await M.agentModels().catch((): ModelState => ({ models: [], selected: null, inherited: null }));
   if (token !== modelPickerToken) return;
-  if (!state.models.length && !sessionModel) { modelTag.style.display = 'none'; return; }
+  // An active override warrants the picker even when model discovery failed —
+  // it is the only way to see and clear that override.
+  if (!state.models.length && !state.selected && !state.inherited) { modelTag.style.display = 'none'; return; }
   modelTag.textContent = '';
-  const shortName = sessionModel.replace('claude-', '');
-  // With no override active, the session runs on the inherited model — name it.
-  const defaultLabel = !state.selected && shortName ? `default (${shortName})` : 'default';
-  modelTag.appendChild(new Option(defaultLabel, ''));
+  const inheritedName = state.inherited ? state.inherited.replace('claude-', '') : '';
+  modelTag.appendChild(new Option(inheritedName ? `default (${inheritedName})` : 'default', ''));
   // The CLI lists its own "default" row; our inherit option already covers it.
   for (const m of state.models.filter((m) => m.value !== 'default')) {
     const opt = new Option(m.label, m.value);
     if (m.description) opt.title = m.description;
     modelTag.appendChild(opt);
   }
-  // A persisted value the CLI no longer lists must still round-trip visibly.
-  if (state.selected && !state.models.some((m) => m.value === state.selected)) {
-    modelTag.appendChild(new Option(state.selected, state.selected));
+  let selectedValue = '';
+  if (state.selected) {
+    // A persisted explicit id (e.g. "claude-sonnet-5") may be covered by an
+    // alias row ("sonnet") — resolvedModel is the SDK's bridge between the two.
+    const row = state.models.find((m) => m.value === state.selected || m.resolvedModel === state.selected);
+    if (row) selectedValue = row.value;
+    else {
+      // A persisted value the CLI no longer lists must still round-trip visibly.
+      modelTag.appendChild(new Option(state.selected, state.selected));
+      selectedValue = state.selected;
+    }
   }
-  modelTag.value = state.selected || '';
+  modelTag.value = selectedValue;
+  modelTag.disabled = false;
   modelTag.style.display = '';
 }
 
 modelTag.onchange = async () => {
-  const r = await M.setAgentModel(modelTag.value || null).catch(() => ({ ok: false, error: 'Could not switch models' }));
+  const vault = state.vault?.path;
+  if (vaultOpening || !vault) { void refreshModelPicker(); return; }
+  // One switch at a time: the main process serializes too, but an inert control
+  // is the honest UI while the previous choice is still applying.
+  modelTag.disabled = true;
+  const r = await M.setAgentModel(modelTag.value || null, vault).catch((): SendResult => ({ ok: false, error: 'Could not switch models' }));
   if (!r.ok) flashChat('⚠ ' + (r.error || 'Could not switch models'));
-  // Re-sync either way: on failure this reverts the visible selection.
+  // Re-sync either way (it also re-enables): on failure this reverts the
+  // visible selection.
   void refreshModelPicker();
 };
 
@@ -706,8 +728,9 @@ M.onAgentEvent((evt) => {
   }
   switch (evt.kind) {
     // While a vault open is in flight the main process reports no active vault,
-    // so hold the refresh; openVault re-syncs the picker once the open commits.
-    case 'session': sessionModel = evt.model || ''; if (!vaultOpening) void refreshModelPicker(); break;
+    // so hold the refresh; openVault re-syncs the picker once the open commits
+    // (the inherited model lives in the main process, so nothing is lost).
+    case 'session': if (!vaultOpening) void refreshModelPicker(); break;
     case 'turn_start': setBusy(true); break;
     case 'thinking_delta': onThinkingDelta(evt.text); break;
     case 'assistant_delta': clearThinking(); onAssistantDelta(evt.text); break;

@@ -43,7 +43,7 @@ const api: MemexApi = {
   sendMessage: (text) => invoke('agent:send', text),
   interrupt: () => invoke('agent:interrupt'),
   agentModels: () => invoke('agent:models'),
-  setAgentModel: (model) => invoke('agent:setModel', model),
+  setAgentModel: (model, vault) => invoke('agent:setModel', model, vault),
 
   // inbox / outbox
   addInboxNote: (text) => invoke('inbox:addNote', text),

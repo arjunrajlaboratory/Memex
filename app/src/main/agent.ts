@@ -64,6 +64,10 @@ export class AgentSession {
   private openInClaudeCode: (dirPath: string) => Promise<{ ok: boolean; message: string }>;
   private claudeExecutable: string | undefined;
   private model: string | undefined;
+  // The model the CLI reports running when NO override is active — i.e. the one
+  // the user's Claude Code configuration supplies. Owned here (not cached in the
+  // renderer) so vault-open resets and event ordering can't lose it.
+  inheritedModel: string | null = null;
   private queue = new MessageQueue();
   private query: Query | null = null;
   running = false;
@@ -190,10 +194,11 @@ export class AgentSession {
     switch (msg.type) {
       case 'system':
         if (msg.subtype === 'init') {
-          // When a model override is active, init reports the override — not the
-          // configuration default the picker's "default" entry falls back to —
-          // so only pass the model on as the inherited one when nothing was set.
-          this.onEvent({ kind: 'session', sessionId: msg.session_id, tools: msg.tools, model: this.model ? undefined : msg.model });
+          // init reports whatever the session runs on. Only when no override is
+          // active does that name the configuration default the picker's
+          // "default" entry falls back to.
+          if (!this.model && msg.model) this.inheritedModel = msg.model;
+          this.onEvent({ kind: 'session', sessionId: msg.session_id, tools: msg.tools, model: msg.model });
         }
         break;
 
@@ -279,6 +284,9 @@ export class AgentSession {
     const models: ModelInfo[] = await this.query.supportedModels();
     return models.map((m) => ({
       value: m.value,
+      // The canonical wire id an alias row resolves to — kept so a persisted
+      // explicit id still matches the alias row that covers it (per the SDK docs).
+      resolvedModel: m.resolvedModel || undefined,
       label: m.displayName || m.value,
       description: m.description || undefined,
     }));

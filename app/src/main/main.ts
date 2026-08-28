@@ -68,6 +68,12 @@ let win: BrowserWindow | null = null;
 let currentVault: string | null = null;
 const vaultTransition = new VaultTransitionGate();
 let session: AgentSession | null = null;
+// The CLI's model list is static for a session's lifetime; cache it so the
+// renderer's refreshes don't repeat the control round-trip.
+let sessionModelsCache: ModelOption[] | null = null;
+// Model switches mutate the live session, this.model, and the persisted config
+// together; run them one at a time so a rapid flip can't interleave those writes.
+const modelSwitchQueue = new SerialQueue();
 let watchers: fs.FSWatcher[] = [];
 let watcherRestartTimer: ReturnType<typeof setTimeout> | null = null;
 let shuttingDown = false;
@@ -785,6 +791,7 @@ function bundledClaudeExecutable(): string | undefined {
 
 async function startSession(vault: string): Promise<void> {
   if (session) { try { await session.stop(); } catch (_) {} session = null; }
+  sessionModelsCache = null;
   let nextSession: AgentSession;
   const isCurrent = () => session === nextSession && currentVault === vault;
   const handleEvent = async (evt: AgentEvent): Promise<void> => {
@@ -1145,24 +1152,45 @@ function registerIpc(): void {
 
   handle('agent:models', async (): Promise<ModelState> => {
     const vault = activeVaultPath();
-    if (!vault || !session || !session.running) return { models: [], selected: null };
-    let models: ModelOption[] = [];
-    try { models = await session.supportedModels(); } catch (_) {}
-    return { models, selected: vaultModel(loadConfig(), vault) };
+    if (!vault) return { models: [], selected: null, inherited: null };
+    // Selected and inherited are reported even when the session is down (e.g. a
+    // persisted model the CLI refused killed it) — the picker must stay visible
+    // so the user can change the preference and recover.
+    const selected = vaultModel(loadConfig(), vault);
+    const inherited = session ? session.inheritedModel : null;
+    if (!session || !session.running) return { models: [], selected, inherited };
+    if (!sessionModelsCache || !sessionModelsCache.length) {
+      try { sessionModelsCache = await session.supportedModels(); } catch (_) {}
+    }
+    return { models: sessionModelsCache || [], selected, inherited };
   });
 
-  handle('agent:setModel', async (_e, model: string | null): Promise<SendResult> => {
+  handle('agent:setModel', (_e, model: string | null, expectedVault: string): Promise<SendResult> => modelSwitchQueue.run(async (): Promise<SendResult> => {
     const vault = activeVaultPath();
     if (!vault) return { ok: false, error: 'Vault is switching' };
-    if (!session || !session.running) return { ok: false, error: 'No active session' };
+    // The renderer names the vault it was showing; a change event that raced a
+    // vault switch must not write another vault's preference.
+    if (expectedVault && expectedVault !== vault) return { ok: false, error: 'Vault changed before the model switch applied' };
     const normalized = typeof model === 'string' && model.trim() ? model.trim() : null;
+    if (!session || !session.running) {
+      // No live session to switch — most likely a persisted model the CLI
+      // refused at startup. Persist the new choice and restart on it, so the
+      // picker is the recovery path rather than hand-editing config.json.
+      saveConfig(setVaultModel(loadConfig(), vault, normalized));
+      try { await startSession(vault); }
+      catch (e) { return { ok: false, error: 'Saved, but the session could not restart: ' + String((e as Error)?.message || e) }; }
+      return { ok: true };
+    }
     try { await session.setModel(normalized ?? undefined); }
     catch (e) { return { ok: false, error: String((e as Error)?.message || e) }; }
     // Persist only after the live switch succeeded, so the stored preference
     // never names a model the CLI refused.
     saveConfig(setVaultModel(loadConfig(), vault, normalized));
+    // The CLI's list includes the session's configured custom model (when one is
+    // set), so a switch can change it — refetch on the next refresh.
+    sessionModelsCache = null;
     return { ok: true };
-  });
+  }));
 
   handle('inbox:addNote', async (_e, text: string) => {
     const vault = activeVaultPath();

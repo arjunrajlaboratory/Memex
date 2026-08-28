@@ -130,6 +130,7 @@ body {
   text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
 }
 .model-tag:hover, .model-tag:focus-visible { background: var(--panel); color: var(--ink); border-color: var(--line); outline: none; }
+.model-tag:disabled { opacity: .45; cursor: default; }
 .model-tag option { font-family: var(--font-mono); background: var(--panel); color: var(--ink); }
 .icon-btn {
   background: transparent; border: 1px solid transparent; border-radius: 8px;
