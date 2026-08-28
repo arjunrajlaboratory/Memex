@@ -121,7 +121,17 @@ body {
 .chev { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; }
 
 .tb-right { display: flex; align-items: center; gap: 10px; }
-.model-tag { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); letter-spacing: .02em; }
+/* A <select> dressed as the quiet titlebar tag it replaced; native dropdown UI. */
+.model-tag {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); letter-spacing: .02em;
+  appearance: none; -webkit-appearance: none;
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  padding: 4px 8px; cursor: pointer; max-width: 160px;
+  text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+}
+.model-tag:hover, .model-tag:focus-visible { background: var(--panel); color: var(--ink); border-color: var(--line); outline: none; }
+.model-tag:disabled { opacity: .45; cursor: default; }
+.model-tag option { font-family: var(--font-mono); background: var(--panel); color: var(--ink); }
 .icon-btn {
   background: transparent; border: 1px solid transparent; border-radius: 8px;
   width: 30px; height: 30px; display: grid; place-items: center; cursor: pointer; color: var(--ink-dim);

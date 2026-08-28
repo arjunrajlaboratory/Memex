@@ -17,6 +17,7 @@ import { localDatePlusDays, localDateString } from './date';
 import { copyPathsIntoInbox, writeInboxNote } from './inbox';
 import { invalidateSearchIndex, searchVault } from './search';
 import { clearVaultToolGrants, grantTool, hasToolGrant, type ToolGrantState } from './grants';
+import { setVaultModel, vaultModel, type ModelPreferenceState } from './model-preferences';
 import { isSafeExternalUrl, isTrustedFileUrl, resolveInside, resolvedStaysInside } from './security';
 import { hardenMarkdownRenderer, wikilinkMarkdown } from './markdown';
 import { externalNavigationPolicy, installDenyByDefaultPermissions } from './web-policy';
@@ -52,7 +53,7 @@ if (!process.env.MEMEX_ENGINE_DIR) process.env.MEMEX_ENGINE_DIR = ENGINE_ROOT;
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 const LEGAL_DIR = path.join(__dirname, '..', 'legal');
 
-interface PersistedConfig extends ToolGrantState { recent?: string[]; last?: string; terms?: TermsAcceptance; }
+interface PersistedConfig extends ToolGrantState, ModelPreferenceState { recent?: string[]; last?: string; terms?: TermsAcceptance; }
 
 // Node's fs does not expand a leading ~, but the user's placeholder path is ~/…,
 // so expand it wherever a user-supplied path enters the main process.
@@ -67,6 +68,12 @@ let win: BrowserWindow | null = null;
 let currentVault: string | null = null;
 const vaultTransition = new VaultTransitionGate();
 let session: AgentSession | null = null;
+// The CLI's model list is static for a session's lifetime; cache it so the
+// renderer's refreshes don't repeat the control round-trip.
+let sessionModelsCache: ModelOption[] | null = null;
+// Model switches mutate the live session, this.model, and the persisted config
+// together; run them one at a time so a rapid flip can't interleave those writes.
+const modelSwitchQueue = new SerialQueue();
 let watchers: fs.FSWatcher[] = [];
 let watcherRestartTimer: ReturnType<typeof setTimeout> | null = null;
 let shuttingDown = false;
@@ -131,6 +138,13 @@ function loadConfig(): PersistedConfig {
 function saveConfig(cfg: PersistedConfig): void {
   try { fs.mkdirSync(path.dirname(CONFIG_PATH()), { recursive: true }); fs.writeFileSync(CONFIG_PATH(), JSON.stringify(cfg, null, 2)); } catch (_) {}
 }
+// saveConfig swallows write errors (see the legal:accept note), so persistence
+// is verified by re-reading from disk — the same question a restart will ask.
+function persistVaultModel(vault: string, model: string | null): boolean {
+  saveConfig(setVaultModel(loadConfig(), vault, model));
+  return vaultModel(loadConfig(), vault) === model;
+}
+
 function rememberVault(p: string): void {
   const cfg = loadConfig();
   cfg.recent = [p, ...(cfg.recent || []).filter((x) => x !== p)].slice(0, 8);
@@ -784,6 +798,7 @@ function bundledClaudeExecutable(): string | undefined {
 
 async function startSession(vault: string): Promise<void> {
   if (session) { try { await session.stop(); } catch (_) {} session = null; }
+  sessionModelsCache = null;
   let nextSession: AgentSession;
   const isCurrent = () => session === nextSession && currentVault === vault;
   const handleEvent = async (evt: AgentEvent): Promise<void> => {
@@ -809,6 +824,10 @@ async function startSession(vault: string): Promise<void> {
     requestPermission: (request) => requestAgentPermission(vault, nextSession, request),
     openInClaudeCode: (dirPath: string) => launchClaudeCode(dirPath, vault),
     claudeExecutable: bundledClaudeExecutable(),
+    // Like tool grants, the choice lives in the app's own config keyed by vault
+    // path — not in the agent-writable vault — and defaults to inheriting
+    // whatever the user's Claude Code configuration says.
+    model: vaultModel(loadConfig(), vault) ?? undefined,
   });
   session = nextSession;
   try {
@@ -1137,6 +1156,62 @@ function registerIpc(): void {
     if (session) await session.interrupt();
     return { ok: true };
   });
+
+  handle('agent:models', async (): Promise<ModelState> => {
+    const vault = activeVaultPath();
+    if (!vault) return { models: [], selected: null, inherited: null };
+    // Selected and inherited are reported even when the session is down (e.g. a
+    // persisted model the CLI refused killed it) — the picker must stay visible
+    // so the user can change the preference and recover.
+    const selected = vaultModel(loadConfig(), vault);
+    const inherited = session ? session.inheritedModel : null;
+    if (!session || !session.running) return { models: [], selected, inherited };
+    let models = sessionModelsCache || [];
+    if (!models.length) {
+      const queried = session;
+      try {
+        models = await queried.supportedModels();
+        // A vault switch can replace the session while this awaits; a stale
+        // list must not be committed as the new session's cache. (The stale
+        // response itself is discarded by the renderer's refresh token.)
+        if (session === queried) sessionModelsCache = models;
+      } catch (_) { models = []; }
+    }
+    return { models, selected, inherited };
+  });
+
+  handle('agent:setModel', (_e, model: string | null, expectedVault: string): Promise<SendResult> => modelSwitchQueue.run(async (): Promise<SendResult> => {
+    const vault = activeVaultPath();
+    if (!vault) return { ok: false, error: 'Vault is switching' };
+    // The renderer names the vault it was showing; a change event that raced a
+    // vault switch must not write another vault's preference.
+    if (expectedVault && expectedVault !== vault) return { ok: false, error: 'Vault changed before the model switch applied' };
+    const normalized = typeof model === 'string' && model.trim() ? model.trim() : null;
+    if (!session || !session.running) {
+      // No live session to switch — most likely a persisted model the CLI
+      // refused at startup. Persist the new choice and restart on it, so the
+      // picker is the recovery path rather than hand-editing config.json.
+      if (!persistVaultModel(vault, normalized)) return { ok: false, error: 'The model choice could not be saved.' };
+      // Take the transition gate so this restart and a concurrent vault:open
+      // can't interleave their session swaps.
+      if (!vaultTransition.begin()) return { ok: false, error: 'Vault is switching' };
+      try { await startSession(vault); }
+      catch (e) { return { ok: false, error: 'Saved, but the session could not restart: ' + String((e as Error)?.message || e) }; }
+      finally { vaultTransition.finish(); }
+      return { ok: true };
+    }
+    try { await session.setModel(normalized ?? undefined); }
+    catch (e) { return { ok: false, error: String((e as Error)?.message || e) }; }
+    // The CLI's list includes the session's configured custom model (when one is
+    // set), so a switch can change it — refetch on the next refresh.
+    sessionModelsCache = null;
+    // Persist only after the live switch succeeded, so the stored preference
+    // never names a model the CLI refused.
+    if (!persistVaultModel(vault, normalized)) {
+      return { ok: false, error: 'The model switched for this session, but the choice could not be saved and will be lost on restart.' };
+    }
+    return { ok: true };
+  }));
 
   handle('inbox:addNote', async (_e, text: string) => {
     const vault = activeVaultPath();

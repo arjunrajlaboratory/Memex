@@ -92,6 +92,15 @@ interface ArtifactView {
   rel?: string;       // vault-relative source file, when there is one
 }
 
+// ---------- model selection ----------
+// One selectable model as reported by the agent CLI (value may be an alias like
+// "sonnet" or a full id like "claude-sonnet-5"; resolvedModel is the canonical
+// wire id an alias resolves to, for matching persisted explicit ids).
+interface ModelOption { value: string; resolvedModel?: string; label: string; description?: string; }
+// `selected` is the per-vault override; null means inherit the SDK default.
+// `inherited` names the model the session runs on with no override, when known.
+interface ModelState { models: ModelOption[]; selected: string | null; inherited: string | null; }
+
 // ---------- agent events (main -> renderer) ----------
 interface AgentUsage { input_tokens?: number; output_tokens?: number; }
 
@@ -208,6 +217,10 @@ interface MemexApi {
 
   sendMessage(text: string): Promise<SendResult>;
   interrupt(): Promise<{ ok: boolean }>;
+  agentModels(): Promise<ModelState>;
+  // `vault` is the vault the renderer believes it is changing; the main process
+  // rejects a mismatch so a click racing a vault switch can't cross vaults.
+  setAgentModel(model: string | null, vault: string): Promise<SendResult>;
 
   addInboxNote(text: string): Promise<{ ok: boolean; rel?: string; error?: string }>;
   dropIntoInbox(paths: string[]): Promise<DropResult>;
