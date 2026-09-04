@@ -622,5 +622,56 @@ class TestPlanResolution(unittest.TestCase):
             self.assertTrue((work / "undo" / "sentinel").exists())
 
 
+class QuartzBuildArtifactTests(unittest.TestCase):
+    def test_quartz_shippable_skips_build_state(self):
+        from memex_bake import quartz_shippable
+
+        self.assertTrue(quartz_shippable(pathlib.Path("quartz.config.ts")))
+        self.assertTrue(quartz_shippable(pathlib.Path("quartz/plugins/emitters/x.ts")))
+        # Deliberately shipped even though hardened/quartz/.gitignore lists them.
+        self.assertTrue(quartz_shippable(pathlib.Path("tsconfig.tsbuildinfo")))
+        self.assertTrue(quartz_shippable(pathlib.Path(".gitignore")))
+        for rel in ("node_modules/pixi.js/index.js", "public/index.html", ".quartz-cache/x", "prof/x", ".DS_Store"):
+            self.assertFalse(quartz_shippable(pathlib.Path(rel)), rel)
+
+    def test_bake_engine_does_not_ship_node_modules(self):
+        from memex_bake import bake_engine
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = pathlib.Path(tmp) / "engine"
+            (engine / "hardened/quartz/node_modules/pixi.js").mkdir(parents=True)
+            (engine / "hardened/quartz/node_modules/pixi.js/index.js").write_text("x")
+            (engine / "hardened/quartz/public").mkdir()
+            (engine / "hardened/quartz/public/index.html").write_text("x")
+            (engine / "hardened/quartz/quartz.config.ts").write_text("export default {}")
+            (engine / "VERSION").write_text("0.0.0\n")
+            (engine / "hardened/contract").mkdir(parents=True)
+            (engine / "hardened/contract/AGENTS.base.md").write_text("# Agents\n")
+            (engine / "hardened/contract/CLAUDE.base.md").write_text("# Claude\n")
+            target = pathlib.Path(tmp) / "target"
+            result = bake_engine(engine, target, {}, [], include_scaffold=False, include_seeds=False)
+            baked = {p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file()}
+            self.assertIn("quartz/quartz.config.ts", baked)
+            self.assertFalse({p for p in baked if p.startswith("quartz/node_modules/")})
+            self.assertFalse({p for p in baked if p.startswith("quartz/public/")})
+            recorded = {str(k) for k in result.files} if hasattr(result, "files") else set()
+            self.assertFalse({p for p in recorded if "node_modules" in p})
+
+
+class FilterUnignoredTests(unittest.TestCase):
+    def test_many_paths_do_not_overflow_argv(self):
+        import subprocess
+
+        from memex_update import filter_unignored
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = pathlib.Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            (vault / ".gitignore").write_text("quartz/node_modules/\n")
+            many = [f"quartz/node_modules/pkg-{i:05d}/lib/index.js" for i in range(30000)]
+            kept = filter_unignored(vault, {"AGENTS.md", ".gitignore", *many})
+            self.assertEqual(kept, [".gitignore", "AGENTS.md"])
+
+
 if __name__ == "__main__":
     unittest.main()

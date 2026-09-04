@@ -483,7 +483,13 @@ def add_version_paths(
     entry["staged_path"] = staged_version_path(work_dir, "staged", rel, staged_dir / rel)
 
 
-def run_git(vault_dir: pathlib.Path, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+def run_git(
+    vault_dir: pathlib.Path,
+    args: list[str],
+    *,
+    check: bool = True,
+    input: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         # quotepath off so non-ASCII paths come back verbatim, not octal-escaped
         ["git", "-c", "core.quotepath=off", *args],
@@ -491,6 +497,7 @@ def run_git(vault_dir: pathlib.Path, args: list[str], *, check: bool = True) -> 
         text=True,
         capture_output=True,
         check=check,
+        input=input,
     )
 
 
@@ -579,7 +586,14 @@ def filter_unignored(vault_dir: pathlib.Path, paths: set[str] | list[str]) -> li
     items = sorted(paths)
     if not items:
         return []
-    proc = run_git(vault_dir, ["check-ignore", "--", *items], check=False)
+    # Paths go over stdin: a plan can name tens of thousands of files, and
+    # passing them as argv exceeds ARG_MAX (OSError: Argument list too long).
+    proc = run_git(
+        vault_dir,
+        ["check-ignore", "--stdin"],
+        check=False,
+        input="".join(f"{p}\n" for p in items),
+    )
     ignored = {line for line in proc.stdout.splitlines() if line}
     return [p for p in items if p not in ignored]
 
@@ -597,7 +611,11 @@ def commit_update(vault_dir: pathlib.Path, version: str, paths: set[str] | None 
             tracked_missing = [p for p in missing if p in tracked]
         addable = existing + tracked_missing
         if addable:
-            run_git(vault_dir, ["add", "--", *addable])
+            run_git(
+                vault_dir,
+                ["add", "--pathspec-from-file=-"],
+                input="".join(f"{p}\n" for p in addable),
+            )
     else:
         run_git(vault_dir, ["add", "."])
     diff = run_git(vault_dir, ["diff", "--cached", "--quiet"], check=False)

@@ -210,6 +210,18 @@ def bake_file(src: pathlib.Path, dst: pathlib.Path, answers: dict[str, Any], nor
         shutil.copy2(src, dst)
 
 
+# Local build state that `npm install` / `quartz build` leave inside
+# hardened/quartz when someone runs the engine's own Quartz. These directories
+# are gitignored there (hardened/quartz/.gitignore) but a raw rglob still sees
+# them; shipping them baked ~18k npm files into one vault's plan and manifest.
+QUARTZ_BUILD_ARTIFACT_DIRS = frozenset({"node_modules", "public", ".quartz-cache", "prof"})
+
+
+def quartz_shippable(rel: pathlib.Path) -> bool:
+    """True if a file under hardened/quartz is engine content, not build state."""
+    return bool(rel.parts) and rel.parts[0] not in QUARTZ_BUILD_ARTIFACT_DIRS and rel.name != ".DS_Store"
+
+
 def bake_tree(src: pathlib.Path, dst: pathlib.Path, answers: dict[str, Any], result: BakeResult | None = None, pack: str | None = None, normalized: dict[str, str] | None = None) -> None:
     normalized = normalized if normalized is not None else normalize_answers(answers)
     for fp in src.rglob("*"):
@@ -577,7 +589,7 @@ def bake_engine(
     quartz = engine_dir / "hardened/quartz"
     if quartz.exists():
         for fp in quartz.rglob("*"):
-            if fp.is_file():
+            if fp.is_file() and quartz_shippable(fp.relative_to(quartz)):
                 dst = target / "quartz" / fp.relative_to(quartz)
                 bake_file(fp, dst, answers, normalized)
                 result.record(dst.relative_to(target), "hardened", fp)
