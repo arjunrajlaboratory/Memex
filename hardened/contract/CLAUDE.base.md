@@ -273,6 +273,7 @@ Hard rules: default `sensitivity: private`. Never invent personal facts — ever
 - Person / Interaction / Commitment / Ask notes default to `sensitivity: private`.
 - After any vault-content mutation, append one line to `log.md`:
   `<datetime> — <actor> — <verb> — <[[target]]> — <one-line summary>`.
+- Prose for humans (letters, briefings, drafts, emails) follows the "Writing style" section of `AGENTS.md`: don't use mannered prose, and don't use ideas/concepts as sentence subjects (a general rule, not an exact one).
 
 ## Model selection in steady state
 

@@ -29,6 +29,13 @@ If your role is not declared at the start of a session, ask. Do not assume.
 9. **Mark uncertainty.** If confidence is low, set `needs_review: true` and add a `# Reviewer notes` section.
 10. **Respect sensitivity.** Read `_schemas/_privacy.md`. Do not quote `private` notes in external outputs; do not include `sensitive` notes in any agent run log or briefing unless explicitly cited by the user.
 
+## Writing style
+
+These rules apply to any prose written for the user or for people they correspond with — letters, briefings, reviews, drafts, emails, note bodies:
+
+- **Don't use mannered prose.** Write plainly and directly. Cut ornamental phrasing, rhetorical flourishes, and constructions that perform rather than inform ("It's not just X — it's Y", "stands as a testament to"). If a sentence sounds like writing instead of saying, rewrite it.
+- **Don't use ideas or concepts as sentence subjects** (a general rule, not an exact one). Prefer people and concrete things as subjects: "We showed that the enhancer drives expression", not "The data underscore the notion that expression is enhancer-driven". Abstract subjects ("This approach enables...", "The framework highlights...") are occasionally the right call, but reach for a concrete subject first.
+
 ## Framework vs. your edits
 
 The vault has two kinds of durable customization:
