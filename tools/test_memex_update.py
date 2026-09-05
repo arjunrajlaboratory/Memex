@@ -654,8 +654,9 @@ class QuartzBuildArtifactTests(unittest.TestCase):
             self.assertIn("quartz/quartz.config.ts", baked)
             self.assertFalse({p for p in baked if p.startswith("quartz/node_modules/")})
             self.assertFalse({p for p in baked if p.startswith("quartz/public/")})
-            recorded = {str(k) for k in result.files} if hasattr(result, "files") else set()
-            self.assertFalse({p for p in recorded if "node_modules" in p})
+            recorded = set(result.files)
+            self.assertIn("quartz/quartz.config.ts", recorded)
+            self.assertFalse({p for p in recorded if p.startswith(("quartz/node_modules/", "quartz/public/"))})
 
 
 class FilterUnignoredTests(unittest.TestCase):
@@ -671,6 +672,21 @@ class FilterUnignoredTests(unittest.TestCase):
             many = [f"quartz/node_modules/pkg-{i:05d}/lib/index.js" for i in range(30000)]
             kept = filter_unignored(vault, {"AGENTS.md", ".gitignore", *many})
             self.assertEqual(kept, [".gitignore", "AGENTS.md"])
+
+    def test_tracked_paths_many_candidates(self):
+        import subprocess
+
+        from memex_update import tracked_paths
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = pathlib.Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            (vault / "AGENTS.md").write_text("x")
+            (vault / "CLAUDE.md").write_text("x")
+            subprocess.run(["git", "add", "AGENTS.md"], cwd=tmp, check=True)
+            many = [f"quartz/node_modules/pkg-{i:05d}/lib/index.js" for i in range(30000)]
+            self.assertEqual(tracked_paths(vault, {"AGENTS.md", "CLAUDE.md", "nope.md", *many}), ["AGENTS.md"])
+            self.assertEqual(tracked_paths(vault, set()), [])
 
 
 if __name__ == "__main__":

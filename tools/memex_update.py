@@ -598,17 +598,25 @@ def filter_unignored(vault_dir: pathlib.Path, paths: set[str] | list[str]) -> li
     return [p for p in items if p not in ignored]
 
 
+def tracked_paths(vault_dir: pathlib.Path, paths: set[str] | list[str]) -> list[str]:
+    """The subset of `paths` git currently tracks, in sorted order.
+
+    `git ls-files` has no --pathspec-from-file, so rather than splatting the
+    candidates into argv (ARG_MAX) list the whole index once and intersect."""
+    wanted = set(paths)
+    if not wanted:
+        return []
+    out = run_git(vault_dir, ["ls-files", "-z"], check=False).stdout
+    tracked = {entry for entry in out.split("\0") if entry}
+    return sorted(wanted & tracked)
+
+
 def commit_update(vault_dir: pathlib.Path, version: str, paths: set[str] | None = None) -> bool:
     if paths:
         unignored = filter_unignored(vault_dir, paths)
         existing = [p for p in unignored if (vault_dir / p).exists()]
         missing = [p for p in unignored if not (vault_dir / p).exists()]
-        tracked_missing: list[str] = []
-        if missing:
-            # One batched ls-files call instead of one subprocess per path.
-            out = run_git(vault_dir, ["ls-files", "--", *missing], check=False)
-            tracked = {line for line in out.stdout.splitlines() if line}
-            tracked_missing = [p for p in missing if p in tracked]
+        tracked_missing = tracked_paths(vault_dir, missing) if missing else []
         addable = existing + tracked_missing
         if addable:
             run_git(
@@ -1554,13 +1562,14 @@ def abort_update(args: argparse.Namespace) -> int:
     previous = plan.get("previous_branch")
 
     # Revert tracked files the update modified/deleted back to their committed state.
-    tracked = [
-        line
-        for line in run_git(vault_dir, ["ls-files", "--", *sorted(paths)], check=False).stdout.splitlines()
-        if line
-    ]
+    tracked = tracked_paths(vault_dir, paths)
     if tracked:
-        run_git(vault_dir, ["restore", "--source=HEAD", "--staged", "--worktree", "--", *tracked], check=False)
+        run_git(
+            vault_dir,
+            ["restore", "--source=HEAD", "--staged", "--worktree", "--pathspec-from-file=-"],
+            check=False,
+            input="".join(f"{p}\n" for p in tracked),
+        )
     # untrack_memex_state stages a .memex deletion; ls-files above no longer
     # sees those paths, so re-stage them from HEAD explicitly. On vaults that
     # never tracked .memex this is a no-op (next prepare untracks again).
