@@ -1,6 +1,6 @@
 {
   "name": "memex-desktop",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Desktop app for Memex — install, set up, and drive your second brain with a chat + dashboards UI on top of the Claude agent.",
   "author": {
     "name": "Arjun Raj",
