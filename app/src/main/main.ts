@@ -9,9 +9,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 
 import * as vaultLib from './vault';
 import { AgentSession } from './agent';
+import { PendingQuestions } from './ask-user';
 import { ArtifactStore } from './artifact-store';
 import { localDatePlusDays, localDateString } from './date';
 import { copyPathsIntoInbox, writeInboxNote } from './inbox';
@@ -633,6 +635,33 @@ function requestAgentPermission(
   return result;
 }
 
+// AskUserQuestion prompts render as a card in the chat and block the tool call
+// until the user answers or dismisses it. A stopped/switched session, an
+// interrupt, or the SDK aborting the call cancels it.
+const pendingQuestions = new PendingQuestions();
+
+async function askAgentQuestion(
+  vault: string,
+  owningSession: AgentSession,
+  questions: AgentQuestion[],
+  signal: AbortSignal,
+): Promise<AgentQuestionAnswers | null> {
+  const isCurrent = (): boolean => session === owningSession && currentVault === vault && !vaultTransition.active;
+  if (!isCurrent() || signal.aborted || !win || win.isDestroyed()) return null;
+  const id = randomUUID();
+  const onAbort = () => { pendingQuestions.answer(id, null); };
+  signal.addEventListener('abort', onAbort, { once: true });
+  const answer = pendingQuestions.wait(id);
+  emit('agent:event', { kind: 'question', id, questions });
+  try {
+    const picks = await answer;
+    return isCurrent() ? picks : null;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+    emit('agent:event', { kind: 'question_closed', id });
+  }
+}
+
 // AppleScript string literal: escape backslashes and quotes.
 function appleScriptString(s: string): string {
   return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
@@ -797,6 +826,7 @@ function bundledClaudeExecutable(): string | undefined {
 }
 
 async function startSession(vault: string): Promise<void> {
+  pendingQuestions.cancelAll();
   if (session) { try { await session.stop(); } catch (_) {} session = null; }
   sessionModelsCache = null;
   let nextSession: AgentSession;
@@ -823,6 +853,7 @@ async function startSession(vault: string): Promise<void> {
     onEvent: (evt: AgentEvent) => { chain = chain.then(() => handleEvent(evt)).catch(() => {}); },
     requestPermission: (request) => requestAgentPermission(vault, nextSession, request),
     openInClaudeCode: (dirPath: string) => launchClaudeCode(dirPath, vault),
+    askUser: (questions, signal) => askAgentQuestion(vault, nextSession, questions, signal),
     claudeExecutable: bundledClaudeExecutable(),
     // Like tool grants, the choice lives in the app's own config keyed by vault
     // path — not in the agent-writable vault — and defaults to inheriting
@@ -1151,8 +1182,15 @@ function registerIpc(): void {
     return { ok: session.send(text) };
   });
 
+  handle('agent:answerQuestion', async (_e, id: string, answers: AgentQuestionAnswers | null) => {
+    if (!activeVaultPath() || typeof id !== 'string') return { ok: false };
+    const picks = answers && typeof answers === 'object' && !Array.isArray(answers) ? answers : null;
+    return { ok: pendingQuestions.answer(id, picks) };
+  });
+
   handle('agent:interrupt', async () => {
     if (!activeVaultPath()) return { ok: false };
+    pendingQuestions.cancelAll();
     if (session) await session.interrupt();
     return { ok: true };
   });
@@ -1307,6 +1345,7 @@ if (!gotLock) {
     quitCleanup = 'stopping';
     const closingSession = session;
     session = null;
+    pendingQuestions.cancelAll();
     const timeout = new Promise<void>((resolve) => setTimeout(resolve, 3000));
     void Promise.race([closingSession.stop(), timeout])
       .catch(() => {})

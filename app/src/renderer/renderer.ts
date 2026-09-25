@@ -641,6 +641,87 @@ function completeToolCard(id: string | undefined, text?: string, isError?: boole
   else (card.querySelector('.tool-body') as HTMLElement).style.display = 'none';
 }
 
+// ---------------- AskUserQuestion ----------------
+// The agent's multiple-choice questions render as a card that holds the tool
+// call open until the user submits or skips. Each question offers its options
+// plus a free-text "Other"; multi-select questions take several picks.
+const questionCards = new Map<string, HTMLElement>();
+
+function addQuestionCard(id: string, questions: AgentQuestion[]): void {
+  closeAssistantBubble(); clearThinking();
+  const card = el('div', 'ask');
+  const readers: Array<() => string[]> = [];
+  questions.forEach((q, qi) => {
+    const block = el('div', 'ask-q');
+    if (q.header) block.appendChild(el('span', 'ask-chip')).textContent = q.header;
+    block.appendChild(el('div', 'ask-text')).textContent = q.question;
+    const name = `ask-${id}-${qi}`;
+    const type = q.multiSelect ? 'checkbox' : 'radio';
+    const preview = el('pre', 'ask-preview'); preview.hidden = true;
+    const inputs: HTMLInputElement[] = [];
+    const addOption = (label: string, description: string, previewText?: string): HTMLInputElement => {
+      const row = el('label', 'ask-opt') as HTMLLabelElement;
+      const input = document.createElement('input');
+      input.type = type; input.name = name; input.value = label;
+      row.appendChild(input);
+      const txt = el('span', 'ask-opt-text');
+      txt.appendChild(el('span', 'ask-opt-label')).textContent = label;
+      if (description) txt.appendChild(el('span', 'ask-opt-desc')).textContent = description;
+      row.appendChild(txt);
+      input.addEventListener('change', () => {
+        if (previewText && input.checked) { preview.textContent = previewText; preview.hidden = false; }
+        else if (!q.multiSelect || !inputs.some((i) => i.checked && i.dataset.preview)) preview.hidden = true;
+      });
+      if (previewText) input.dataset.preview = '1';
+      inputs.push(input);
+      block.appendChild(row);
+      return input;
+    };
+    for (const o of q.options) addOption(o.label, o.description, o.preview);
+    const other = addOption('Other', '');
+    const otherText = document.createElement('input');
+    otherText.type = 'text'; otherText.className = 'ask-other'; otherText.placeholder = 'Type your own answer…';
+    otherText.addEventListener('input', () => { if (otherText.value.trim()) { other.checked = true; } });
+    block.appendChild(otherText);
+    block.appendChild(preview);
+    readers.push(() => inputs.filter((i) => i.checked).map((i) => (i === other ? otherText.value.trim() : i.value)).filter(Boolean));
+    card.appendChild(block);
+  });
+  const actions = el('div', 'ask-actions');
+  const skip = el('button', 'btn', 'Skip') as HTMLButtonElement;
+  const submit = el('button', 'btn primary', 'Answer') as HTMLButtonElement;
+  actions.append(skip, submit);
+  card.appendChild(actions);
+  const settle = (answers: AgentQuestionAnswers | null): void => {
+    closeQuestionCard(id, answers ? 'Answered' : 'Skipped');
+    void M.answerQuestion(id, answers).catch(() => ({ ok: false }));
+  };
+  submit.onclick = () => {
+    const answers: AgentQuestionAnswers = {};
+    questions.forEach((q, qi) => {
+      const picks = readers[qi]();
+      if (picks.length) answers[q.question] = q.multiSelect ? picks : picks[0];
+    });
+    if (!Object.keys(answers).length) { submit.textContent = 'Pick an option first'; setTimeout(() => { submit.textContent = 'Answer'; }, 1400); return; }
+    settle(answers);
+  };
+  skip.onclick = () => settle(null);
+  questionCards.set(id, card);
+  chatScroll.appendChild(card);
+  scrollChat();
+  (card.querySelector('input') as HTMLInputElement | null)?.focus();
+}
+
+function closeQuestionCard(id: string, status = 'Closed'): void {
+  const card = questionCards.get(id);
+  if (!card) return;
+  questionCards.delete(id);
+  card.classList.add('done');
+  card.querySelectorAll('input, button').forEach((n) => { (n as HTMLInputElement).disabled = true; });
+  const actions = card.querySelector('.ask-actions');
+  if (actions) actions.replaceChildren(el('span', 'ask-status', esc(status)));
+}
+
 function setBusy(b: boolean): void {
   state.busy = b;
   $('sendBtn').style.display = b ? 'none' : 'grid';
@@ -739,7 +820,13 @@ M.onAgentEvent((evt) => {
     case 'thinking_delta': onThinkingDelta(evt.text); break;
     case 'assistant_delta': clearThinking(); onAssistantDelta(evt.text); break;
     case 'assistant_text': clearThinking(); onAssistantText(evt.text, evt.html || ''); break;
-    case 'tool_use': clearThinking(); addToolCard(evt.id, evt.name, evt.input); break;
+    case 'tool_use':
+      clearThinking();
+      // The question card (from the 'question' event) stands in for the tool card.
+      if (evt.name !== 'AskUserQuestion') addToolCard(evt.id, evt.name, evt.input);
+      break;
+    case 'question': addQuestionCard(evt.id, evt.questions); break;
+    case 'question_closed': closeQuestionCard(evt.id, 'No longer waiting for an answer'); break;
     case 'tool_result': completeToolCard(evt.id, evt.text, evt.isError); break;
     case 'artifact': if (evt.artifact) showArtifact(evt.artifact); break;
     case 'tool_start': case 'permission': break;   // cards render from tool_use; permissions are auto-allowed

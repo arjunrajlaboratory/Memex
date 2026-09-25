@@ -5,6 +5,7 @@
 // The SDK is ESM-only, so its VALUES are loaded with a dynamic import() (preserved
 // by module:node16); its TYPES are erased at compile time, so importing them
 // statically is safe and keeps this file honest against SDK upgrades.
+import { ASK_USER_TOOL, answeredInput, hasAnyAnswer, parseQuestions } from './ask-user';
 import type { ModelInfo, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk' with { 'resolution-mode': 'import' };
 
 type QueueResult = IteratorResult<SDKUserMessage, undefined>;
@@ -62,6 +63,7 @@ export class AgentSession {
   private onEvent: (evt: AgentEvent) => void;
   private requestPermission: (request: AgentPermissionRequest) => Promise<boolean>;
   private openInClaudeCode: (dirPath: string) => Promise<{ ok: boolean; message: string }>;
+  private askUser: (questions: AgentQuestion[], signal: AbortSignal) => Promise<AgentQuestionAnswers | null>;
   private claudeExecutable: string | undefined;
   private model: string | undefined;
   // The model the CLI reports running when NO override is active — i.e. the one
@@ -78,6 +80,7 @@ export class AgentSession {
     onEvent,
     requestPermission,
     openInClaudeCode,
+    askUser,
     claudeExecutable,
     model,
   }: {
@@ -85,6 +88,9 @@ export class AgentSession {
     onEvent: (evt: AgentEvent) => void;
     requestPermission?: (request: AgentPermissionRequest) => Promise<boolean>;
     openInClaudeCode?: (dirPath: string) => Promise<{ ok: boolean; message: string }>;
+    // Shows AskUserQuestion prompts and resolves with the user's picks, or null
+    // if they dismissed it or the question was canceled.
+    askUser?: (questions: AgentQuestion[], signal: AbortSignal) => Promise<AgentQuestionAnswers | null>;
     // Absolute path to the bundled `claude` binary. The host supplies this in
     // packaged builds, where the SDK's own resolution points into app.asar.
     claudeExecutable?: string;
@@ -99,6 +105,8 @@ export class AgentSession {
     this.requestPermission = requestPermission || (async () => false);
     // Fail closed if a host does not supply a launcher.
     this.openInClaudeCode = openInClaudeCode || (async () => ({ ok: false, message: 'Claude Code hand-off is not available in this host.' }));
+    // Without a question UI, the question counts as dismissed rather than answered.
+    this.askUser = askUser || (async () => null);
     this.claudeExecutable = claudeExecutable;
     this.model = model;
   }
@@ -152,6 +160,21 @@ export class AgentSession {
         maxTurns: 100,
         mcpServers: { ui: uiServer },
         canUseTool: async (name: string, input: Record<string, unknown>, options) => {
+          // A question is not a permission prompt: the host must collect the
+          // answers and return them in updatedInput, or the CLI resolves the
+          // question with no answer at all.
+          if (name === ASK_USER_TOOL) {
+            const questions = parseQuestions(input);
+            if (!questions) return { behavior: 'deny' as const, message: 'AskUserQuestion input was malformed; ask in plain chat instead.' };
+            const picks = await this.askUser(questions, options.signal);
+            if (options.signal.aborted) {
+              return { behavior: 'deny' as const, message: 'The question was canceled before the user answered.' };
+            }
+            if (!hasAnyAnswer(questions, picks)) {
+              return { behavior: 'deny' as const, message: 'The user dismissed the question without answering. Do not assume an answer; ask again in chat or proceed only with what they have said.' };
+            }
+            return { behavior: 'allow' as const, updatedInput: answeredInput(input, questions, picks as AgentQuestionAnswers) };
+          }
           this.onEvent({ kind: 'permission', name });
           const allowed = await this.requestPermission({
             name,

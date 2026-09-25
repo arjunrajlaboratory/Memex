@@ -114,6 +114,12 @@ interface AgentPermissionRequest {
   blockedPath?: string;
 }
 
+// AskUserQuestion, as the renderer shows it and the user answers it.
+interface AgentQuestionOption { label: string; description: string; preview?: string; }
+interface AgentQuestion { question: string; header: string; options: AgentQuestionOption[]; multiSelect: boolean; }
+// Keyed by question text; a multi-select question maps to every picked label.
+type AgentQuestionAnswers = Record<string, string | string[]>;
+
 // Discriminated on `kind` so switch statements narrow. The 'artifact' variant carries
 // both the raw show_artifact args (agent process -> main) and the resolved view
 // (main -> renderer); each leg fills only its own fields.
@@ -128,6 +134,8 @@ type AgentEvent =
   | { kind: 'tool_result'; id?: string; text?: string; isError?: boolean }
   | { kind: 'artifact'; title?: string; format?: 'html' | 'markdown' | 'auto'; content?: string; path?: string; artifact?: ArtifactView }
   | { kind: 'permission'; name?: string }
+  | { kind: 'question'; id: string; questions: AgentQuestion[] }
+  | { kind: 'question_closed'; id: string }
   | { kind: 'result'; subtype?: string; result?: string; usage?: AgentUsage; costUsd?: number; durationMs?: number; numTurns?: number }
   | { kind: 'error'; message: string };
 
@@ -216,6 +224,7 @@ interface MemexApi {
   registerArtifact(html: string): Promise<string>;
 
   sendMessage(text: string): Promise<SendResult>;
+  answerQuestion(id: string, answers: AgentQuestionAnswers | null): Promise<{ ok: boolean }>;
   interrupt(): Promise<{ ok: boolean }>;
   agentModels(): Promise<ModelState>;
   // `vault` is the vault the renderer believes it is changing; the main process

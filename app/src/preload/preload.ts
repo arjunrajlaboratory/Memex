@@ -41,6 +41,7 @@ const api: MemexApi = {
 
   // agent chat
   sendMessage: (text) => invoke('agent:send', text),
+  answerQuestion: (id, answers) => invoke('agent:answerQuestion', id, answers),
   interrupt: () => invoke('agent:interrupt'),
   agentModels: () => invoke('agent:models'),
   setAgentModel: (model, vault) => invoke('agent:setModel', model, vault),
