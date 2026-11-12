@@ -138,7 +138,7 @@ Once the vault is open in your agent, these get you moving. Each works as plain 
 slash command:
 
 - **`/session-start`** — or *"where did we leave off?"* — a 5-second pre-flight: log tail, open tasks, inbox state, and a recommended next move.
-- **`/daily-briefing`** — *"give me today's briefing"* — the flagship daily dashboard (top outcomes, calendar, tasks due, what's blocked, what needs triage), opened in the browser.
+- **`/daily-briefing`** — *"give me today's briefing"* — the flagship daily dashboard (top outcomes, calendar, tasks due, what's blocked, what needs triage), opened in the browser. Next to it opens a review form with one row per item: pick an action for each (Do it, Done, Defer, Make task, …), add a note where you want, and submit. The agent then applies your answers with `/apply-review` — replies are drafted, never sent, and anything it does for you waits for your OK before it counts as done. Rows you skip come back in tomorrow's briefing.
 - **`/ingest-source <url-or-path>`** — *"pull this paper into the vault: <url>"* — lands an article / PDF / URL as a typed Source note and updates the wiki pages it touches.
 - **`/create-task`** — *"add a task to email Alex by Friday"* — a schema-conformant Task with the right parent project, an id, and a calendar block when there's a time.
 - **`/triage-inbox`** — *"triage the inbox"* — walks every unfiled capture in `Inbox/` and routes each to the right typed note until the drop zone is empty.

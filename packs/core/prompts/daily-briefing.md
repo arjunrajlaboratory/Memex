@@ -59,7 +59,8 @@ Gather the following inputs (read only what exists; skip gracefully if absent):
 1. Active projects — `Atlas/Projects/*.md` where `status: active`
 2. Open tasks — `Ops/Tasks/*.md` where `status` not in [done, canceled]
 3. Waiting-for / I-owe items — tasks and commitments flagged as waiting
-4. Unprocessed inbox captures — `Inbox/` top level (excluding `_filed/` and `README.md`)
+4. Unprocessed inbox captures — `Inbox/` top level (excluding `README.md` and the system slots
+   `_filed/`, `_journal/`, `comms/`, `reviews/`)
 5. Calendar events — `Ops/Calendars/` for today and the next 7 days
 6. Agent jobs — `Agents/Jobs/*.md` where `status` in [ready, needs_review]
 7. Due trackers — `Atlas/Trackers/*.md` where `status: active` AND `next_check <= {{date}}`
@@ -67,6 +68,11 @@ Gather the following inputs (read only what exists; skip gracefully if absent):
    `status: complete`; exclude `partial` and `failed` write-ahead digests
 9. Surfaced followups — `Ops/Followups/*.md` where `surface_on <= {{date}}` AND `status: pending`
 10. People needing a touch — `Atlas/People/*.md` where `next_touch <= {{date}}` AND `status: active`
+11. Previous review carry-over — `python3 scripts/briefing_review.py carryover <previous briefing date> --json`
+    (skip silently if there was no previous review). Put each carried item — unanswered, `keep`,
+    or a `defer` that has come due — in its natural section, marked as carried. Do not drop one just
+    because nothing new happened; do not carry items whose answers were applied; drop a carried item
+    whose target is already closed.
 
 Produce `Ops/Briefings/{{date}}.md` with this exact frontmatter and 13-section body:
 
@@ -116,6 +122,18 @@ Rules:
 - The People section (9) is mandatory even if all subsections are empty.
 - Honor sensitivity: summarize `private` items one level of abstraction higher;
   never quote `sensitive` items unless the user explicitly cited them.
+- After saving the briefing, write `Ops/Briefings/{{date}}.items.json` (`schema:
+  "memex.briefing-items/v1"`): one entry per actionable list item in §0 and §§3–11 (never §1,
+  §2, §12, §13), each with a stable `id` (`<kind>:<target path without .md>`), `section`, `kind`,
+  and `text`; `status`/`due` from the target's frontmatter; `signal` + `threads` for
+  reconcile-sourced items; `sensitivity` inherited from the target (default `private`); `also_in`
+  instead of repeats; `carried_from`/`previous` for carried items. Follow the field rules in
+  `_workflows/daily-briefing.md`. Run `python3 scripts/briefing_review.py validate {{date}}` and fix
+  every problem it reports before continuing.
+- Open the review form: `python3 scripts/briefing_review.py build {{date}}` writes
+  `outputs/briefing-review/{{date}}.html`; open it (or, when the local site is running, open
+  `http://localhost:{{QUARTZ_PORT}}/review/{{date}}`). The user answers there; apply the submitted
+  answers with the `apply-review` skill. A chat reply such as "yes to 1,3" still works for §0.
 - After saving the file, append exactly one line to `log.md`:
   `<datetime> — agent:planner — briefing — [[Ops/Briefings/{{date}}]] — daily briefing generated`
 ```

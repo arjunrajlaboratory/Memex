@@ -39,7 +39,9 @@ Read these before doing anything:
 
 List the queue:
 
-- `ls Inbox/` (excluding `README.md` and the system slots: `_filed/`, `_journal/` — durable journals, not captures — and `comms/` — capture-comms digests)
+- `ls Inbox/` (excluding `README.md` and the system slots: `_filed/`, `_journal/` — durable journals, not captures — `comms/` — capture-comms digests — and `reviews/` — briefing-review answers and their apply ledger, owned by `apply-review`)
+
+Never count, classify, move, or file anything under a system slot. In particular, `Inbox/reviews/<date>.json` is the user's saved briefing review, not a capture: if the user wants it processed, that is the `apply-review` skill's job.
 
 If empty, report "inbox clean" and exit. Don't invent work.
 
@@ -128,6 +130,7 @@ Notable:
 
 ## What this skill does NOT do
 
+- **Does not touch the system slots** (`_filed/`, `_journal/`, `comms/`, `reviews/`). They live in `Inbox/` permanently and are never part of the queue.
 - **Does not over-triage.** When in doubt, leave at the top of `Inbox/` and write a Followup; that's better than forcing a wrong type.
 - **Does not lower sensitivity.** Default `private` for People-adjacent items.
 - **Does not modify `Raw/` after copying.** The raw is immutable.

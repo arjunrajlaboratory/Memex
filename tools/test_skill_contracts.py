@@ -1,3 +1,4 @@
+import json
 import re
 import unittest
 from pathlib import Path
@@ -1100,6 +1101,187 @@ class TestTrackerHistoryContract(unittest.TestCase):
         for path in expected:
             with self.subTest(path=path):
                 self.assertIn(f"`{path}`", self.same_day_backport)
+
+
+class TestBriefingReviewContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        core = ROOT / "packs/core"
+        cls.briefing = (core / "skills/daily-briefing/SKILL.md").read_text()
+        cls.briefing_workflow = (core / "workflows/daily-briefing.md").read_text()
+        cls.briefing_prompt = (core / "prompts/daily-briefing.md").read_text()
+        cls.briefing_schema = (core / "schemas/briefing.md").read_text()
+        cls.apply = (core / "skills/apply-review/SKILL.md").read_text()
+        cls.triage = (core / "skills/triage-inbox/SKILL.md").read_text()
+        cls.hook = (ROOT / "hardened/hooks/session-start-context.sh").read_text()
+        cls.packs = json.loads((ROOT / "packs.json").read_text())
+        cls.backport = (ROOT / "docs/BACKPORT.md").read_text()
+
+    def test_briefing_emits_and_validates_items_json(self):
+        for name, artifact in {
+            "skill": self.briefing,
+            "workflow": self.briefing_workflow,
+            "prompt": self.briefing_prompt,
+            "schema": self.briefing_schema,
+        }.items():
+            with self.subTest(artifact=name):
+                self.assertIn(".items.json", artifact)
+                self.assertIn("memex.briefing-items/v1", artifact)
+                self.assertRegex(artifact, r"briefing_review\.py\s+validate")
+        step = markdown_section(
+            self.briefing,
+            "## Step 3b — Write the review items (`Ops/Briefings/<date>.items.json`)",
+            "## Step 4 — Log",
+        )
+        self.assertRegex(step, r"(?is)regenerat.{0,80}overwrites.{0,60}items file")
+        self.assertRegex(step, r"(?is)fix.{0,200}re-run until it passes")
+        self.assertRegex(step, r"(?is)sensitivity.{0,200}target note.{0,200}never lower")
+        self.assertRegex(step, r"(?is)also_in")
+        # Items cover §0 and §§3–11, never the calendar, starter or end-of-day prompts.
+        self.assertRegex(step, r"(?is)§ 0 and §§ 3–11")
+        self.assertRegex(step, r"(?is)Not § 1.{0,60}§ 2.{0,80}§ 12.{0,80}§ 13")
+
+    def test_briefing_carries_over_the_previous_review(self):
+        for name, artifact in {
+            "skill": self.briefing,
+            "workflow": self.briefing_workflow,
+            "prompt": self.briefing_prompt,
+        }.items():
+            with self.subTest(artifact=name):
+                self.assertRegex(artifact, r"briefing_review\.py carryover <previous briefing date> --json")
+                self.assertRegex(artifact, r"(?is)skip (?:this step )?silently")
+                self.assertRegex(artifact, r"(?is)(?:not|never) drop.{0,60}because nothing new happened")
+                self.assertRegex(artifact, r"(?is)(?:not|never) carry.{0,40}answers? (?:was|were) applied|"
+                                           r"answers were applied are not carried")
+        carry = markdown_section(
+            self.briefing,
+            "## Step 2a — Carry over the previous review",
+            "## Step 2b — Build § 0 \"State confirmation needed\"",
+        )
+        self.assertIn("carried_from", carry)
+        self.assertIn("previous", carry)
+
+    def test_briefing_opens_the_review_on_the_configured_surface(self):
+        step = markdown_section(
+            self.briefing, "## Step 5b — Open the review", "## Step 6 — Report back"
+        )
+        self.assertIn("review_surface", step)
+        self.assertRegex(step, r"(?is)absent.{0,80}`auto`")
+        self.assertIn("show_widget", step)
+        self.assertIn("http://localhost:{{QUARTZ_PORT}}/review/<date>", step)
+        self.assertIn("outputs/briefing-review/<date>.html", step)
+        self.assertRegex(step, r"--surface widget")
+        self.assertRegex(step, r"(?is)in the printed order, one widget per file")
+        # The artifact surface is opt-in, private, redacted, and read back fully first.
+        self.assertRegex(step, r"--surface artifact")
+        self.assertRegex(step, r"(?is)\*\*private\*\* artifact.{0,40}capabilities: \{db: \{\}, user: \{\}\}")
+        self.assertRegex(step, r"(?is)Read the generated file in full before publishing")
+        self.assertRegex(step, r"(?is)Never pass a lower level.{0,80}unless the user says so")
+        self.assertRegex(step, r"(?is)withheld as local-only")
+        self.assertIn("reviews/<date>", step)
+
+    def test_briefing_hands_answers_to_apply_review_and_keeps_chat_fallback(self):
+        report = markdown_section(
+            self.briefing, "## Step 6 — Report back", "## What this skill does NOT do"
+        )
+        self.assertIn("Briefing review — <date>", report)
+        self.assertIn("Inbox/reviews/<date>.json", report)
+        self.assertIn("[[apply-review]]", report)
+        self.assertRegex(report, r"(?is)fallback.{0,120}yes to 1,3")
+        self.assertRegex(report, r"(?is)Task closes → route through \[\[close-task\]\]")
+
+    def test_apply_review_converges_every_arrival_path_on_save(self):
+        self.assertRegex(self.apply, r"(?m)^name: apply-review$")
+        description = re.search(r"(?m)^description: (.*)$", self.apply).group(1)
+        for phrase in (
+            "apply my briefing review",
+            "here are my review answers",
+            "Briefing review — <date>",
+            "/apply-review",
+        ):
+            self.assertIn(phrase, description)
+        self.assertIn("briefing_review.py save --from-export", self.apply)
+        self.assertIn("--surface artifact", self.apply)
+        self.assertRegex(self.apply, r"(?is)submitted: false.{0,200}not applied|"
+                                     r"Drafts are not answers")
+        self.assertRegex(self.apply, r"briefing_review\.py plan <date> --json")
+        self.assertRegex(self.apply, r"briefing_review\.py annotate <date>")
+
+    def test_apply_review_keeps_outbound_messages_as_drafts(self):
+        hard_rules = markdown_section(
+            self.apply, "## Hard rules (non-negotiable)", "## What this skill does NOT do"
+        )
+        self.assertRegex(hard_rules, r"(?is)Outbound messages are always drafts, never sent")
+        self.assertRegex(self.apply, r"(?is)never send, post, or schedule")
+
+    def test_apply_review_never_self_closes_on_do(self):
+        hard_rules = markdown_section(
+            self.apply, "## Hard rules (non-negotiable)", "## What this skill does NOT do"
+        )
+        self.assertRegex(hard_rules, r"(?is)`do` answer never self-closes.{0,80}needs_review")
+        self.assertRegex(self.apply, r"(?is)A `do` never sets `done`")
+
+    def test_apply_review_routes_closes_through_close_task(self):
+        self.assertRegex(self.apply, r"(?m)^\| task `done` \| \[\[close-task\]\]")
+        self.assertRegex(self.apply, r"(?m)^\| task `cancel` \| \[\[close-task\]\]")
+        self.assertRegex(self.apply, r"(?is)`done` and `cancel` answers are the user's explicit confirmation")
+        self.assertRegex(self.apply, r"(?is)never hand-edit `status: done`")
+
+    def test_apply_review_records_every_answer_in_the_ledger(self):
+        mark = markdown_section(
+            self.apply,
+            "## Step 4 — Mark each answer in the ledger",
+            "## Step 5 — Annotate and log",
+        )
+        self.assertRegex(mark, r"briefing_review\.py mark <date> \"<id>\" --result")
+        self.assertIn("failed", mark)
+        self.assertRegex(mark, r"(?is)continue with the next answer")
+        self.assertRegex(mark, r"(?is)Re-running is safe.{0,300}fingerprint")
+        self.assertRegex(self.apply, r"(?is)Unanswered rows are left alone")
+        self.assertRegex(self.apply, r"(?is)`sensitive` items never go to an external service")
+
+    def test_apply_review_orders_bookkeeping_before_long_work(self):
+        order = markdown_section(
+            self.apply, "## Step 2 — Order the work", "## Step 3 — Apply each answer by its route"
+        )
+        closes = order.index("Closes and status edits")
+        creations = order.index("Creations")
+        work = order.index("\"Do it\" work")
+        self.assertLess(closes, creations)
+        self.assertLess(creations, work)
+
+    def test_apply_review_has_meeting_agenda_fallback(self):
+        self.assertRegex(self.apply, r"(?is)meeting-agenda.{0,200}not part of every install.{0,80}otherwise")
+
+    def test_triage_and_session_hook_exclude_reviews_slot(self):
+        self.assertIn("`reviews/`", self.triage)
+        self.assertRegex(self.triage, r"(?is)system slots.{0,300}`reviews/`")
+        find_line = next(
+            line for line in self.hook.splitlines() if "inbox_count=" in line
+        )
+        self.assertIn("! -name 'reviews'", find_line)
+        self.assertIn("! -name 'comms'", find_line)
+
+    def test_apply_review_is_registered(self):
+        self.assertIn("apply-review", self.packs["core"]["skills"])
+        self.assertTrue((ROOT / "packs/core/skills/apply-review/SKILL.md").is_file())
+
+    def test_backport_lists_briefing_review_surfaces(self):
+        section = markdown_section(
+            self.backport, "# Backport checklist — 2026-11-12 briefing review"
+        )
+        for path in (
+            "packs/core/skills/daily-briefing/SKILL.md",
+            "packs/core/skills/apply-review/SKILL.md",
+            "packs/core/skills/triage-inbox/SKILL.md",
+            "packs/core/workflows/daily-briefing.md",
+            "packs/core/prompts/daily-briefing.md",
+            "packs/core/schemas/briefing.md",
+            "hardened/hooks/session-start-context.sh",
+            "hardened/quartz/quartz/cli/handlers.js",
+        ):
+            with self.subTest(path=path):
+                self.assertIn(f"`{path}`", section)
 
 
 if __name__ == "__main__":

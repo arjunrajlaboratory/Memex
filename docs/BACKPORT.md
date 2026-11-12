@@ -145,3 +145,36 @@ These Quartz files are derive-managed. Mirror every row into the source vault be
 | `hardened/quartz/quartz.config.ts` | `quartz/quartz.config.ts` | Configure `Plugin.Latex` with `remarkMathOptions.singleDollarTextMath: false` so ordinary dollar amounts remain text while `$$...$$` display math continues to work. |
 | `hardened/quartz/quartz/plugins/transformers/latex.ts` | `quartz/quartz/plugins/transformers/latex.ts` | Add the typed `remarkMathOptions` passthrough and preserve remark-math's existing defaults when the option is omitted. |
 | `hardened/quartz/quartz/plugins/transformers/latex.test.ts` | `quartz/quartz/plugins/transformers/latex.test.ts` | Add parser-level regression coverage for default behavior, the option passthrough, the shipped config, and display math. |
+
+# Backport checklist — 2026-11-12 briefing review
+
+These files are derive-managed. Mirror every row into the source vault before the next
+`tools/derive.py` run; otherwise derivation will drop the review items, the carry-over step, the
+`apply-review` skill, and the `Inbox/reviews/` system slot while the review CLI and the engine
+contract tests stay behind. Contract: `docs/superpowers/specs/2026-11-12-briefing-review-design.md`.
+
+| Engine file changed here | Source-vault location | What to mirror |
+| --- | --- | --- |
+| `packs/core/skills/daily-briefing/SKILL.md` | `.claude/skills/daily-briefing/SKILL.md` | Step 2a carry-over (`briefing_review.py carryover <previous date> --json`); Step 3b writes and validates `Ops/Briefings/<date>.items.json` with the per-field rules; Step 5b opens the review on the `review_surface` surface (widget / server / page / opt-in private artifact); Step 6 makes the review form the primary answer path, hands answers to `apply-review`, and keeps "yes to 1,3" as the fallback; inbox input skips all system slots. |
+| `packs/core/skills/apply-review/SKILL.md` | `.claude/skills/apply-review/SKILL.md` | **NEW skill** — saves answers from every arrival path, plans, applies by route (closes and status edits, then creations, then "Do it" work), marks each answer in the ledger, annotates §0, logs, reports. Drafts-only outbound, never self-closes on `do`. Also add it to the source vault's skill list so derive's pre-flight finds it. |
+| `packs/core/workflows/daily-briefing.md` | `_workflows/daily-briefing.md` | Carry-over input, the items-file rules, validation, and the review surfaces. |
+| `packs/core/prompts/daily-briefing.md` | `Agents/Prompts/daily-briefing.md` | Carry-over input (item 11), items file + validate, open the page/server review, `apply-review` for answers. |
+| `packs/core/schemas/briefing.md` | `_schemas/briefing.md` | "Review items (daily)" section; §0 answered in the review or by the chat fallback; `.md` and `.items.json` regenerate together. |
+| `packs/core/skills/triage-inbox/SKILL.md` | `.claude/skills/triage-inbox/SKILL.md` | `Inbox/reviews/` joins `_filed/`, `_journal/`, `comms/` as a system slot that is never listed, counted, or filed. |
+| `packs/core/workflows/capture-triage.md` | `_workflows/capture-triage.md` | Same system-slot exclusion for `Inbox/reviews/`. |
+| `packs/core/prompts/triage-inbox.md` | `Agents/Prompts/triage-inbox.md` | Inbox listing skips every system slot (it named only `_filed/`). |
+| `packs/core/skills/session-start/SKILL.md` | `.claude/skills/session-start/SKILL.md` | Inbox count skips every system slot, including `reviews/`. |
+| `hardened/hooks/session-start-context.sh` | `.claude/hooks/session-start-context.sh` | Inbox count excludes `reviews/` alongside `comms/` and `_*`. |
+| `hardened/quartz/quartz/cli/handlers.js` | `quartz/quartz/cli/handlers.js` | `site:serve` routes `GET /review`, `GET /review/<date>`, `GET`/`POST /api/review/<date>` (loopback only, CSRF origin guard), shelling out to `scripts/briefing_review.py`; nothing is emitted into a static build. |
+| `hardened/quartz/quartz/cli/review-routes.js` | `quartz/quartz/cli/review-routes.js` | **NEW file** — the review route implementation `handlers.js` wires in (plus its test `review-routes.test.mjs`). |
+| `hardened/quartz/quartz/components/DashboardsNav.tsx` | `quartz/quartz/components/DashboardsNav.tsx` | Serve-mode-only "Review" button linking to `/review/` (full navigation, `data-router-ignore`). |
+| `hardened/quartz/quartz.config.ts` | `quartz/quartz.config.ts` | `ignorePatterns` += `**/*.items.json` so briefing items never reach `public/`; comment noting `Inbox/**` covers `Inbox/reviews/`. |
+
+Hand-curated, no source-vault mirror needed: `hardened/scripts/briefing_review.py`,
+`hardened/scripts/briefing_review_app.js`, `hardened/scripts/briefing_review_app.css` (the review
+CLI and its client app), and the installed contracts `hardened/contract/CLAUDE.base.md` (skills
+table row, 25 core skills, `review_surface` override key, Inbox system slots) and
+`hardened/contract/AGENTS.base.md` (daily-briefing paragraph, Inbox system slots). Engine-owned:
+`packs.json` (`apply-review` registered), `tools/memex_bake.py` (the `_config/overrides.md` seed
+documents `review_surface`; seeds are write-once, so existing vaults never get that text and every
+skill treats an absent key as `auto`), `tools/test_skill_contracts.py`.
