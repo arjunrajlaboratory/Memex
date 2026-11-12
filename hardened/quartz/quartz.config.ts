@@ -30,7 +30,7 @@ const config: QuartzConfig = {
       "_config",
       "_config/**",
       "Inbox",
-      "Inbox/**",
+      "Inbox/**", // includes Inbox/reviews/ (briefing-review answers + ledgers)
       "_archive",
       "_archive/**",
       "_dashboards",
@@ -74,6 +74,11 @@ const config: QuartzConfig = {
       "IMPLEMENTATION_PLAN.md",
       // Bases / Obsidian view files don't render meaningfully as markdown
       "Ops/Views",
+      // Memex: structured briefing items (Ops/Briefings/<date>.items.json) sit
+      // next to private briefing notes. RemovePrivateNotes only filters Markdown,
+      // so without this the Assets emitter would copy them into public/ (and the
+      // serve watcher would rebuild on every write).
+      "**/*.items.json",
     ],
     defaultDateType: "modified",
     theme: {
