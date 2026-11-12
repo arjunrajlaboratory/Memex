@@ -35,6 +35,13 @@ const DASHBOARDS_FOR_NAV: Entry[] = [
   { slug: "dashboards/stale", title: "Needs attention", stale: true },
 ]
 
+// Memex addition: "Review" button for the briefing review. /review/ is a
+// serve-mode-only route (quartz/cli/review-routes.js), so the button is only
+// rendered when private notes are included, which only `npm run site:serve` sets.
+// data-router-ignore: the review page is not a Quartz page, so the SPA router
+// must do a full navigation instead of morphing it in.
+const SHOW_REVIEW_LINK = process.env.QUARTZ_INCLUDE_PRIVATE === "true"
+
 const DashboardsNav: QuartzComponent = ({ fileData, displayClass }: QuartzComponentProps) => {
   const baseDir = pathToRoot(fileData.slug!)
   // pathToRoot returns "." for the root slug and "../" segments otherwise — no
@@ -67,6 +74,11 @@ const DashboardsNav: QuartzComponent = ({ fileData, displayClass }: QuartzCompon
         <a class="dashboards-nav-btn is-all" href={indexHref}>
           All ↗
         </a>
+        {SHOW_REVIEW_LINK && (
+          <a class="dashboards-nav-btn is-review" href={`${baseDir}/review/`} data-router-ignore>
+            Review
+          </a>
+        )}
       </div>
     </nav>
   )

@@ -15,6 +15,7 @@ import { WebSocketServer } from "ws"
 import { randomUUID } from "crypto"
 import { Mutex } from "async-mutex"
 import { CreateArgv } from "./args.js"
+import { handleReviewRoute } from "./review-routes.js" // Memex addition
 import { globby } from "globby"
 import {
   exitIfCancel,
@@ -368,6 +369,17 @@ export async function handleBuild(argv) {
 
       // strip baseDir prefix
       req.url = req.url?.slice(argv.baseDir.length)
+
+      // Memex addition: briefing-review routes (/review, /api/review/<date>).
+      // Served outside the build mutex; see review-routes.js.
+      if (
+        await handleReviewRoute(req, res, {
+          vaultDir: path.resolve(argv.directory),
+          baseDir: argv.baseDir,
+        })
+      ) {
+        return
+      }
 
       const serve = async () => {
         const release = await buildMutex.acquire()

@@ -1,6 +1,6 @@
 ---
 name: daily-briefing
-description: Generate today's 13-section operating-dashboard briefing for the vault (Top 3 outcomes through End-of-day prompts), open it in the browser, and refuse silent overwrites. Use whenever the user wants today's operating dashboard generated — signaled by phrases like "generate the daily briefing", "today's briefing", "what's the briefing for today", "make today's briefing", "give me the morning briefing", "what's on for today (full version)", or direct invocation "/daily-briefing" / "/daily-briefing 2026-05-19". Synthesizes the vault's current state into `Ops/Briefings/<YYYY-MM-DD>.md` per `_schemas/briefing.md` and the full procedure in `_workflows/daily-briefing.md` — reads active projects, open tasks, waiting-for items, unprocessed inbox, calendar for today + next 7 days, agent jobs, due trackers and fresh digests, surfaced followups, people needing a touch — and produces the 13-section briefing body (Top 3 outcomes, Calendar / time map, Tasks due today, Waiting on others, Projects at risk, New captures needing triage, Agent opportunities, Trackers, People, Followups surfaced today, Decisions needed, Starter prompts, End-of-day review prompts). Refuses to overwrite an existing briefing without explicit confirmation. By default it first runs capture-comms + reconcile-from-comms to close loops from enabled email, Slack, Notion, and Jira streams (and calendar if enabled in `_config/sources.md`) before synthesizing, so the briefing reflects work you did off-vault. Use first thing in the morning before starting work, once per day; this skill is the auto-triggering counterpart to the paste prompt at `Agents/Prompts/daily-briefing.md`.
+description: Generate today's 13-section operating-dashboard briefing for the vault (Top 3 outcomes through End-of-day prompts), open it in the browser, and refuse silent overwrites. Use whenever the user wants today's operating dashboard generated — signaled by phrases like "generate the daily briefing", "today's briefing", "what's the briefing for today", "make today's briefing", "give me the morning briefing", "what's on for today (full version)", or direct invocation "/daily-briefing" / "/daily-briefing 2026-05-19". Synthesizes the vault's current state into `Ops/Briefings/<YYYY-MM-DD>.md` per `_schemas/briefing.md` and the full procedure in `_workflows/daily-briefing.md` — reads active projects, open tasks, waiting-for items, unprocessed inbox, calendar for today + next 7 days, agent jobs, due trackers and fresh digests, surfaced followups, people needing a touch — and produces the 13-section briefing body (Top 3 outcomes, Calendar / time map, Tasks due today, Waiting on others, Projects at risk, New captures needing triage, Agent opportunities, Trackers, People, Followups surfaced today, Decisions needed, Starter prompts, End-of-day review prompts). Alongside the Markdown it writes `Ops/Briefings/<date>.items.json` (one entry per actionable item, carrying over yesterday's unanswered and kept review items) and opens a keyboard-first briefing review form — an inline widget, the local site's `/review/<date>` page, or a standalone page — whose submitted answers the `apply-review` skill applies. Refuses to overwrite an existing briefing without explicit confirmation. By default it first runs capture-comms + reconcile-from-comms to close loops from enabled email, Slack, Notion, and Jira streams (and calendar if enabled in `_config/sources.md`) before synthesizing, so the briefing reflects work you did off-vault. Use first thing in the morning before starting work, once per day; this skill is the auto-triggering counterpart to the paste prompt at `Agents/Prompts/daily-briefing.md`.
 ---
 
 # Generate today's daily briefing
@@ -71,7 +71,7 @@ Run these reads in parallel — one message, multiple tool calls. Read only what
 1. **Active projects** — `Atlas/Projects/*.md` where `status: active`.
 2. **Open tasks** — `Ops/Tasks/*.md` where `status` not in `[done, canceled]`.
 3. **Waiting-for / I-owe items** — tasks and commitments flagged as `waiting`.
-4. **Unprocessed inbox captures** — `Inbox/` top level (excluding `_filed/` and `README.md`).
+4. **Unprocessed inbox captures** — `Inbox/` top level (excluding `README.md` and the system slots `_filed/`, `_journal/`, `comms/`, and `reviews/` — none of them are captures).
 5. **Calendar events** — `Ops/Calendars/` for today + the next 7 days. (If a calendar-connector read is available and recently authorized, pull from there too — but the vault copy is the source of truth.)
 6. **Agent jobs** — `Agents/Jobs/*.md` where `status` in `[ready, needs_review]`.
 7. **Due trackers** — `Atlas/Trackers/*.md` where `status: active` AND `next_check <= <date>`.
@@ -81,6 +81,23 @@ Run these reads in parallel — one message, multiple tool calls. Read only what
 10. **People needing a touch** — `Atlas/People/*.md` where `next_touch <= <date>` AND `status: active`.
 
 Also pull yesterday's briefing's "## Shutdown notes" section if present — it carries the user's last signal about energy, surprises, and unresolved questions, which directly informs today's Top 3 outcomes.
+
+## Step 2a — Carry over the previous review
+
+Run this alongside the Step 2 reads. Find the previous briefing date — the newest `Ops/Briefings/YYYY-MM-DD.md` dated before `<date>` — and run:
+
+```
+python3 scripts/briefing_review.py carryover <previous briefing date> --json
+```
+
+If there is no previous briefing, or the command exits 1 because that day had no review (no items file, no answers), skip this step silently — say nothing about it in the briefing or the chat.
+
+Otherwise the output lists the items today's briefing must carry: rows the user left unanswered, rows answered `keep`, and `defer` rows whose date has come due (the CLI applies the date cutoff). It also returns every answer from that review, for pre-filling. Treat it like this:
+
+- **Place each carried item in its natural section** (a Task in §3 or §4, a Person in §9, a Followup in §10, and so on), not in a separate "carried" pile. Re-read its target note first: if the target is gone, or is already closed (`done`, `canceled`, `acted_on`, `dismissed`, `archived`, `dropped`), drop the item — the state was resolved some other way, for example through the chat "yes to 1,3" fallback.
+- **Do not drop a carried item just because nothing new happened.** A quiet day is the normal case for a `keep`; the item stays on the list until the user answers it with something other than `keep`.
+- **Mark it as carried** in the items file (Step 3b): `carried_from: <previous briefing date>` and, when the user answered it, `previous: {date, action, params, note}` copied from the carryover output. In the Markdown, append ` (carried from <previous date>)` to the line.
+- **Items whose answers were applied are not carried** (`done`, `cancel`, `drop`, `dismiss`, `skip`, `create_task`, and the rest). The carryover output already leaves them out; do not add them back with a `carried_from` marker. If vault state surfaces the same note again on its own merits (say, the Task created from a `create_task` answer is due today), it appears as a normal item.
 
 ## Step 2b — Build § 0 "State confirmation needed"
 
@@ -124,10 +141,10 @@ The vault thinks the following are still in progress. Were any of them already d
    ↳ signal: <e.g. "you emailed Alex the draft 2026-06-03" — present for reconcile-sourced items; omit for pure stale-state hits>
 2. ...
 
-Reply with the numbers that are done (e.g. "yes to 1,3") and the planner will close them via [[close-task]].
+Answer these in the briefing review (they open the form), or reply with the numbers that are done (e.g. "yes to 1,3") and the planner will close them via [[close-task]].
 ```
 
-Number the items so the Step 6 batched confirm ("yes to 1,3,4") maps cleanly. Omit §0 only when
+Number the items so the Step 6 batched confirm ("yes to 1,3,4") maps cleanly; the same number is each item's `label` (`#1`, `#2`, …) in the review items file. Omit §0 only when
 there are no reconcile proposals, no query hits, **and no coverage gaps** — its absence then means
 the pass completed without surfacing stale state or partial capture.
 
@@ -202,6 +219,49 @@ Body — the 13 sections, in this exact order with this exact heading text:
 - Honor sensitivity per `_schemas/_privacy.md` — summarize `private` items one level of abstraction higher, never quote `sensitive` items.
 - If a required input folder is missing entirely, note the gap in the relevant section ("(no calendar data available — `Ops/Calendars/` is empty)") rather than aborting.
 
+## Step 3b — Write the review items (`Ops/Briefings/<date>.items.json`)
+
+The briefing review form is built from a structured copy of the briefing's actionable items. Write it right after the Markdown, with the `Write` tool, at `Ops/Briefings/<date>.items.json`. Regenerating the briefing overwrites this file together with the `.md` — never leave a stale items file next to a fresh briefing. (An existing `Inbox/reviews/<date>.json` stays valid across a regeneration because answers are keyed by item `id`, not by position.)
+
+```json
+{
+  "schema": "memex.briefing-items/v1",
+  "date": "<date>",
+  "generated_at": "<same timestamp as the briefing frontmatter>",
+  "items": [ … ]
+}
+```
+
+**Which lines become items.** One entry per actionable list item in § 0 and §§ 3–11, plus a principal-asks section if this vault's briefing has one (`"section": "asks"`). Not § 1 (Top 3 outcomes), § 2 (calendar), § 12 (starter prompts), § 13 (end-of-day prompts), the § 0 coverage warning, or gap notes such as "(no calendar data available …)". Order the entries as they appear in the briefing; the form numbers rows by that order, and the number is never stored.
+
+**Fields per item.** `id`, `section`, `kind`, and `text` are required; include the rest when they apply.
+
+| field | rule |
+| --- | --- |
+| `id` | `<kind>:<target path without .md>` when the item has a target note (`task:Ops/Tasks/Send revised budget to Dana`). A target that is not Markdown (an `Inbox/` PDF) keeps its extension. With no target: `<kind>:<date>:<section>:<first 8 hex of sha1 of the plain text>` — plain text is `text` with `[[`/`]]`, backticks and emphasis markers removed; compute it with `python3 -c 'import hashlib,sys; print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:8])' "<plain text>"`. Ids must be unique within the file and stay the same across days, which is what makes carry-over work. |
+| `section` | The section number as a string (`"0"`, `"3"` … `"11"`), or `"asks"`. |
+| `section_title` | The heading text without its number; for §§ 8–9 add the subsection: `"People — I owe"`, `"Trackers — Due today"`. |
+| `label` | § 0 only: `#<n>`, the number printed in § 0, so a chat "yes to 1,3" and the form refer to the same rows. |
+| `group` | Optional: a bold group label inside a section (the project a block of tasks sits under). |
+| `kind` | From the target note's folder: `Ops/Tasks/` → `task`; `Atlas/People/<Name>.md` → `person`; `Atlas/Projects/` → `project`; an `Inbox/` capture → `capture`; `Atlas/Trackers/<Tracker>.md` → `tracker`; `Ops/Followups/` → `followup`; `Agents/Jobs/` → `job`. Every § 11 entry is `decision`, whatever it links to. A reconcile Tier-B *create* proposal, or any suggestion to start something that has no note yet, is `proposal`. Everything else — a Commitment, an Ask, a Letter, a fresh tracker digest, a line with no target — is `item`. |
+| `target` | Vault-relative path of the note the line is about, with extension (`Ops/Tasks/Send revised budget to Dana.md`): the leading wikilink, resolved to its real file. Confirm the file exists; omit `target` rather than guess. |
+| `text` | The briefing's Markdown for the line, without the list marker or number, wikilinks kept. |
+| `detail` | The `↳` continuation lines, one string each, without the arrow (`"signal: you emailed Dana the draft 2026-11-09"`). |
+| `status`, `due` | Read from the target note's frontmatter, never from memory or the previous briefing. `due` is the date a `defer` would move: Task `due`, Followup `surface_on`, Person `next_touch`, Project `next_review`, Tracker `next_check`. Omit when the field is empty — never invent one. |
+| `signal`, `threads` | Reconcile-sourced items only: `signal` is the `↳ signal:` text; `threads` lists each `↳ thread:` locator with its source prefix (`gmail:<threadId>`, `notion:<page id>`, `jira:<issue key>`). Skip `n/a` locators (Slack). |
+| `sensitivity` | Inherited from the target note's `sensitivity:` (`normal`, `private`, `sensitive`). Use `private` when there is no target or the field is missing, and `sensitive` for anything a comms digest marked `[sensitive — summarized]`. Never lower it. |
+| `also_in` | When the same `id` would appear in more than one section, emit it once — at its first appearance — and list the other section numbers here (`["3"]`). |
+| `carried_from`, `previous` | Carried items only, from Step 2a. |
+| `actions` | Omit to get the kind's default pills. Set it only to *narrow* that list: a § 0 Letter becomes `["do", "done", "defer", "keep"]` (`done` = submitted); a fresh tracker digest becomes `["do", "create_task", "drop"]`. Never add an action the kind does not have, and keep `do` first. |
+
+Then validate:
+
+```
+python3 scripts/briefing_review.py validate <date>
+```
+
+Exit 0 means the file is good. On exit 1, read the printed problems, fix the items file (duplicate ids, a missing required field, an unknown kind or action, a bad section), and re-run until it passes. Do not continue to Step 4 with a failing file; the review form would be missing rows or refuse to build.
+
 ## Step 4 — Log
 
 Append one line to `log.md`:
@@ -235,10 +295,62 @@ Skip this step only if the user explicitly says "don't open it" or "just write t
 
 (Prior versions of this skill opened the briefing in Obsidian via `obsidian://open?vault={{VAULT_NAME}}&file=...` — that was superseded in favor of Quartz/browser. Memory `feedback_open_artifacts_in_browser` is the canonical statement of the default.)
 
+## Step 5b — Open the review
+
+The review is the form where the user answers every item in the items file: one row per item, action pills (`Alt+1` is always "Do it"), a note field, and a submit step that hands the answers back. Skip this step only when the user said "don't open it" or "just write the file", the same as Step 5.
+
+**Pick the surface.** Read `review_surface` from `_config/overrides.md` — a line `review_surface: <value>` in the frontmatter or the body. When the file or the key is absent, the value is `auto`. (Older vaults never received this key in their seeded overrides file, so absence is the normal case.)
+
+| `review_surface` | Surface used |
+| --- | --- |
+| `auto` (default) | `widget` when this session has an inline-widget tool (a tool whose name ends in `show_widget`); else `server` when the Quartz site answers on `:{{QUARTZ_PORT}}` (check below); else `page`. |
+| `widget`, `server`, `page` | That surface. If it is unavailable (no widget tool; site down), fall back to `page` and say so in one line. |
+| `artifact` | The artifact surface — and also whenever the user asks for the review as an artifact. Never chosen by `auto`. |
+
+**widget** — for a host that renders inline HTML widgets and gives them `sendPrompt`.
+
+```
+python3 scripts/briefing_review.py build <date> --surface widget
+```
+
+It prints one path per line: `outputs/briefing-review/<date>.widget.html`, or, when the fragment is larger than the size limit, one file per page (`<date>.widget.1.html`, `<date>.widget.2.html`, …). Read each file and pass its full contents to the widget tool, in the printed order, one widget per file. Do not edit or trim the fragments. Each page submits its own rows: the submit button sends a text export starting `Briefing review — <date>` back into this conversation.
+
+**server** — the Quartz site route, built fresh on every request; there is nothing to build. Confirm the running site has the route (a site from an older engine returns 404):
+
+```
+curl -s -o /dev/null -w '%{http_code}' "http://localhost:{{QUARTZ_PORT}}/review/<date>"
+```
+
+On `200`, `open "http://localhost:{{QUARTZ_PORT}}/review/<date>"`. On anything else, use `page`. Submitting saves the answers to `Inbox/reviews/<date>.json` directly, and the form autosaves drafts as the user types.
+
+**page** — a self-contained file that works from `file://`:
+
+```
+python3 scripts/briefing_review.py build <date>
+```
+
+It prints `outputs/briefing-review/<date>.html`; run `open` on that path. Submitting copies a text export to the clipboard for the user to paste into the chat.
+
+**artifact** — only when the user asked for it or set `review_surface: artifact`; it puts briefing content on claude.ai, so it is never the automatic choice.
+
+```
+python3 scripts/briefing_review.py build <date> --surface artifact
+```
+
+- The default `--redact private` drops `sensitive` items entirely and reduces `private` items to their title, section and pills. Never pass a lower level (`--redact sensitive`) unless the user says so in this conversation; `none` is refused for this surface.
+- Read the generated file in full before publishing it. Publishing distributes it, and you must know what it contains.
+- Publish it as a **private** artifact with `capabilities: {db: {}, user: {}}`. Never share or pin it unless asked.
+- Tell the user how many items were withheld as local-only (the `sensitive` count in the items file) and how many `private` items show only their title.
+- The form saves answers to the artifact's database, doc `reviews/<date>` (collection `reviews`, doc id `<date>`). Read them back with the artifact data tool when the user says they are done; [[apply-review]] covers that path.
+
+After opening, tell the user in one line how to switch: "To use a different review surface, set `review_surface: widget | server | page | artifact` in `_config/overrides.md`."
+
 ## Step 6 — Report back
 
 ```
 Briefing generated: Ops/Briefings/<date>.md (opened in browser at http://localhost:{{QUARTZ_PORT}}/Ops/Briefings/<date>).
+Review: <N> items, <K> carried from <previous date> — <shown inline above | open at http://localhost:{{QUARTZ_PORT}}/review/<date> | opened outputs/briefing-review/<date>.html | private artifact <link>, <W> items withheld as local-only>. Answer there and submit.
+To use a different review surface, set `review_surface: widget | server | page | artifact` in `_config/overrides.md`.
 
 <IF COMMS COVERAGE IS PARTIAL:>
 **Comms coverage is partial:** <source/direction> did not scan <range> (<reason>). Absence in that range is inconclusive.
@@ -247,7 +359,7 @@ Briefing generated: Ops/Briefings/<date>.md (opened in browser at http://localho
 **Confirm these closes** (vault may be lagging reality — from your comms/calendar + a vault scan):
 1. [[<item 1>]] — still <status>. <signal, if reconcile-sourced>
 2. [[<item 2>]] — ...
-Reply with the ones that are done (e.g. "yes to 1,3") and I'll close them.
+They are at the top of the review. If you'd rather answer here, reply with the ones that are done (e.g. "yes to 1,3") and I'll close them.
 
 Top 3 outcomes:
 1. <outcome 1>
@@ -261,8 +373,15 @@ Surface any coverage gap at the top of the chat report-back, before §0 confirma
 3. The user must see when the comms capture is partial; never let a successfully written briefing
 make an un-scanned range look complete. Then surface the § 0 items if present — the user reads the
 chat before opening the briefing file, and closing stale state in the same session is the whole
-point. This is the **single batched confirmation** for everything Step 1b proposed. When the user
-confirms ("yes to 1,3"):
+point. This is the **single batched confirmation** for everything Step 1b proposed.
+
+**The primary path is the review form.** When answers arrive — a pasted or `sendPrompt` text export
+beginning `Briefing review — <date>`, an `Inbox/reviews/<date>.json` file the server surface wrote,
+or answers in the review artifact's database — hand off to [[apply-review]]. It saves the answers,
+applies them through the owning skills, records each one in the review ledger, and reports. Do not
+apply review answers inline in this skill.
+
+**The chat reply stays valid as a fallback.** When the user confirms in chat instead ("yes to 1,3"):
 
 - **Task closes → route through [[close-task]]** (never hand-edit `status: done` — close-task enforces the final `# Work log` entry and the `unblocks:` cascade, and the "agents never self-close" guardrail means this confirmation is what authorizes it).
 - **Letter `drafting → submitted`** → the clean two-field edit (`status:` + `submitted:`), per [[reconcile-from-comms]].
@@ -277,7 +396,9 @@ Don't recapitulate the whole briefing in chat — the file is the artifact.
 - **Does not silently overwrite.** If today's briefing exists, stop and ask. If it has `## Shutdown notes` appended, refuse the overwrite outright unless the user explicitly says "I know, regenerate and lose the shutdown notes."
 - **Does not auto-execute outcomes.** It writes the briefing; the user decides what to actually do.
 - **Does not lint.** Lint is a separate weekly task; the briefing surfaces signals but doesn't run check 1–20.
-- **Does not modify any of the source notes it reads from.** Projects, Tasks, People, Trackers — all read-only here.
+- **Does not modify any of the source notes it reads from.** Projects, Tasks, People, Trackers — all read-only here. Carry-over (Step 2a) only reads the previous review.
+- **Does not apply review answers.** It writes the items file and opens the form; [[apply-review]] applies what the user submits. The chat "yes to 1,3" fallback for § 0 closes is the one exception, handled in Step 6.
+- **Does not publish the review off the machine on its own.** The artifact surface is used only when the user asks for it or sets `review_surface: artifact`, always as a private artifact, never with `sensitive` items, and never at a lower redaction level than the default unless the user says so.
 
 ## Model recommendation
 
@@ -291,5 +412,9 @@ Don't recapitulate the whole briefing in chat — the file is the artifact.
 - `capture-comms` / `reconcile-from-comms` — Step 1b runs these by default to close loops from enabled email, Slack, Notion, and Jira streams (and calendar if enabled) before synthesis.
 - `_config/sources.md` — which streams Step 1b checks; edit it to turn a stream on/off.
 - `shutdown-review` — the end-of-day counterpart that appends to this briefing.
+- [[apply-review]] — applies the answers submitted in the briefing review (Step 5b) and annotates § 0 with what was resolved.
+- `scripts/briefing_review.py` — the review CLI: `validate` (Step 3b), `carryover` (Step 2a), `build` (Step 5b); `save`, `plan`, `mark` and `annotate` belong to apply-review.
+- `_config/overrides.md` — `review_surface: auto | widget | server | page | artifact` picks where the review opens (absent = `auto`).
+- `Inbox/reviews/` — saved answers (`<date>.json`) and the apply ledger (`<date>.ledger.json`); a system slot, never triaged as a capture.
 - `session-start` — the lighter-weight pre-flight (5–10 seconds vs. several minutes here).
 - `log-mutation` — the canonical log-append helper.
