@@ -102,7 +102,7 @@ body {
 
 #review-root {
   --rv-gutter: 16px;
-  --rv-pills-w: 15.5rem;
+  --rv-pills-w: 16.5rem;
   --rv-note-w: clamp(12rem, 27%, 21rem);
   container-type: inline-size;
   box-sizing: border-box;
@@ -260,10 +260,7 @@ body {
 
 /* ---- banners / export panel ---- */
 #review-root .rv-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 12px;
+  display: block;
   margin: 12px 0 0;
   padding: 9px 12px;
   border-radius: 8px;

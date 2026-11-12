@@ -21,7 +21,6 @@ import sys
 import tempfile
 import threading
 import urllib.parse
-from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ITEMS_SCHEMA = "memex.briefing-items/v1"
@@ -459,7 +458,7 @@ def parse_briefing_markdown(md, date):
     """Parse a briefing's Markdown into raw rows (dicts) in document order.
 
     Rows have section, section_title, label, group, text, detail. Sections 1, 2,
-    12, 13 and `### Upcoming meetings` are skipped; `↳` lines are detail of the
+    12, 13 and `### Upcoming meetings` are skipped; `\u21b3` lines are detail of the
     row above; a childful list item ending in ':' without a wikilink is a group label.
     """
     lines = strip_frontmatter(md).splitlines()
