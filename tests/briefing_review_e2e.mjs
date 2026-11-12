@@ -443,7 +443,7 @@ async function main() {
     await step("artifact surface (db runtime mock)", async () => {
       const file = cli(vault, ["build", DATE, "--surface", "artifact", "--site", SITE]);
       const html = fs.readFileSync(file, "utf8");
-      check("artifact starts with <title>Briefing Review</title> and <style>", /^<!doctype html>\s*<html lang="en">\s*<head>\s*<title>Briefing Review<\/title>\s*<style>/.test(html));
+      check("artifact starts with <title>Briefing Review</title> and <style>", /^<title>Briefing Review<\/title>\s*<style>/.test(html) && !/<(html|head|body|!doctype)/i.test(html));
       check("artifact has no localhost links", !html.includes("localhost"));
       const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
       await context.addInitScript(() => {
