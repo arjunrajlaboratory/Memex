@@ -103,7 +103,7 @@ Routing (always: create the tracked output first, then move the original):
 - **After the typed output is in place**, MOVE the original from `Inbox/<file>` to `Inbox/_filed/<YYYY-MM-DD>/<file>` (do `mkdir -p Inbox/_filed/<today>` once at the start of the run).
 - **Uncertain items** → leave at the top level of `Inbox/` (never moved into `_filed/`); add a needs-review entry under `Ops/Followups/` describing what's unclear.
 
-**Feedback signal:** empty top level of `Inbox/` (minus its README and the `_filed/` archive) means every dropped file has been filed. `Inbox/_filed/` is gitignored — the user sweeps it manually to reclaim disk.
+**Feedback signal:** empty top level of `Inbox/` (minus its README and the system slots: the `_filed/` archive, `_journal/`, `comms/` capture digests, and `reviews/` briefing-review answers) means every dropped file has been filed. `Inbox/_filed/` is gitignored — the user sweeps it manually to reclaim disk.
 
 The agent never deletes from `Inbox/`. Move into `_filed/` is the only out-of-dropbox transition.
 
@@ -128,7 +128,7 @@ Given a raw source in `Raw/sources/`:
 
 ### Daily briefing — see [[_workflows/daily-briefing]]
 
-Generate `Ops/Briefings/<today>.md` per the briefing schema, including the People section and the tracker-digest section. By default the briefing first runs the **loop-closing pass** (Step 1b): `capture-comms` then `reconcile-from-comms` over the capture streams enabled in `_config/sources.md` (sent + received email/Slack plus Notion comments/edits and Jira assignments/comments/transitions/field mentions, and calendar if enabled), so state that lagged reality is reconciled before synthesis. Every external source read is read-only. Tier-A reversible bookkeeping auto-applies; Tier-B task closes are confirmed in one batch and routed through `close-task` (agents never self-close).
+Generate `Ops/Briefings/<today>.md` per the briefing schema, including the People section and the tracker-digest section. By default the briefing first runs the **loop-closing pass** (Step 1b): `capture-comms` then `reconcile-from-comms` over the capture streams enabled in `_config/sources.md` (sent + received email/Slack plus Notion comments/edits and Jira assignments/comments/transitions/field mentions, and calendar if enabled), so state that lagged reality is reconciled before synthesis. Every external source read is read-only. Tier-A reversible bookkeeping auto-applies; Tier-B task closes are confirmed in one batch and routed through `close-task` (agents never self-close). The briefing also writes `Ops/Briefings/<today>.items.json` and opens a review form; the user's submitted answers are applied by the `apply-review` skill, which keeps outbound messages as drafts and never self-closes.
 
 ### Weekly review — see [[_workflows/weekly-review]]
 

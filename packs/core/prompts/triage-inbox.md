@@ -21,7 +21,9 @@ Before doing anything else, read the following files in full:
 Then carry out the capture-triage workflow:
 
 1. List every file under `Inbox/` (untracked drop zone — skip
-   `Inbox/README.md` and skip everything under `Inbox/_filed/`).
+   `Inbox/README.md` and everything under the system slots
+   `Inbox/_filed/`, `Inbox/_journal/`, `Inbox/comms/`, and
+   `Inbox/reviews/`; none of them are captures).
    Process them one at a time.
 
    **`Inbox/` handling:** this folder is gitignored. For each file:

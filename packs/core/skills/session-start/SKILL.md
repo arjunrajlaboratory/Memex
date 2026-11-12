@@ -13,7 +13,7 @@ Run these reads in **parallel** (one message, multiple tool calls):
 
 1. **Log tail** — `log.md`, last ~30 lines (top of file, since newest is on top).
 2. **`needs_review` queue** — grep across `Ops/Tasks/` and `Atlas/` for `status: needs_review`. Return file paths only.
-3. **`Inbox/` top level** — list everything at `Inbox/` excluding `_filed/` and `README.md`. Anything still here = unfiled.
+3. **`Inbox/` top level** — list everything at `Inbox/` excluding `README.md` and the system slots `_filed/`, `_journal/`, `comms/`, and `reviews/`. Anything still here = unfiled.
 4. **Today's briefing** — check whether `Ops/Briefings/<today>.md` exists.
 5. **Active Tasks** — grep `Ops/Tasks/` for `status: in_progress` and `status: next`, count and sample top 5 by file mtime.
 6. **Overdue scheduled-start Tasks** — grep `Ops/Tasks/` for `status: scheduled` AND `scheduled_start:` dates ≤ today. These are tasks that were time-blocked for a moment that has now passed without the user explicitly closing or rescheduling them — they're the highest-friction drift signal because the calendar event has fired and the Task is still pretending to be in the future. Count and list up to 5 with their `scheduled_start` dates.

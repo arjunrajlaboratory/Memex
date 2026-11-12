@@ -501,7 +501,10 @@ def _write_seed_files(target: pathlib.Path, answers: dict[str, Any], streams: li
         "Use this file for local operating preferences that should take precedence "
         "over engine-owned framework defaults. Keep durable customizations here "
         "instead of editing `.claude/skills/`, `_schemas/`, `_templates/`, "
-        "`_workflows/`, `Agents/Prompts/`, `scripts/`, or `quartz/` in place.\n"
+        "`_workflows/`, `Agents/Prompts/`, `scripts/`, or `quartz/` in place.\n\n"
+        "Known keys (an absent key means the default):\n\n"
+        "- `review_surface: auto` - where the daily briefing opens its review form: "
+        "`auto` (default), `widget`, `server`, `page`, or `artifact`.\n"
     )
     # Seeds are write-once: never clobber an existing file (re-running init with
     # --force must not reset log.md / _config/overrides.md). Existing seeds are

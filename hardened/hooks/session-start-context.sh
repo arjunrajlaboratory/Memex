@@ -60,11 +60,12 @@ fi
 # Inbox/ top-level, excluding README, dotfiles (.DS_Store), and the
 # system-managed slots that live in Inbox permanently: underscore-prefixed
 # folders (_filed archive, _journal — the underscore marks a system slot per
-# _schemas/journal.md) and comms/ (capture-comms digests). Dropped user
+# _schemas/journal.md), comms/ (capture-comms digests), and reviews/
+# (briefing-review answers + apply ledger, owned by apply-review). Dropped user
 # FOLDERS still count — "drop in a folder of notes" is a supported capture
 # path, so a lone directory must not read as "empty (clean)".
 if [ -d "Inbox" ]; then
-  inbox_count="$(find Inbox -mindepth 1 -maxdepth 1 ! -name 'README.md' ! -name '.*' ! -name '_*' ! -name 'comms' 2>/dev/null | wc -l | tr -d ' ')"
+  inbox_count="$(find Inbox -mindepth 1 -maxdepth 1 ! -name 'README.md' ! -name '.*' ! -name '_*' ! -name 'comms' ! -name 'reviews' 2>/dev/null | wc -l | tr -d ' ')"
   if [ "${inbox_count:-0}" != "0" ]; then
     echo "Inbox/: ${inbox_count} item(s) waiting — consider /triage-inbox"
   else

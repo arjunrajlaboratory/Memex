@@ -8,6 +8,7 @@
       "create-task",
       "close-task",
       "daily-briefing",
+      "apply-review",
       "weekly-review",
       "lint",
       "log-mutation",
