@@ -648,7 +648,8 @@ class TestBuild(VaultCase):
         self.write_items()
         [path] = self.built("--surface", "artifact")
         html = path.read_text()
-        self.assertTrue(html.startswith("<!doctype html>\n<html lang=\"en\">\n<head>\n<title>Briefing Review</title>\n<style>"))
+        self.assertTrue(html.startswith("<title>Briefing Review</title>\n<style>"))
+        self.assertNotRegex(html.lower(), r"<!doctype|<html|<head|<body")
         data = self.payload(html)
         ids = {i["id"]: i for i in data["items"]}
         self.assertNotIn("item:2026-11-12:asks:12345678", ids)

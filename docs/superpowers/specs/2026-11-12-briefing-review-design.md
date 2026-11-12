@@ -243,7 +243,7 @@ State: `{[id]: {action, params, note}}`, keyed by item id. Storage and submit de
   no doctype/html/head/body) for a host that renders inline HTML widgets and exposes
   `sendPrompt(text)`. Compact layout. If the fragment exceeds `--max-bytes` (default 60000) it is
   split by section into `…widget.1.html`, `…widget.2.html`, …; each page submits its own rows.
-- **artifact** — a full page for a private claude.ai Artifact with `capabilities: {db: {}, user: {}}`.
+- **artifact** — page content (title and style first, no doctype/html/head/body; the publisher adds them) for a private claude.ai Artifact with `capabilities: {db: {}, user: {}}`.
   Sensitivity gate (`--redact`, default `private`): `sensitive` items are always dropped from the
   payload; with `--redact private`, `private` items keep only their leading wikilink title, section
   and pills (no signal, detail, status prose); `--redact sensitive` keeps private text; `none` is

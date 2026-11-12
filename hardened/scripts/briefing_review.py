@@ -1271,14 +1271,19 @@ def render_surface(payload, surface, js, css):
         return (f"<style>{compact_source(widget_css(css), 'css')}</style>\n"
                 f"<div id=\"review-root\" data-surface=\"widget\"></div>\n"
                 f"<script>window.__REVIEW__={data};\n{compact_source(js, 'js')}</script>\n")
-    title = "Briefing Review" if surface == "artifact" else f"Briefing review &#8212; {payload['date']}"
+    body = (f"<div id=\"review-root\" data-surface=\"{surface}\"></div>\n"
+            f"<script>window.__REVIEW__={data};</script>\n<script>{js}</script>\n")
+    if surface == "artifact":
+        # The Artifact publisher wraps the file in its own doctype/head/body
+        # skeleton, so this surface is page content only: title and style first.
+        return f"<title>Briefing Review</title>\n<style>{css}</style>\n{body}"
+    title = f"Briefing review &#8212; {payload['date']}"
     return ("<!doctype html>\n<html lang=\"en\">\n<head>\n"
             f"<title>{title}</title>\n<style>{css}</style>\n"
             "<meta charset=\"utf-8\">\n"
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
             "</head>\n<body>\n"
-            f"<div id=\"review-root\" data-surface=\"{surface}\"></div>\n"
-            f"<script>window.__REVIEW__={data};</script>\n<script>{js}</script>\n"
+            f"{body}"
             "</body>\n</html>\n")
 
 
