@@ -65,3 +65,30 @@ test('submitting the same text twice does not duplicate it', () => {
   const once = merge('note', 'Briefing review — 2026-11-12');
   assert.equal(merge(once, 'Briefing review — 2026-11-12'), once);
 });
+
+const gate = (g) => JSON.parse(JSON.stringify(run('checkPromptBridgeGate')(g)));
+
+test('a prompt is accepted only from a focused frame or right after a user gesture', () => {
+  const base = { frameFocused: false, recentActivation: false, lastStagedAt: null, now: 10_000 };
+  assert.equal(gate(base).ok, false);
+  assert.match(gate(base).error, /not focused/);
+  assert.deepEqual(gate({ ...base, frameFocused: true }), { ok: true });
+  assert.deepEqual(gate({ ...base, recentActivation: true }), { ok: true });
+});
+
+test('one staged prompt per frame every few seconds', () => {
+  assert.equal(run('PROMPT_BRIDGE_MIN_INTERVAL_MS'), 3000);
+  const g = { frameFocused: true, recentActivation: false, now: 10_000 };
+  const limited = gate({ ...g, lastStagedAt: 8_000 });
+  assert.equal(limited.ok, false);
+  assert.match(limited.error, /too many/);
+  assert.deepEqual(gate({ ...g, lastStagedAt: 7_000 }), { ok: true });
+  assert.deepEqual(gate({ ...g, lastStagedAt: null }), { ok: true });
+});
+
+test('a non-empty draft is never overwritten or re-focused: the text waits behind Insert', () => {
+  const mode = run('promptBridgeStageMode');
+  assert.equal(mode(''), 'insert');
+  assert.equal(mode('  \n'), 'insert');
+  assert.equal(mode('half-typed message'), 'confirm');
+});

@@ -855,7 +855,8 @@ async function sendMessage(text?: string): Promise<void> {
   text = (text || composer.value).trim();
   if (!text || !state.vault || vaultOpening) return;
   addUserMsg(text);
-  composer.value = ''; autosize(); setComposerNotice('');
+  composer.value = ''; autosize();
+  if (!pendingPrompt) setComposerNotice('');   // a waiting "Insert" offer outlives the user's own send
   const r = await M.sendMessage(text);
   if (!r.ok) flashChat('⚠ ' + (r.error || 'Could not send'));
 }
@@ -868,17 +869,30 @@ composer.addEventListener('keydown', (e) => {
 function autosize(): void { composer.style.height = 'auto'; composer.style.height = Math.min(composer.scrollHeight, 180) + 'px'; }
 composer.addEventListener('input', () => {
   autosize();
-  if (!composer.value.trim()) setComposerNotice('');
+  if (!composer.value.trim() && !pendingPrompt) setComposerNotice('');
 });
 
-function setComposerNotice(text: string): void {
+// Text an artifact offered while the user had a draft: held until they click Insert.
+let pendingPrompt: { text: string; notice: string } | null = null;
+
+function setComposerNotice(text: string, action?: { label: string; run: () => void }): void {
   const notice = $('composerNotice');
-  notice.textContent = text;
+  if (!action) pendingPrompt = null;
+  notice.replaceChildren(document.createTextNode(text));
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'composer-notice-btn';
+    btn.textContent = action.label;
+    btn.onclick = action.run;
+    notice.append(' ', btn);
+  }
   notice.hidden = !text;
 }
 
 /** Put text into the composer (after any draft) for the user to review and send. */
 function stagePrompt(text: string, notice: string): void {
+  pendingPrompt = null;
   composer.value = mergePromptIntoDraft(composer.value, text);
   autosize();
   composer.focus();
@@ -886,6 +900,15 @@ function stagePrompt(text: string, notice: string): void {
   composer.scrollTop = composer.scrollHeight;
   composer.scrollIntoView({ block: 'nearest' });
   setComposerNotice(notice);
+}
+
+/** The user is mid-draft: never move their caret; offer the text behind an Insert button. */
+function offerPrompt(text: string, what: string): void {
+  pendingPrompt = { text, notice: `${what} ready — press Enter to send` };
+  setComposerNotice(`${what} waiting to be added to your message.`, {
+    label: 'Insert',
+    run: () => { const p = pendingPrompt; if (p) stagePrompt(p.text, p.notice); },
+  });
 }
 
 $('chips').addEventListener('click', (e) => {
@@ -1481,17 +1504,39 @@ function artifactIframe(url: string | undefined): HTMLIFrameElement {
 // ---------------- artifact → composer prompt bridge ----------------
 // An artifact (agent-written HTML) may hand text to the chat, e.g. the briefing
 // review form's answers. It only fills the composer: the user reads and sends
-// it, so an artifact can never inject a turn on its own.
+// it, so an artifact can never inject a turn on its own. It is also gated
+// (checkPromptBridgeGate): only right after the user interacted with that frame,
+// at most once every few seconds per frame; and when the user has a draft, the
+// text waits behind an Insert button instead of moving their caret.
+const promptBridgeLastStaged = new WeakMap<HTMLIFrameElement, number>();
 window.addEventListener('message', (event: MessageEvent) => {
   const frame = findPromptBridgeFrame(event.source, document.querySelectorAll<HTMLIFrameElement>('iframe[data-artifact="1"]'));
   if (!frame || !frame.src.startsWith('artifact:')) return;
   const parsed = parsePromptBridgeMessage(event.data);
   if (parsed.kind === 'ignore') return;
-  if (parsed.kind === 'accept') {
-    const what = parsed.text.startsWith('Briefing review') ? 'Review answers' : 'Text from the artifact';
-    stagePrompt(parsed.text, `${what} ready — press Enter to send`);
+  let ack: { type: string; ok: boolean; error?: string; staged?: boolean };
+  if (parsed.kind === 'reject') {
+    ack = { type: PROMPT_BRIDGE_ACK_TYPE, ok: false, error: parsed.error };
+  } else {
+    const now = Date.now();
+    const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+    const gate = checkPromptBridgeGate({
+      frameFocused: document.activeElement === frame,
+      recentActivation: !!(activation && activation.isActive),
+      lastStagedAt: promptBridgeLastStaged.get(frame) ?? null,
+      now,
+    });
+    if (!gate.ok) {
+      ack = { type: PROMPT_BRIDGE_ACK_TYPE, ok: false, error: gate.error };
+    } else {
+      promptBridgeLastStaged.set(frame, now);
+      const what = parsed.text.startsWith('Briefing review') ? 'Review answers' : 'Text from the artifact';
+      const mode = promptBridgeStageMode(composer.value);
+      if (mode === 'insert') stagePrompt(parsed.text, `${what} ready — press Enter to send`);
+      else offerPrompt(parsed.text, what);
+      ack = { type: PROMPT_BRIDGE_ACK_TYPE, ok: true, staged: mode === 'insert' };
+    }
   }
-  const ack = parsed.kind === 'accept' ? { type: PROMPT_BRIDGE_ACK_TYPE, ok: true } : { type: PROMPT_BRIDGE_ACK_TYPE, ok: false, error: parsed.error };
   const target = typeof event.origin === 'string' && event.origin.startsWith('artifact://') ? event.origin : '*';
   try { (event.source as Window).postMessage(ack, target); } catch (_) {}
 });

@@ -262,7 +262,8 @@
         note: (e.note || "").trim(), kind: item.kind, target: item.target || "", text: plainText(item.text) });
     });
     return { schema: "memex.briefing-review/v1", date: DATE, surface: SURFACE, submitted: !!submitted,
-      submitted_at: submitted ? nowIso() : (meta.submittedAt || null), answers: answers, unanswered: unanswered };
+      submitted_at: submitted ? nowIso() : (meta.submittedAt || null), items_hash: R.items_hash || null,
+      answers: answers, unanswered: unanswered };
   }
 
   function sectionHeading(item) {
@@ -272,9 +273,12 @@
 
   // Mirrors format_export() in Python; see the contract's "Text export" grammar.
   function exportText() {
-    const lines = ["Briefing review " + DASH + " " + DATE + " (apply with the apply-review skill)"];
-    if (PAGED && ITEMS.length) {
-      lines.push("Part " + R.page + " of " + R.pages + " " + DASH + " rows " + ITEMS[0].n + "-" + ITEMS[ITEMS.length - 1].n + ".");
+    // The items hash lets `save --from-export` detect a briefing regenerated since this page was built.
+    const lines = ["Briefing review " + DASH + " " + DATE + (R.items_hash ? " " + DOT + " items " + R.items_hash : "") +
+      " (apply with the apply-review skill)"];
+    if (PAGED) {
+      const rows = R.rows || (ITEMS.length ? [ITEMS[0].n, ITEMS[ITEMS.length - 1].n] : [0, 0]);
+      lines.push("Part " + R.page + " of " + R.pages + " " + DASH + " rows " + rows[0] + "-" + rows[1] + ".");
     }
     lines.push("");
     let current = null, unanswered = 0;
@@ -472,7 +476,7 @@
     root.appendChild(ui.banner);
     root.appendChild(ui.exportWrap);
     if (R.withheld) {
-      root.appendChild(h("p", { class: "rv-withheld", text: R.withheld + (R.withheld === 1 ? " sensitive item is" : " sensitive items are") +
+      root.appendChild(h("p", { class: "rv-withheld", text: R.withheld + (R.withheld === 1 ? " private or sensitive item is" : " private or sensitive items are") +
         " withheld from this page (local-only). Review " + (R.withheld === 1 ? "it" : "them") + " in your vault." }));
     }
     if (!ITEMS.length) root.appendChild(h("p", { class: "rv-empty", text: "No reviewable items in this briefing." }));
@@ -751,14 +755,16 @@
     return submitClipboard(n);
   }
 
-  function submitClipboard(n) {
+  // `why` (optional) explains that a richer hand-off failed and this is the fallback.
+  function submitClipboard(n, why) {
     const text = exportText(), obj = answersObject(true);
     showExport(text);
     copyText(text).then(function (ok) {
       markSubmitted(obj);
-      showBanner(ui.banner, "ok", ok
+      const lead = why ? [h("b", { text: why }), " "] : [];
+      showBanner(ui.banner, why ? "error" : "ok", lead.concat(ok
         ? [h("b", { text: CHECK + " Copied " + n + (n === 1 ? " answer" : " answers") }), " " + DASH + " paste into Claude to apply them."]
-        : [h("b", { text: "Copy the text below" }), " and paste it into Claude to apply your answers."]);
+        : [h("b", { text: "Copy the text below" }), " and paste it into Claude to apply your answers."]));
       if (!ok) { ui.exportBox.focus(); ui.exportBox.select(); }
       ui.banner.scrollIntoView({ block: "nearest" });
     });
@@ -766,25 +772,62 @@
 
   function submitWidget(n) {
     const text = exportText(), obj = answersObject(true);
-    let how = null;
+    const count = n + (n === 1 ? " answer" : " answers") + (PAGED ? " from part " + R.page + " of " + R.pages : "");
     try {
-      if (typeof window.sendPrompt === "function") { window.sendPrompt(text); how = "Sent to Claude"; }
-      else if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: "memex:sendPrompt", text: text }, "*");
-        how = "Sent to Claude";
+      if (typeof window.sendPrompt === "function") {
+        window.sendPrompt(text);
+        markSubmitted(obj);
+        showBanner(ui.banner, "ok", [h("b", { text: CHECK + " Sent to Claude" }), " " + DASH + " " + count + "."]);
+        return;
       }
-    } catch (e) { how = null; }
-    if (!how) return submitClipboard(n);
-    markSubmitted(obj);
-    showBanner(ui.banner, "ok", [h("b", { text: CHECK + " " + how }), " " + DASH + " " + n + (n === 1 ? " answer" : " answers") +
-      (PAGED ? " from part " + R.page + " of " + R.pages + "." : ".")]);
+    } catch (e) { return submitClipboard(n, "Couldn't hand the answers to Claude " + DASH + " copy them instead."); }
+    if (!(window.parent && window.parent !== window)) return submitClipboard(n);
+    // Framed (Memex Desktop): hand the export to the parent and wait for its ack.
+    ui.submit.disabled = true;
+    setStatus("Handing to the app" + ELL);
+    waitForAck(text, ACK_TIMEOUT_MS).then(function (ack) {
+      ui.submit.disabled = false;
+      setStatus("");
+      if (!ack || !ack.ok) {
+        submitClipboard(n, "Couldn't hand the answers to the app" + (ack && ack.error ? " (" + ack.error + ")" : "") +
+          " " + DASH + " copy them instead.");
+        return;
+      }
+      markSubmitted(obj);
+      showBanner(ui.banner, "ok", ack.staged === false
+        ? [h("b", { text: CHECK + " Handed to Memex" }), " " + DASH + " " + count + ". Click Insert under the message box, then press Enter there to send them."]
+        : [h("b", { text: CHECK + " In the message box" }), " " + DASH + " " + count + " are not sent yet: press Enter in the Memex message box to send them."]);
+    });
+  }
+
+  const ACK_TIMEOUT_MS = 1500;
+  // Post {type:"memex:sendPrompt"} to the parent; resolve with its ack, or null on timeout.
+  function waitForAck(text, timeout) {
+    return new Promise(function (resolve) {
+      let done = false, timer = null;
+      function finish(v) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMsg);
+        resolve(v);
+      }
+      function onMsg(ev) {
+        const d = ev.data;
+        if (ev.source !== window.parent || !d || d.type !== "memex:sendPrompt:ack") return;
+        finish({ ok: d.ok === true, error: typeof d.error === "string" ? d.error.slice(0, 200) : "", staged: d.staged });
+      }
+      window.addEventListener("message", onMsg);
+      timer = setTimeout(function () { finish(null); }, timeout);
+      try { window.parent.postMessage({ type: "memex:sendPrompt", text: text }, "*"); } catch (e) { finish(null); }
+    });
   }
 
   function submitServer(n) {
     ui.submit.disabled = true;
     setStatus("Submitting" + ELL);
     const obj = answersObject(true);
-    remote.post(obj, false).then(function () {
+    remote.submit(obj).then(function () {
       markSubmitted(obj);
       setStatus("");
       showBanner(ui.banner, "ok", [h("b", { text: CHECK + " Submitted " + n + (n === 1 ? " answer" : " answers") }),
@@ -819,6 +862,8 @@
 
   // A serial, coalescing write queue: one write in flight; later calls ride on
   // the queued write, which reads the newest state when it starts.
+  // run(fn) puts a one-off write (a submit) on the same chain and cancels a pending
+  // debounced write, so a draft can never overtake or follow a submit out of order.
   function writeQueue(write) {
     let chain = Promise.resolve(true), queued = null, timer = null;
     function flush() {
@@ -828,7 +873,13 @@
       chain = queued;
       return queued;
     }
-    return { schedule: function () { clearTimeout(timer); timer = setTimeout(flush, 800); }, flush: flush };
+    function run(fn) {
+      clearTimeout(timer);
+      const p = chain.then(fn);
+      chain = p.then(function () { return true; }, function () { return false; });
+      return p;
+    }
+    return { schedule: function () { clearTimeout(timer); timer = setTimeout(flush, 800); }, flush: flush, run: run };
   }
 
   const noRemote = { schedule: function () {}, flush: function () { return Promise.resolve(false); },
@@ -846,7 +897,13 @@
       });
     }
     const q = writeQueue(function () {
-      if (meta.submittedAt && meta.dirty) { setStatus("Edited since submit " + DASH + " not yet sent"); return Promise.resolve(true); }
+      // Once submitted (or while submitting) drafts stop: the server would keep the
+      // submitted file anyway, and a late draft must never race the submit.
+      if (meta.submitting) return Promise.resolve(true);
+      if (meta.submittedAt) {
+        if (meta.dirty) setStatus("Edited since submit " + DASH + " not yet sent");
+        return Promise.resolve(true);
+      }
       return post(answersObject(false), true).then(function () {
         setStatus("Draft saved " + clock(Date.now()));
         return true;
@@ -880,8 +937,18 @@
         setStatus("Server not reachable (" + (err && err.message || err) + ") " + DASH + " answers stay in this browser", "error");
       });
     }
-    return { init: init, schedule: q.schedule, flush: q.flush, post: post, connected: function () { return true; },
-      lastError: function () { return ""; } };
+    function submitNow(obj) {
+      meta.submitting = true;
+      return q.run(function () { return post(obj, false); }).then(function (body) {
+        meta.submitting = false;
+        return body;
+      }, function (err) {
+        meta.submitting = false;
+        throw err;
+      });
+    }
+    return { init: init, schedule: q.schedule, flush: q.flush, post: post, submit: submitNow,
+      connected: function () { return true; }, lastError: function () { return ""; } };
   }
 
   function artifactRemote() {

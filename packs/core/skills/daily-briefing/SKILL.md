@@ -90,12 +90,13 @@ Run this alongside the Step 2 reads. Find the previous briefing date — the new
 python3 scripts/briefing_review.py carryover <previous briefing date> --json
 ```
 
-If there is no previous briefing, or the command exits 1 because that day had no review (no items file, no answers), skip this step silently — say nothing about it in the briefing or the chat.
+If there is no previous briefing, or the command exits 1, skip this step silently — say nothing about it in the briefing or the chat. It exits 1 whenever that day had no review: no `Ops/Briefings/<previous date>.items.json` (it never falls back to parsing the Markdown, which would carry the whole briefing), no `Inbox/reviews/<previous date>.json`, or only an unsubmitted draft there. Do not pass `--include-draft` unless the user asks to carry from an unsubmitted review.
 
 Otherwise the output lists the items today's briefing must carry: rows the user left unanswered, rows answered `keep`, and `defer` rows whose date has come due (the CLI applies the date cutoff). It also returns every answer from that review, for pre-filling. Treat it like this:
 
 - **Place each carried item in its natural section** (a Task in §3 or §4, a Person in §9, a Followup in §10, and so on), not in a separate "carried" pile. Re-read its target note first: if the target is gone, or is already closed (`done`, `canceled`, `acted_on`, `dismissed`, `archived`, `dropped`), drop the item — the state was resolved some other way, for example through the chat "yes to 1,3" fallback.
 - **Do not drop a carried item just because nothing new happened.** A quiet day is the normal case for a `keep`; the item stays on the list until the user answers it with something other than `keep`.
+- **Keep its id.** Use the carried item's `id` from the carryover output verbatim — do not recompute it. Ids of items with a target are stable across days anyway; ids of target-less items embed the date they were first emitted, so recomputing one would break the link to yesterday's answer.
 - **Mark it as carried** in the items file (Step 3b): `carried_from: <previous briefing date>` and, when the user answered it, `previous: {date, action, params, note}` copied from the carryover output. In the Markdown, append ` (carried from <previous date>)` to the line.
 - **Items whose answers were applied are not carried** (`done`, `cancel`, `drop`, `dismiss`, `skip`, `create_task`, and the rest). The carryover output already leaves them out; do not add them back with a `carried_from` marker. If vault state surfaces the same note again on its own merits (say, the Task created from a `create_task` answer is due today), it appears as a normal item.
 
@@ -221,7 +222,7 @@ Body — the 13 sections, in this exact order with this exact heading text:
 
 ## Step 3b — Write the review items (`Ops/Briefings/<date>.items.json`)
 
-The briefing review form is built from a structured copy of the briefing's actionable items. Write it right after the Markdown, with the `Write` tool, at `Ops/Briefings/<date>.items.json`. Regenerating the briefing overwrites this file together with the `.md` — never leave a stale items file next to a fresh briefing. (An existing `Inbox/reviews/<date>.json` stays valid across a regeneration because answers are keyed by item `id`, not by position.)
+The briefing review form is built from a structured copy of the briefing's actionable items. Write it right after the Markdown, with the `Write` tool, at `Ops/Briefings/<date>.items.json`. Regenerating the briefing overwrites this file together with the `.md` — never leave a stale items file next to a fresh briefing. (An existing `Inbox/reviews/<date>.json` stays valid across a regeneration because answers are keyed by item `id`, not by position. A text export made on a page built before the regeneration is checked row by row when it is saved; see [[apply-review]].)
 
 ```json
 {
@@ -238,7 +239,7 @@ The briefing review form is built from a structured copy of the briefing's actio
 
 | field | rule |
 | --- | --- |
-| `id` | `<kind>:<target path without .md>` when the item has a target note (`task:Ops/Tasks/Send revised budget to Dana`). A target that is not Markdown (an `Inbox/` PDF) keeps its extension. With no target: `<kind>:<date>:<section>:<first 8 hex of sha1 of the plain text>` — plain text is `text` with `[[`/`]]`, backticks and emphasis markers removed; compute it with `python3 -c 'import hashlib,sys; print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:8])' "<plain text>"`. Ids must be unique within the file and stay the same across days, which is what makes carry-over work. |
+| `id` | `<kind>:<target path without .md>` when the item has a target note (`task:Ops/Tasks/Send revised budget to Dana`). A target that is not Markdown (an `Inbox/` PDF) keeps its extension. These ids are stable across days. With no target, do not compute the id yourself: print it with `python3 scripts/briefing_review.py id --kind <kind> --section <section> --date <date> --text "<text>"` (the exact `text` you write for the item) and copy the output. Target-less ids embed the date, so they are per-day; for a **carried** target-less item, reuse the `id` from the carryover output (Step 2a) instead. Ids must be unique within the file. |
 | `section` | The section number as a string (`"0"`, `"3"` … `"11"`), or `"asks"`. |
 | `section_title` | The heading text without its number; for §§ 8–9 add the subsection: `"People — I owe"`, `"Trackers — Due today"`. |
 | `label` | § 0 only: `#<n>`, the number printed in § 0, so a chat "yes to 1,3" and the form refer to the same rows. |
@@ -249,7 +250,7 @@ The briefing review form is built from a structured copy of the briefing's actio
 | `detail` | The `↳` continuation lines, one string each, without the arrow (`"signal: you emailed Dana the draft 2026-11-09"`). |
 | `status`, `due` | Read from the target note's frontmatter, never from memory or the previous briefing. `due` is the date a `defer` would move: Task `due`, Followup `surface_on`, Person `next_touch`, Project `next_review`, Tracker `next_check`. Omit when the field is empty — never invent one. |
 | `signal`, `threads` | Reconcile-sourced items only: `signal` is the `↳ signal:` text; `threads` lists each `↳ thread:` locator with its source prefix (`gmail:<threadId>`, `notion:<page id>`, `jira:<issue key>`). Skip `n/a` locators (Slack). |
-| `sensitivity` | Inherited from the target note's `sensitivity:` (`normal`, `private`, `sensitive`). Use `private` when there is no target or the field is missing, and `sensitive` for anything a comms digest marked `[sensitive — summarized]`. Never lower it. |
+| `sensitivity` | Inherited from the target note's `sensitivity:` (`normal`, `private`, `sensitive`). Use `private` when there is no target or the field is missing, and `sensitive` for anything a comms digest marked `[sensitive — summarized]`. Never lower it. (The artifact build does not trust this field alone: it takes the strictest of it, the target note's frontmatter, and any linked note's.) |
 | `also_in` | When the same `id` would appear in more than one section, emit it once — at its first appearance — and list the other section numbers here (`["3"]`). |
 | `carried_from`, `previous` | Carried items only, from Step 2a. |
 | `actions` | Omit to get the kind's default pills. Set it only to *narrow* that list: a § 0 Letter becomes `["do", "done", "defer", "keep"]` (`done` = submitted); a fresh tracker digest becomes `["do", "create_task", "drop"]`. Never add an action the kind does not have, and keep `do` first. |
@@ -313,7 +314,7 @@ The review is the form where the user answers every item in the items file: one 
 python3 scripts/briefing_review.py build <date> --surface widget
 ```
 
-It prints one path per line: `outputs/briefing-review/<date>.widget.html`, or, when the fragment is larger than the size limit, one file per page (`<date>.widget.1.html`, `<date>.widget.2.html`, …). Read each file and pass its full contents to the widget tool, in the printed order, one widget per file. Do not edit or trim the fragments. Each page submits its own rows: the submit button sends a text export starting `Briefing review — <date>` back into this conversation.
+When you know the host's real size limit for one widget, pass it as `--max-bytes <bytes>` (default 200000; about 50 KB of every page is the form's script and styles). It prints one path per line: `outputs/briefing-review/<date>.widget.html`, or, when the fragment is larger than the size limit, one file per page (`<date>.widget.1.html`, `<date>.widget.2.html`, …). Read each file and pass its full contents to the widget tool, in the printed order, one widget per file. Do not edit or trim the fragments. Each page submits its own rows: the submit button sends a text export starting `Briefing review — <date> · items <hash>` back into this conversation. (In Memex Desktop the export is placed in the message box, not sent; the user presses Enter to send it.)
 
 **server** — the Quartz site route, built fresh on every request; there is nothing to build. Confirm the running site has the route (a site from an older engine returns 404):
 
@@ -337,10 +338,11 @@ It prints `outputs/briefing-review/<date>.html`; run `open` on that path. Submit
 python3 scripts/briefing_review.py build <date> --surface artifact
 ```
 
-- The default `--redact private` drops `sensitive` items entirely and reduces `private` items to their title, section and pills. Never pass a lower level (`--redact sensitive`) unless the user says so in this conversation; `none` is refused for this surface.
+- **With the default `--redact private`, private items are withheld, together with sensitive ones: they stay local-only and never reach claude.ai.** An item counts as private or sensitive when the items file, its target note's frontmatter, or any note it links to says so (unknown counts as private). Every item's id on the page is an opaque alias, so no note title travels in an id; the alias map stays local in `outputs/briefing-review/<date>.artifact-map.json`.
+- Looser levels need the user's explicit say-so in this conversation: `--redact titles` shows private items as answerable rows with only their leading wikilink title, kind and top-level section (a title can itself be private, so ask); `--redact sensitive` shows private items in full. `sensitive` items are dropped at every level, and `none` is refused for this surface.
 - Read the generated file in full before publishing it. Publishing distributes it, and you must know what it contains.
 - Publish it as a **private** artifact with `capabilities: {db: {}, user: {}}`. Never share or pin it unless asked.
-- Tell the user how many items were withheld as local-only (the `sensitive` count in the items file) and how many `private` items show only their title.
+- Tell the user how many items were withheld as local-only (the page's own notice states the count) and, only with `--redact titles`, that private items show only their title. Offer to review the withheld items locally (page or server surface).
 - The form saves answers to the artifact's database, doc `reviews/<date>` (collection `reviews`, doc id `<date>`). Read them back with the artifact data tool when the user says they are done; [[apply-review]] covers that path.
 
 After opening, tell the user in one line how to switch: "To use a different review surface, set `review_surface: widget | server | page | artifact` in `_config/overrides.md`."
@@ -398,7 +400,7 @@ Don't recapitulate the whole briefing in chat — the file is the artifact.
 - **Does not lint.** Lint is a separate weekly task; the briefing surfaces signals but doesn't run check 1–20.
 - **Does not modify any of the source notes it reads from.** Projects, Tasks, People, Trackers — all read-only here. Carry-over (Step 2a) only reads the previous review.
 - **Does not apply review answers.** It writes the items file and opens the form; [[apply-review]] applies what the user submits. The chat "yes to 1,3" fallback for § 0 closes is the one exception, handled in Step 6.
-- **Does not publish the review off the machine on its own.** The artifact surface is used only when the user asks for it or sets `review_surface: artifact`, always as a private artifact, never with `sensitive` items, and never at a lower redaction level than the default unless the user says so.
+- **Does not publish the review off the machine on its own.** The artifact surface is used only when the user asks for it or sets `review_surface: artifact`, always as a private artifact, never with `sensitive` items, with `private` items withheld by default, and never at a looser redaction level than the default unless the user says so.
 
 ## Model recommendation
 
@@ -413,7 +415,7 @@ Don't recapitulate the whole briefing in chat — the file is the artifact.
 - `_config/sources.md` — which streams Step 1b checks; edit it to turn a stream on/off.
 - `shutdown-review` — the end-of-day counterpart that appends to this briefing.
 - [[apply-review]] — applies the answers submitted in the briefing review (Step 5b) and annotates § 0 with what was resolved.
-- `scripts/briefing_review.py` — the review CLI: `validate` (Step 3b), `carryover` (Step 2a), `build` (Step 5b); `save`, `plan`, `mark` and `annotate` belong to apply-review.
+- `scripts/briefing_review.py` — the review CLI: `id` and `validate` (Step 3b), `carryover` (Step 2a), `build` (Step 5b); `save`, `plan`, `mark` and `annotate` belong to apply-review.
 - `_config/overrides.md` — `review_surface: auto | widget | server | page | artifact` picks where the review opens (absent = `auto`).
 - `Inbox/reviews/` — saved answers (`<date>.json`) and the apply ledger (`<date>.ledger.json`); a system slot, never triaged as a capture.
 - `session-start` — the lighter-weight pre-flight (5–10 seconds vs. several minutes here).

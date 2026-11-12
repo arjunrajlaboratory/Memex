@@ -153,18 +153,19 @@ async function route(req, res, opts) {
       return true
     }
     if (!fs.existsSync(script)) {
-      text(500, `briefing review script not found: ${script}`)
+      text(500, "briefing review script not found: scripts/briefing_review.py")
       return true
     }
     const args = [script, "--vault", vaultDir, "build", date, "--surface", "server", "--stdout"]
     const result = await run(python, args, { cwd: vaultDir, timeout })
     if (result.spawnError) {
-      text(500, `could not run ${python}: ${result.spawnError.message}`)
+      text(500, `could not run ${path.basename(python)}`)
     } else if (result.code === 0) {
       send(200, "text/html; charset=utf-8", req.method === "HEAD" ? undefined : result.stdout)
     } else {
       const msg =
-        result.stderr.trim() || `briefing_review.py build exited ${result.code ?? result.signal}`
+        publicError(result.stderr, vaultDir) ||
+        `briefing_review.py build exited ${result.code ?? result.signal}`
       text(result.code === 1 ? 404 : 500, msg)
     }
     return true
@@ -223,26 +224,70 @@ async function route(req, res, opts) {
   }
 
   if (!fs.existsSync(script)) {
-    json(500, { ok: false, error: `briefing review script not found: ${script}` })
+    json(500, { ok: false, error: "briefing review script not found: scripts/briefing_review.py" })
     return true
   }
   const draft = ["1", "true"].includes(url.searchParams.get("draft") ?? "")
   const args = [script, "--vault", vaultDir, "save", date, "--surface", "server"]
   if (draft) args.push("--draft")
-  const result = await run(python, args, { cwd: vaultDir, timeout, input: body })
+  // One save per vault+date at a time, in arrival order: a draft POST can never
+  // overtake the submit that followed it (the script also locks across processes).
+  const result = await serialize(`${vaultDir}\0${date}`, () =>
+    run(python, args, { cwd: vaultDir, timeout, input: body }),
+  )
   if (result.spawnError) {
-    json(500, { ok: false, error: `could not run ${python}: ${result.spawnError.message}` })
+    json(500, { ok: false, error: `could not run ${path.basename(python)}` })
   } else if (result.code === 0) {
     json(200, { ok: true, path: result.stdout.trim() })
   } else if (result.code === null) {
-    json(500, { ok: false, error: result.stderr.trim() })
+    json(500, { ok: false, error: publicError(result.stderr, vaultDir) || "save was interrupted" })
   } else {
     json(400, {
       ok: false,
-      error: result.stderr.trim() || `briefing_review.py save exited ${result.code ?? result.signal}`,
+      error:
+        publicError(result.stderr, vaultDir) ||
+        `briefing_review.py save exited ${result.code ?? result.signal}`,
     })
   }
   return true
+}
+
+const MAX_ERROR_CHARS = 300
+const saveChains = new Map()
+
+/** Run fn after every earlier call with the same key has settled. */
+export function serialize(key, fn) {
+  const prev = saveChains.get(key) ?? Promise.resolve()
+  const next = prev.then(fn, fn)
+  const tail = next.then(
+    () => {},
+    () => {},
+  )
+  saveChains.set(key, tail)
+  tail.then(() => {
+    if (saveChains.get(key) === tail) saveChains.delete(key)
+  })
+  return next
+}
+
+/**
+ * The text a browser may see from a failed script run: only the last non-empty
+ * stderr line (never a traceback), the "briefing_review: " prefix dropped, vault
+ * paths made relative, capped.
+ */
+export function publicError(stderr, vaultDir) {
+  const lines = String(stderr ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+  let msg = (lines[lines.length - 1] ?? "").replace(/^briefing_review:\s*/, "")
+  if (vaultDir) {
+    const root = path.resolve(vaultDir)
+    msg = msg.split(root + path.sep).join("").split(root).join("<vault>")
+  }
+  // Any other absolute path (an interpreter, a site-packages file) is reduced to its basename.
+  msg = msg.replace(/(^|[\s'"(=])(?:[A-Za-z]:)?[\\/](?:[^\s'"\\/]+[\\/])+([^\s'"\\/]+)/g, "$1$2")
+  return msg.length > MAX_ERROR_CHARS ? msg.slice(0, MAX_ERROR_CHARS) + "…" : msg
 }
 
 /** Read the request body; resolves null (and drains the rest) once it exceeds max bytes. */

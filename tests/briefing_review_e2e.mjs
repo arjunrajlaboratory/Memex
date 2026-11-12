@@ -5,6 +5,7 @@
 // the page (file://), server, widget (inline + framed) and artifact surfaces in Chromium.
 import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,7 +19,10 @@ const SCRIPT = path.join(REPO, "hardened", "scripts", "briefing_review.py");
 const SHOTS = "/tmp/claude-0/-home-user-Memex/a8109344-0f9f-5442-b3f0-107a5b7f43d2/scratchpad";
 const DATE = "2026-11-12"; // Thursday
 const SITE = "http://localhost:4321";
-const HEADER = `Briefing review — ${DATE} (apply with the apply-review skill)`;
+const sha1 = (s) => crypto.createHash("sha1").update(s, "utf8").digest("hex");
+// The export header carries an 8-hex fingerprint of the item-id list (set in main()).
+let HEADER = "";
+const alias = (id) => "a:" + sha1(`${DATE}\n${id}`).slice(0, 12);
 const ROW_RE = /^- \[\d+\](?: \S+)? [A-Z_]+(?:\(.*?\))? — .+$/;
 
 // ------------------------------------------------------------------ results
@@ -166,6 +170,7 @@ async function answerSome(page) {
 
 async function main() {
   const { vault, items } = makeVault();
+  HEADER = `Briefing review — ${DATE} · items ${sha1(items.map((i) => i.id).join("\n")).slice(0, 8)} (apply with the apply-review skill)`;
   console.log(`vault: ${vault}`);
   const browser = await chromium.launch();
   let server = null;
@@ -365,9 +370,19 @@ async function main() {
       });
       check("autosaves a draft", draft && draft.submitted === false && draft.surface === "server" && draft.answers[0].action === "done",
         JSON.stringify(draft));
+      // Edit, then submit before the 800 ms draft debounce fires: the submit goes through the
+      // same queue, cancels the pending draft, and no draft POST follows it.
+      const posts = [];
+      page.on("request", (r) => { if (r.method() === "POST") posts.push(r.url()); });
+      await page.click(`${row(5)} .rv-note`);
+      await page.keyboard.type("!");
       await page.click("#review-root .rv-btn-primary");
       await page.waitForSelector('#review-root .rv-banner[data-kind="ok"]', { timeout: 5000 });
+      await sleep(1500);
+      const submitAt = posts.findIndex((u) => !u.includes("draft=1"));
+      check("no draft is sent after a submit", submitAt >= 0 && posts.slice(submitAt + 1).length === 0, JSON.stringify(posts));
       const sub = JSON.parse(fs.readFileSync(answersFile, "utf8"));
+      check("the submitted file has the last edit", sub.answers[0].note === "closed on Tuesday!", sub.answers[0].note);
       check("Submit writes Inbox/reviews/<date>.json with submitted: true", sub.submitted === true && sub.answers[0].id === items[4].id
         && sub.unanswered.length === items.length - 1, JSON.stringify(sub).slice(0, 200));
       check("confirmation names the file", (await page.textContent('#review-root .rv-banner[data-kind="ok"]')).includes(`Inbox/reviews/${DATE}.json`));
@@ -391,7 +406,10 @@ async function main() {
     await step("widget surface (inline, sendPrompt)", async () => {
       const paged = cli(vault, ["build", DATE, "--surface", "widget", "--site", SITE]).split("\n");
       const sizes = paged.map((p) => fs.statSync(p).size);
-      check(`default --max-bytes 60000 respected (${paged.length} page(s), ${sizes.join("/")} bytes)`, sizes.every((s) => s <= 60000));
+      check(`default --max-bytes 200000 respected (${paged.length} page(s), ${sizes.join("/")} bytes)`, sizes.every((s) => s <= 200000));
+      const small = cli(vault, ["build", DATE, "--surface", "widget", "--site", SITE, "--max-bytes", "56000",
+        "--out", path.join(vault, "outputs", "briefing-review", "small.widget.html")]).split("\n");
+      check("small budget splits into several non-empty pages", small.length > 1 && small.every((p) => /"items":\[\{/.test(fs.readFileSync(p, "utf8"))), String(small.length));
       const file = cli(vault, ["build", DATE, "--surface", "widget", "--site", SITE, "--max-bytes", "400000",
         "--out", path.join(vault, "outputs", "briefing-review", "single.widget.html")]);
       const fragment = fs.readFileSync(file, "utf8");
@@ -424,20 +442,41 @@ async function main() {
       check("no page errors", errors.length === 0, errors.join(" | "));
       await context.close();
 
-      // Framed without sendPrompt -> postMessage to the parent (Memex Desktop bridge).
-      const framed = await browser.newContext({ viewport: { width: 1000, height: 900 } });
-      const host = await framed.newPage();
-      await host.setContent(`<!doctype html><html><body><iframe id="f" style="width:960px;height:860px;border:0"></iframe>
-        <script>window.__msgs = []; addEventListener("message", (e) => window.__msgs.push(e.data));</script></body></html>`);
-      await host.$eval("#f", (f, html) => { f.srcdoc = "<!doctype html><html><body>" + html + "</body></html>"; }, fragment);
-      const frame = await (await host.$("#f")).contentFrame();
-      await frame.waitForSelector(row(1));
-      await frame.click(`${row(3)} .rv-pill[data-action="drop"]`);
-      await frame.click("#review-root .rv-btn-primary");
-      const msgs = await until(() => host.evaluate(() => window.__msgs.length ? window.__msgs : null), 3000);
+      // Framed without sendPrompt -> postMessage to the parent (Memex Desktop bridge), then wait for its ack.
+      const framedHost = async (ackScript) => {
+        const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+        const host = await ctx.newPage();
+        await host.setContent(`<!doctype html><html><body><iframe id="f" style="width:960px;height:860px;border:0"></iframe>
+          <script>window.__msgs = []; addEventListener("message", (e) => { window.__msgs.push(e.data); ${ackScript} });</script></body></html>`);
+        await host.$eval("#f", (f, html) => { f.srcdoc = "<!doctype html><html><body>" + html + "</body></html>"; }, fragment);
+        const frame = await (await host.$("#f")).contentFrame();
+        await frame.waitForSelector(row(1));
+        await frame.click(`${row(3)} .rv-pill[data-action="drop"]`);
+        await frame.click("#review-root .rv-btn-primary");
+        return { ctx, host, frame };
+      };
+      const acked = await framedHost(`if (e.data && e.data.type === "memex:sendPrompt") e.source.postMessage({ type: "memex:sendPrompt:ack", ok: true, staged: true }, "*");`);
+      const msgs = await until(() => acked.host.evaluate(() => window.__msgs.length ? window.__msgs : null), 3000);
       check("framed widget posts memex:sendPrompt", msgs && msgs.length === 1 && msgs[0].type === "memex:sendPrompt" &&
         msgs[0].text.startsWith(HEADER) && msgs[0].text.includes("- [3] #2a DROP — [[Consent form v3]]"), JSON.stringify(msgs).slice(0, 300));
-      await framed.close();
+      await acked.frame.waitForSelector('#review-root .rv-banner[data-kind="ok"]', { timeout: 3000 });
+      const okText = await acked.frame.textContent('#review-root .rv-banner[data-kind="ok"]');
+      check("acked: says the answers are in the message box, not sent yet", okText.includes("In the message box") && okText.includes("press Enter"), okText);
+      await acked.ctx.close();
+
+      const silent = await framedHost("");
+      check("no 'sent' claim before the ack arrives", !(await silent.frame.$('#review-root .rv-banner[data-kind="ok"]')));
+      await silent.frame.waitForSelector('#review-root .rv-banner[data-kind="error"]', { timeout: 4000 });
+      const errText = await silent.frame.textContent('#review-root .rv-banner[data-kind="error"]');
+      check("no ack: clipboard fallback with a clear message", errText.includes("Couldn't hand the answers to the app") &&
+        (await silent.frame.inputValue("#review-root .rv-export textarea")).startsWith(HEADER), errText);
+      await silent.ctx.close();
+
+      const refused = await framedHost(`if (e.data && e.data.type === "memex:sendPrompt") e.source.postMessage({ type: "memex:sendPrompt:ack", ok: false, error: "the artifact is not focused" }, "*");`);
+      await refused.frame.waitForSelector('#review-root .rv-banner[data-kind="error"]', { timeout: 3000 });
+      const refText = await refused.frame.textContent('#review-root .rv-banner[data-kind="error"]');
+      check("ok:false ack: fallback names the reason", refText.includes("Couldn't hand the answers to the app") && refText.includes("not focused"), refText);
+      await refused.ctx.close();
     });
 
     await step("artifact surface (db runtime mock)", async () => {
@@ -473,7 +512,10 @@ async function main() {
       check("renders before db resolves", (await page.textContent("#review-root .rv-status")).includes("Connecting"));
       await until(async () => (await page.textContent("#review-root .rv-status")) === "Connected", 3000);
       check("connects to db", (await page.textContent("#review-root .rv-status")) === "Connected");
-      check("private item reduced to its title", (await page.textContent(`${row(20)} .rv-text`)) === "Aiko Tanaka");
+      check("private item withheld by default", !(await page.$(row(20))) &&
+        (await page.textContent("#review-root .rv-withheld")).includes("1 private or sensitive item is withheld"));
+      check("ids are opaque aliases", !html.includes("Aiko Tanaka") && !html.includes("task:Ops/Tasks/") &&
+        (await page.$(`#review-root .rv-row[data-id="${alias(items[0].id)}"]`)) !== null);
       check("wikilinks render as plain text", (await page.$$("#review-root .rv-text a")).length === 0);
       await page.click(`${row(1)} .rv-note`);
       await page.keyboard.press("Alt+2");
@@ -484,7 +526,8 @@ async function main() {
       check("draft writes are debounced and coalesced", writes.length >= 1 && writes.length <= 2, String(writes.length));
       const last = writes[writes.length - 1];
       check("draft doc shape", last.path === `reviews/${DATE}` && last.obj.submitted === false && last.obj.surface === "artifact" &&
-        last.obj.state[items[0].id].note === "done yesterday" && last.obj.answers[0].action === "done", JSON.stringify(last).slice(0, 300));
+        last.obj.state[alias(items[0].id)].note === "done yesterday" && last.obj.answers[0].action === "done" &&
+        last.obj.answers[0].id === alias(items[0].id), JSON.stringify(last).slice(0, 300));
       await page.evaluate(() => { window.__failNext = true; });
       await page.click(`${row(2)} .rv-pill[data-action="keep"]`);
       await until(async () => (await page.$('#review-root .rv-banner[data-kind="error"]')) !== null, 4000);
@@ -493,8 +536,23 @@ async function main() {
       await page.waitForSelector('#review-root .rv-banner[data-kind="ok"]', { timeout: 5000 });
       const final = (await page.evaluate(() => window.__writes)).pop();
       check("Submit writes submitted: true to the same doc", final.obj.submitted === true && final.obj.answers.length === 2 &&
-        typeof final.obj.submitted_at === "string" && final.obj.state[items[1].id].action === "keep", JSON.stringify(final).slice(0, 300));
+        typeof final.obj.submitted_at === "string" && final.obj.state[alias(items[1].id)].action === "keep", JSON.stringify(final).slice(0, 300));
+      // The stored doc (alias ids) round-trips through save --surface artifact to real ids.
+      const out = cli(vault, ["save", DATE, "--surface", "artifact"], JSON.stringify(final.obj));
+      const savedA = JSON.parse(fs.readFileSync(out, "utf8"));
+      check("artifact answers map back to real ids", JSON.stringify(savedA.answers.map((a) => a.id)) === JSON.stringify([items[0].id, items[1].id]),
+        JSON.stringify(savedA.answers.map((a) => a.id)));
+      fs.rmSync(out);
       await context.close();
+
+      const titled = cli(vault, ["build", DATE, "--surface", "artifact", "--redact", "titles", "--out",
+        path.join(vault, "outputs", "briefing-review", "titles.artifact.html")]);
+      const tctx = await browser.newContext();
+      const tp = await tctx.newPage();
+      await tp.goto(pathToFileURL(titled).href);
+      await tp.waitForSelector(row(20));
+      check("--redact titles: private item reduced to its title", (await tp.textContent(`${row(20)} .rv-text`)) === "Aiko Tanaka");
+      await tctx.close();
 
       const offline = await browser.newContext();
       const p2 = await offline.newPage();

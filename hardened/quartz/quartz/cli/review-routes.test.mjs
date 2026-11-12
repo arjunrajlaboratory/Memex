@@ -6,7 +6,7 @@ import http from "node:http"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { handleReviewRoute } from "./review-routes.js"
+import { handleReviewRoute, publicError, serialize } from "./review-routes.js"
 
 // Stub CLI: echoes its argv so tests can assert on what was passed.
 //   build ... --stdout  -> HTML containing the argv; date 1999-01-01 -> exit 1
@@ -31,6 +31,15 @@ elif cmd == "save":
     data = json.loads(body)
     if data.get("bad"):
         sys.stderr.write("answers invalid: bad\n"); sys.exit(1)
+    if data.get("traceback"):
+        sys.stderr.write("Traceback (most recent call last):\n  File \"" + vault + "/scripts/briefing_review.py\", line 9, in <module>\n    x\nTypeError: unhashable type: 'list'\n"); sys.exit(1)
+    if data.get("pathy"):
+        sys.stderr.write("briefing_review: refusing to replace " + os.path.join(vault, "Inbox", "reviews", date + ".json") + "\n"); sys.exit(1)
+    if data.get("tag"):
+        import time
+        time.sleep(data.get("sleep", 0))
+        with open(os.path.join(vault, "order.log"), "a") as f:
+            f.write(data["tag"] + "\n")
     data["_argv"] = argv
     d = os.path.join(vault, "Inbox", "reviews")
     os.makedirs(d, exist_ok=True)
@@ -174,6 +183,52 @@ test("POST: script validation failure is 400 with stderr", async () => {
   const r = await post("/api/review/2026-11-12", { bad: true })
   assert.equal(r.status, 400)
   assert.deepEqual(await r.json(), { ok: false, error: "answers invalid: bad" })
+})
+
+test("POST errors carry only the last stderr line, no traceback, no absolute paths", async () => {
+  let r = await post("/api/review/2026-11-12", { traceback: true })
+  assert.equal(r.status, 400)
+  let body = await r.json()
+  assert.equal(body.error, "TypeError: unhashable type: 'list'")
+  assert.ok(!body.error.includes(vault))
+  r = await post("/api/review/2026-11-12", { pathy: true })
+  body = await r.json()
+  assert.equal(body.error, "refusing to replace Inbox/reviews/2026-11-12.json")
+})
+
+test("publicError keeps one capped line and strips absolute paths", () => {
+  assert.equal(publicError("a\nb\n\n", "/v"), "b")
+  assert.equal(publicError("briefing_review: bad /v/Inbox/x.json", "/v"), "bad Inbox/x.json")
+  assert.equal(publicError("cannot open /usr/lib/python3/thing.py now", "/v"), "cannot open thing.py now")
+  assert.equal(publicError("keep Inbox/reviews/x.json relative", "/v"), "keep Inbox/reviews/x.json relative")
+  assert.ok(publicError("x".repeat(1000), "/v").length <= 301)
+  assert.equal(publicError("", "/v"), "")
+})
+
+test("saves for one date run one at a time, in arrival order", async () => {
+  const log = path.join(vault, "order.log")
+  fs.rmSync(log, { force: true })
+  const slow = post("/api/review/2026-11-14", { tag: "draft", sleep: 0.6 })
+  await new Promise((r) => setTimeout(r, 100))
+  const fast = post("/api/review/2026-11-14", { tag: "submit" })
+  const [a, b] = await Promise.all([slow, fast])
+  assert.equal(a.status, 200)
+  assert.equal(b.status, 200)
+  assert.deepEqual(fs.readFileSync(log, "utf8").trim().split("\n"), ["draft", "submit"])
+  const stored = JSON.parse(fs.readFileSync(path.join(vault, "Inbox", "reviews", "2026-11-14.json"), "utf8"))
+  assert.equal(stored.tag, "submit")
+})
+
+test("serialize keeps going after a rejected task", async () => {
+  const order = []
+  const a = serialize("k", async () => {
+    order.push("a")
+    throw new Error("x")
+  })
+  const b = serialize("k", async () => order.push("b"))
+  await assert.rejects(a)
+  await b
+  assert.deepEqual(order, ["a", "b"])
 })
 
 test("bad date on the API is 400", async () => {
