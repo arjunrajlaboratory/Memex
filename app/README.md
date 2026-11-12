@@ -136,6 +136,21 @@ strict no-network content security policy. Ordinary HTTP(S) links are delegated 
 browser after a native confirmation. A live page that needs network access belongs in a custom
 `kind: "web"` tab instead.
 
+### Artifact → chat bridge
+
+An HTML artifact can hand text to the chat (the briefing review form uses this for its Submit):
+
+```js
+window.parent.postMessage({ type: "memex:sendPrompt", text }, "*");
+```
+
+The app accepts it only from an `artifact://` iframe it created itself (not web tabs or any other
+frame), and only when `text` is a non-empty string of at most 200 000 characters. The text is placed
+in the message box — after any draft, separated by a blank line — with a "press Enter to send"
+notice. It is **never sent automatically**: an artifact is agent-written HTML, so the user always
+reviews and sends the turn. The app replies to the frame with
+`{ type: "memex:sendPrompt:ack", ok: true }` (or `ok: false` plus `error` for an unusable `text`).
+
 ## Notes
 
 - The app is strict TypeScript compiled with `tsc`; renderer HTML/CSS assets are copied into `dist/`.

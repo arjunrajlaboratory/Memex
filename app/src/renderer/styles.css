@@ -247,6 +247,8 @@ body {
 .send-btn svg, .stop-btn svg { width: 18px; height: 18px; fill: currentColor; stroke: none; }
 .stop-btn svg rect { fill: currentColor; }
 .composer-foot { margin-top: 8px; font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono); min-height: 14px; }
+.composer-notice { color: var(--accent); margin-right: 10px; }
+.composer-notice[hidden] { display: none; }
 
 /* ======================= PANEL ======================= */
 .panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg-2); }

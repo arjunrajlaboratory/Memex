@@ -535,6 +535,7 @@ function resetVaultScopedUi(): void {
   chatScroll.replaceChildren(...(chatEmptyTemplate ? [chatEmptyTemplate.cloneNode(true)] : []));
   composer.value = '';
   autosize();
+  setComposerNotice('');
   setBusy(false);
 }
 
@@ -854,7 +855,7 @@ async function sendMessage(text?: string): Promise<void> {
   text = (text || composer.value).trim();
   if (!text || !state.vault || vaultOpening) return;
   addUserMsg(text);
-  composer.value = ''; autosize();
+  composer.value = ''; autosize(); setComposerNotice('');
   const r = await M.sendMessage(text);
   if (!r.ok) flashChat('⚠ ' + (r.error || 'Could not send'));
 }
@@ -865,7 +866,27 @@ composer.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 function autosize(): void { composer.style.height = 'auto'; composer.style.height = Math.min(composer.scrollHeight, 180) + 'px'; }
-composer.addEventListener('input', autosize);
+composer.addEventListener('input', () => {
+  autosize();
+  if (!composer.value.trim()) setComposerNotice('');
+});
+
+function setComposerNotice(text: string): void {
+  const notice = $('composerNotice');
+  notice.textContent = text;
+  notice.hidden = !text;
+}
+
+/** Put text into the composer (after any draft) for the user to review and send. */
+function stagePrompt(text: string, notice: string): void {
+  composer.value = mergePromptIntoDraft(composer.value, text);
+  autosize();
+  composer.focus();
+  composer.setSelectionRange(composer.value.length, composer.value.length);
+  composer.scrollTop = composer.scrollHeight;
+  composer.scrollIntoView({ block: 'nearest' });
+  setComposerNotice(notice);
+}
 
 $('chips').addEventListener('click', (e) => {
   const chip = (e.target as Element).closest('.chip') as HTMLElement | null; if (!chip) return;
@@ -1432,11 +1453,7 @@ async function renderCustomTab(body: HTMLElement, def: TabDef): Promise<void> {
     body.style.position = 'relative';
     const wrap = el('div', 'artifact-wrap');
     const abody = el('div', 'artifact-body');
-    const iframe = document.createElement('iframe');
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-modals');
-    iframe.referrerPolicy = 'no-referrer';
-    iframe.src = f.url || '';
-    abody.appendChild(iframe); wrap.appendChild(abody); body.appendChild(wrap);
+    abody.appendChild(artifactIframe(f.url)); wrap.appendChild(abody); body.appendChild(wrap);
   } else if (f.kind === 'image') {
     body.appendChild(bar);
     const img = el('img', 'artifact-img') as HTMLImageElement; img.src = f.dataUri || ''; body.appendChild(img);
@@ -1448,6 +1465,36 @@ async function renderCustomTab(body: HTMLElement, def: TabDef): Promise<void> {
 
 // ============================================================ ARTIFACT VIEWER
 let currentArtifact: ArtifactView | null = null;
+
+// Served from a unique artifact:// origin with a no-network CSP. Each document
+// keeps its isolated origin while same-origin enables localStorage for its scripts.
+// The data-artifact marker is what the prompt bridge trusts as a message source.
+function artifactIframe(url: string | undefined): HTMLIFrameElement {
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-modals');
+  iframe.referrerPolicy = 'no-referrer';
+  iframe.dataset.artifact = '1';
+  iframe.src = url || '';
+  return iframe;
+}
+
+// ---------------- artifact → composer prompt bridge ----------------
+// An artifact (agent-written HTML) may hand text to the chat, e.g. the briefing
+// review form's answers. It only fills the composer: the user reads and sends
+// it, so an artifact can never inject a turn on its own.
+window.addEventListener('message', (event: MessageEvent) => {
+  const frame = findPromptBridgeFrame(event.source, document.querySelectorAll<HTMLIFrameElement>('iframe[data-artifact="1"]'));
+  if (!frame || !frame.src.startsWith('artifact:')) return;
+  const parsed = parsePromptBridgeMessage(event.data);
+  if (parsed.kind === 'ignore') return;
+  if (parsed.kind === 'accept') {
+    const what = parsed.text.startsWith('Briefing review') ? 'Review answers' : 'Text from the artifact';
+    stagePrompt(parsed.text, `${what} ready — press Enter to send`);
+  }
+  const ack = parsed.kind === 'accept' ? { type: PROMPT_BRIDGE_ACK_TYPE, ok: true } : { type: PROMPT_BRIDGE_ACK_TYPE, ok: false, error: parsed.error };
+  const target = typeof event.origin === 'string' && event.origin.startsWith('artifact://') ? event.origin : '*';
+  try { (event.source as Window).postMessage(ack, target); } catch (_) {}
+});
 
 function displayArtifact(art: ArtifactView): void {   // no history push
   renderEpoch++;   // cancel any in-flight tab render before it can commit
@@ -1485,13 +1532,7 @@ function renderArtifact(): void {
   wrap.appendChild(bar);
   const abody = el('div', 'artifact-body');
   if (a.kind === 'html') {
-    // Served from a unique artifact:// origin with a no-network CSP. Each document
-    // keeps its isolated origin while same-origin enables localStorage for its scripts.
-    const iframe = document.createElement('iframe');
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-modals');
-    iframe.referrerPolicy = 'no-referrer';
-    iframe.src = a.url || '';
-    abody.appendChild(iframe);
+    abody.appendChild(artifactIframe(a.url));
   } else if (a.kind === 'image') {
     const img = el('img', 'artifact-img') as HTMLImageElement; img.src = a.dataUri || ''; abody.appendChild(img);
   } else {

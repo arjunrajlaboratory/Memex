@@ -884,7 +884,7 @@ async function resolveArtifact(vault: string, evt: Extract<AgentEvent, { kind: '
   }
   if (kind === 'auto' || kind == null) {
     if (rel && /\.html?$/.test(rel)) kind = 'html';
-    else if (content && /^\s*<!doctype|^\s*<html|^\s*<div|^\s*<section|^\s*<table/i.test(content)) kind = 'html';
+    else if (content && /^\s*<!doctype|^\s*<html|^\s*<div|^\s*<section|^\s*<table|^\s*<style|^\s*<script/i.test(content)) kind = 'html';
     else kind = 'markdown';
   }
   if (kind === 'html') return { title, kind: 'html', url: registerArtifact(content || '', vault), rel };
