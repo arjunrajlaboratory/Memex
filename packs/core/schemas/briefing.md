@@ -63,8 +63,9 @@ Every daily briefing has a companion `Ops/Briefings/YYYY-MM-DD.items.json` (`sch
 "memex.briefing-items/v1"`), written with the `.md` and overwritten with it on regeneration. It
 holds one entry per actionable list item in § 0 and §§ 3–11 (plus a principal-asks section,
 `"section": "asks"`, where a vault has one) — never § 1, § 2, § 12, or § 13. Required per item:
-`id` (stable across days: `<kind>:<target path without .md>`, else
-`<kind>:<date>:<section>:<sha1-8 of the plain text>`), `section`, `kind`, `text`. Optional:
+`id` (`<kind>:<target path without .md>`, stable across days; with no target the per-day
+`<kind>:<date>:<section>:<sha1-8 of the plain text>` printed by `python3
+scripts/briefing_review.py id`), `section`, `kind`, `text`. Optional:
 `section_title`, `label`, `group`, `target`, `detail`, `status`, `due`, `signal`, `threads`,
 `sensitivity` (inherited from the target; default `private`), `also_in`, `carried_from`,
 `previous`, `actions` (only to narrow the kind's default). `python3 scripts/briefing_review.py

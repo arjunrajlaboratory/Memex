@@ -249,6 +249,7 @@ body {
 .composer-foot { margin-top: 8px; font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono); min-height: 14px; }
 .composer-notice { color: var(--accent); margin-right: 10px; }
 .composer-notice[hidden] { display: none; }
+.composer-notice-btn { font: inherit; color: var(--accent); background: none; border: 1px solid currentColor; border-radius: 4px; padding: 0 6px; margin-left: 4px; cursor: pointer; }
 
 /* ======================= PANEL ======================= */
 .panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg-2); }

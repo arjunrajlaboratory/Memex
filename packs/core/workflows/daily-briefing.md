@@ -57,8 +57,9 @@ search.
 - All followups with `surface_on <= today` and `status: pending`
 - All people whose `next_touch <= today` and `status: active`
 - The previous review's carry-over: `python3 scripts/briefing_review.py carryover <previous briefing date> --json`
-  (skip silently when there was no previous review). Place each carried item — unanswered, `keep`,
-  or a `defer` that has come due — in its natural section, marked as carried; never drop one just
+  (it exits 1 when that day has no items file or no submitted review; then skip silently). Place
+  each carried item — unanswered, `keep`, or a `defer` that has come due — in its natural section,
+  marked as carried, reusing the `id` the carryover output reports verbatim; never drop one just
   because nothing new happened, and never carry an item whose answer was applied. Drop a carried
   item whose target is already closed.
 
@@ -109,12 +110,15 @@ Use this as the actual prompt for the briefing run.
 After saving the briefing, write `Ops/Briefings/{{today}}.items.json` (`schema:
 "memex.briefing-items/v1"`): one entry per actionable list item in §0 and §§3–11 (and a
 principal-asks section if the briefing has one) — never §1, §2, §12, or §13. Each entry carries a
-stable `id` (`<kind>:<target path without .md>`, or `<kind>:<date>:<section>:<sha1-8 of the plain
-text>` with no target), `section`, `kind` (from the target's folder: task, person, project,
+`id` (`<kind>:<target path without .md>`, stable across days; with no target, print it with
+`python3 scripts/briefing_review.py id --kind <kind> --section <section> --date {{today}} --text
+"<text>"` — such ids are per-day, so a carried target-less item keeps the id from the carryover
+output), `section`, `kind` (from the target's folder: task, person, project,
 capture, tracker, followup, job; every §11 entry is `decision`; create proposals are `proposal`;
 anything else is `item`), and `text` (the briefing's Markdown, wikilinks kept). Read `status` and
 `due` from the target's frontmatter, copy `signal` and source-prefixed `threads` for
-reconcile-sourced items, inherit `sensitivity` from the target (default `private`), list other
+reconcile-sourced items, inherit `sensitivity` from the target (default `private`; the artifact build re-checks the note's
+frontmatter and never trusts this field alone), list other
 sections in `also_in` instead of repeating an item, mark carried items with `carried_from` and
 `previous`, and set `actions` only to narrow the kind's default. Then run `python3
 scripts/briefing_review.py validate {{today}}` and fix every reported problem before continuing.
@@ -123,6 +127,7 @@ Regenerating the briefing overwrites the items file together with the `.md`.
 Open the review on the surface named by `review_surface` in `_config/overrides.md` (absent =
 `auto`: an inline widget when the session has one, else the local site's `/review/{{today}}`
 route when the site is up, else the standalone page from `python3 scripts/briefing_review.py build
-{{today}}`). The artifact surface is used only on request, always private and redacted. The user
+{{today}}`). The artifact surface is used only on request, always private and redacted (by default
+private and sensitive items are withheld and stay local-only; loosening needs the user's say-so). The user
 answers in the form; the `apply-review` skill applies the submitted answers. A chat reply such as
 "yes to 1,3" remains a valid fallback for the §0 closes.

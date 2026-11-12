@@ -26,7 +26,9 @@ The mechanics live in `scripts/briefing_review.py`, which saves answers, plans w
    EOF
    ```
 
-   The date comes from the export header. The command prints the path it wrote.
+   The date comes from the export header (`Briefing review — <date> · items <hash>`; older exports have no `· items` part and still work). The command prints the path it wrote.
+
+   Rows are numbered (`[n]`) by the briefing's item order, so `save` checks every row against the item now at that number (its label and the start of its text). If the briefing was regenerated after the review page was built and the rows no longer line up, it re-matches each row by label and text; when every row matches exactly one item it saves and says so on stderr — mention that in your report. When any row cannot be matched, it exits 1, lists those rows, and writes nothing. Then **do not guess** which item a row meant and do not edit the export: tell the user the briefing changed since they opened the review, name the unmatched rows, and ask them to reopen the review (the rebuilt form) and submit again.
 2. **A saved file** — the server surface (`/review/<date>` on the local site) already wrote `Inbox/reviews/<date>.json` when the user pressed submit. Nothing to save; go to Step 1.
 3. **The review artifact** — when the review was published as a private artifact, the answers live in its database, doc `reviews/<date>` (collection `reviews`, doc id `<date>`). Read that doc with the artifact data tool, write its JSON to a scratch file, and pipe it in:
 
@@ -34,9 +36,9 @@ The mechanics live in `scripts/briefing_review.py`, which saves answers, plans w
    python3 scripts/briefing_review.py save <date> --surface artifact < <scratch file>
    ```
 
-   Add `--draft` when the doc's `submitted` is not `true`. The artifact never held `sensitive` items, so those rows simply have no answer.
+   Add `--draft` when the doc's `submitted` is not `true`. The artifact's ids are opaque aliases (`a:<12 hex>`); `--surface artifact` maps them back to the real item ids (with the local `outputs/briefing-review/<date>.artifact-map.json`), so pipe the doc in unchanged. The artifact never held `sensitive` items — nor, at the default redaction, `private` ones — so those rows simply have no answer.
 
-If `save` exits 1, show the user the problem it printed (usually an export for a date with no items file, or an id that is not in the items) and stop; do not hand-write the answers file.
+If `save` exits 1, show the user the problem it printed (usually an export for a date with no items file, rows that no longer match the items, or an id that is not in the items) and stop; do not hand-write the answers file. `save` also refuses to replace already-submitted answers with an empty set; pass `--allow-empty` only when the user says they want to clear their review. A warning on stderr that the answers were made against different items (`items_hash`) is informational for JSON answers, which are matched by id.
 
 **Drafts are not answers.** An answers file with `submitted: false` is an autosave. Do not apply it unless the user says to ("apply what I have so far"); then pass `--include-draft` to `plan`.
 
@@ -55,7 +57,7 @@ Read these before applying anything:
 python3 scripts/briefing_review.py plan <date> --json
 ```
 
-The plan lists every answer that is not yet in the ledger, each with its `id`, display number `n`, `action`, `params`, `note`, `kind`, `target`, and a `route`. Unanswered rows are not in the plan and mean "leave as is": never touch them. If the plan is empty, everything was already applied; say so and stop.
+The plan lists every answer that is not yet in the ledger, each with its `id`, display number `n`, `action`, `params`, `note`, `kind`, `target`, a `route`, and the answer's `fingerprint` (keep it: Step 4 passes it back). Unanswered rows are not in the plan and mean "leave as is": never touch them. If the plan is empty, everything was already applied; say so and stop.
 
 Treat the `route` as the default and the hard rules below as binding. A note that asks for more than the pill says changes the route to `agent` (see Step 3).
 
@@ -132,8 +134,10 @@ Do not guess on anything consequential: a close, a cancel, a rename, a message t
 After each answer — not at the end — record it:
 
 ```
-python3 scripts/briefing_review.py mark <date> "<id>" --result applied|drafted|skipped|failed --summary "<one line: what you did>"
+python3 scripts/briefing_review.py mark <date> "<id>" --fingerprint <the plan entry's fingerprint> --result applied|drafted|skipped|failed --summary "<one line: what you did>"
 ```
+
+Always pass `--fingerprint` with the value from the plan entry you applied. If the user re-submitted the review while you were working, the file now holds a different answer for that row; the ledger then records the answer you actually applied, prints a note, and the changed answer comes back in the next `plan` — run `plan` again at the end and apply what reappears. Without `--fingerprint`, `mark` warns and records whatever answer is in the file at that moment.
 
 - `applied` — the change landed. `drafted` — the outcome is a draft waiting for the user. `skipped` — deliberately no change (`keep`, `skip`, already in the requested state). `failed` — it went wrong; the summary says why.
 - **Partial failure:** when one answer fails (a missing note, a tool error, a connector outage), mark it `failed` with the reason and continue with the next answer. Never stop the run for one bad row, and never mark a failed row `applied`.
@@ -147,7 +151,7 @@ When the plan is worked through:
 python3 scripts/briefing_review.py annotate <date>
 ```
 
-This rewrites the managed `Review resolved` block in the briefing's § 0 from the ledger. It is idempotent; run it again after any later re-run.
+This rewrites the managed `Review resolved` block in the briefing's § 0 from the ledger, describing the answer each `mark` recorded (not a later edit of the answers file). It is idempotent; run it again after any later re-run.
 
 Then append one `log.md` line for each direct frontmatter edit you made (owning skills log their own), and one summary line for the run:
 
@@ -186,7 +190,8 @@ Leave out empty groups. End with the batched question if there is one. Keep it s
 - **`sensitive` items never go to an external service.** Do not send their content to a connector, a web search, or an artifact; draft anything they need in `Drafts/` and tell the user. Never lower a note's sensitivity.
 - **Unanswered rows are left alone.** No answer means "leave as is".
 - **Autosaved drafts (`submitted: false`) are not applied** unless the user says to.
-- **Every applied answer is recorded with `mark`**, one at a time, as you go.
+- **Every applied answer is recorded with `mark --fingerprint`**, one at a time, as you go.
+- **Never guess which item an export row meant.** When `save --from-export` cannot match rows to items, ask the user to reopen the review and submit again.
 
 ## What this skill does NOT do
 

@@ -69,8 +69,9 @@ Gather the following inputs (read only what exists; skip gracefully if absent):
 9. Surfaced followups — `Ops/Followups/*.md` where `surface_on <= {{date}}` AND `status: pending`
 10. People needing a touch — `Atlas/People/*.md` where `next_touch <= {{date}}` AND `status: active`
 11. Previous review carry-over — `python3 scripts/briefing_review.py carryover <previous briefing date> --json`
-    (skip silently if there was no previous review). Put each carried item — unanswered, `keep`,
-    or a `defer` that has come due — in its natural section, marked as carried. Do not drop one just
+    (it exits 1 when that day has no items file or no submitted review; then skip silently). Put
+    each carried item — unanswered, `keep`, or a `defer` that has come due — in its natural
+    section, marked as carried, with the `id` the output reports. Do not drop one just
     because nothing new happened; do not carry items whose answers were applied; drop a carried item
     whose target is already closed.
 
@@ -124,7 +125,9 @@ Rules:
   never quote `sensitive` items unless the user explicitly cited them.
 - After saving the briefing, write `Ops/Briefings/{{date}}.items.json` (`schema:
   "memex.briefing-items/v1"`): one entry per actionable list item in §0 and §§3–11 (never §1,
-  §2, §12, §13), each with a stable `id` (`<kind>:<target path without .md>`), `section`, `kind`,
+  §2, §12, §13), each with an `id` (`<kind>:<target path without .md>`; with no target, the output
+  of `python3 scripts/briefing_review.py id --kind <kind> --section <section> --date {{date}}
+  --text "<text>"`), `section`, `kind`,
   and `text`; `status`/`due` from the target's frontmatter; `signal` + `threads` for
   reconcile-sourced items; `sensitivity` inherited from the target (default `private`); `also_in`
   instead of repeats; `carried_from`/`previous` for carried items. Follow the field rules in

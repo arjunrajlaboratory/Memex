@@ -1160,6 +1160,28 @@ class TestBriefingReviewContract(unittest.TestCase):
         )
         self.assertIn("carried_from", carry)
         self.assertIn("previous", carry)
+        # Exit 1 (no items file / no submitted answers) means skip; the id is reused verbatim.
+        self.assertRegex(carry, r"(?is)exits 1, skip this step silently")
+        self.assertRegex(carry, r"(?is)never falls back to parsing the Markdown")
+        self.assertRegex(carry, r"(?is)only an unsubmitted draft")
+        self.assertRegex(carry, r"(?is)`id` from the carryover output verbatim")
+
+    def test_briefing_uses_the_id_command_for_targetless_items(self):
+        step = markdown_section(
+            self.briefing,
+            "## Step 3b — Write the review items (`Ops/Briefings/<date>.items.json`)",
+            "## Step 4 — Log",
+        )
+        self.assertIn("briefing_review.py id --kind <kind> --section <section> --date <date> --text", step)
+        self.assertNotIn("hashlib", step)
+        self.assertRegex(step, r"(?is)Target-less ids embed the date, so they are per-day")
+        for artifact in (self.briefing_workflow, self.briefing_prompt, self.briefing_schema):
+            self.assertRegex(artifact, r"briefing_review\.py\s+id")
+
+    def test_apply_review_never_guesses_unmatched_export_rows(self):
+        self.assertRegex(self.apply, r"(?is)exits 1, lists those rows, and writes nothing.{0,40}\*\*do not guess\*\*")
+        self.assertRegex(self.apply, r"(?is)ask them to reopen the review")
+        self.assertRegex(self.apply, r"(?is)--allow-empty")
 
     def test_briefing_opens_the_review_on_the_configured_surface(self):
         step = markdown_section(
@@ -1176,8 +1198,12 @@ class TestBriefingReviewContract(unittest.TestCase):
         self.assertRegex(step, r"--surface artifact")
         self.assertRegex(step, r"(?is)\*\*private\*\* artifact.{0,40}capabilities: \{db: \{\}, user: \{\}\}")
         self.assertRegex(step, r"(?is)Read the generated file in full before publishing")
-        self.assertRegex(step, r"(?is)Never pass a lower level.{0,80}unless the user says so")
+        # Default redaction withholds private items too; loosening needs the user's say-so.
+        self.assertRegex(step, r"(?is)default `--redact private`, private items are withheld.{0,80}local-only")
+        self.assertRegex(step, r"(?is)Looser levels need the user's explicit say-so")
+        self.assertIn("--redact titles", step)
         self.assertRegex(step, r"(?is)withheld as local-only")
+        self.assertRegex(step, r"(?is)--max-bytes.{0,40}default 200000")
         self.assertIn("reviews/<date>", step)
 
     def test_briefing_hands_answers_to_apply_review_and_keeps_chat_fallback(self):
@@ -1233,7 +1259,8 @@ class TestBriefingReviewContract(unittest.TestCase):
             "## Step 4 — Mark each answer in the ledger",
             "## Step 5 — Annotate and log",
         )
-        self.assertRegex(mark, r"briefing_review\.py mark <date> \"<id>\" --result")
+        self.assertRegex(mark, r"briefing_review\.py mark <date> \"<id>\" --fingerprint <[^>]+> --result")
+        self.assertRegex(mark, r"(?is)Always pass `--fingerprint`")
         self.assertIn("failed", mark)
         self.assertRegex(mark, r"(?is)continue with the next answer")
         self.assertRegex(mark, r"(?is)Re-running is safe.{0,300}fingerprint")

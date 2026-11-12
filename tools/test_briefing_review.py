@@ -351,7 +351,8 @@ class TestAnswers(VaultCase):
         self.assertEqual(normalized[-1]["params"] if normalized[-1]["kind"] == "tracker" else
                          [a for a in normalized if a["kind"] == "tracker"][0]["params"], {"date_raw": "whenever"})
         text = br.format_export(DATE, doc, normalized)
-        self.assertTrue(text.startswith(f"Briefing review — {DATE} (apply with the apply-review skill)\n\n"))
+        self.assertTrue(text.startswith(f"Briefing review — {DATE} · items {br.items_hash(doc)} "
+                                        "(apply with the apply-review skill)\n\n"), text[:120])
         self.assertIn("- [1] #1 DEFER(2026-11-16) — [[Alpha]] — something\n    → ping first / then send", text)
         self.assertIn("- [4] NOTE — ", text)
         self.assertIn("CREATE_TASK(Grant timeline (draft))", text)
@@ -485,7 +486,8 @@ class TestPlan(VaultCase):
         self.assertEqual(plan["already_applied"], 3)
         ledger = json.loads(br.ledger_path(self.vault, DATE).read_text())
         self.assertEqual(ledger["schema"], br.LEDGER_SCHEMA)
-        self.assertEqual(set(ledger["entries"]["task:Ops/Tasks/Beta"]), {"fingerprint", "result", "summary", "at"})
+        self.assertEqual(set(ledger["entries"]["task:Ops/Tasks/Beta"]),
+                         {"fingerprint", "result", "summary", "at", "n", "action", "params", "note", "text"})
         # Changing one answer re-plans exactly that one.
         self.save([{"id": "task:Ops/Tasks/Alpha", "action": "done", "note": "also tell Dana"},
                    {"id": "task:Ops/Tasks/Beta", "action": "defer", "params": {"date": "fri"}},
@@ -643,32 +645,106 @@ class TestBuild(VaultCase):
         self.assertEqual(seen, list(range(1, len(GOOD_ITEMS) + 1)))
         res = self.run_cli("build", DATE, "--surface", "widget", "--max-bytes", "1000", "--site", SITE)
         self.assertEqual(res.returncode, 1)
+        self.assertIn("too small for the widget's script and styles", res.stderr)
+
+    def write_notes(self, notes):
+        for rel, sens in notes.items():
+            p = self.vault / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            fm = f"---\ntype: note\nsensitivity: {sens}\n---\n" if sens else "---\ntype: note\n---\n"
+            p.write_text(fm + "# body\n", encoding="utf-8")
+
+    ARTIFACT_NOTES = {"Ops/Tasks/Alpha.md": "normal", "Ops/Tasks/Beta.md": "normal",
+                      "Ops/Tasks/Gamma.md": "private", "Inbox/memo.md": "normal"}
 
     def test_artifact_redaction(self):
-        self.write_items()
+        items = copy.deepcopy(GOOD_ITEMS)
+        items[3]["group"] = "Collaborators"
+        items[2]["previous"] = {"date": "2026-11-11", "action": "waiting", "params": {"who": "Dana Q"}, "note": "ask Dana"}
+        items[2]["carried_from"] = "2026-11-11"
+        self.write_items(items)
+        self.write_notes(self.ARTIFACT_NOTES)
+        alias = lambda i: br.artifact_alias(DATE, i)  # noqa: E731
         [path] = self.built("--surface", "artifact")
         html = path.read_text()
         self.assertTrue(html.startswith("<title>Briefing Review</title>\n<style>"))
         self.assertNotRegex(html.lower(), r"<!doctype|<html|<head|<body")
         data = self.payload(html)
         ids = {i["id"]: i for i in data["items"]}
-        self.assertNotIn("item:2026-11-12:asks:12345678", ids)
-        self.assertNotIn("Secret plan", html)
-        self.assertEqual(data["withheld"], 1)
+        # Every id is an opaque alias; no note title or path reaches the payload through ids.
+        self.assertTrue(all(re.fullmatch(r"a:[0-9a-f]{12}", i) for i in ids), list(ids))
+        for leak in ("Ops/Tasks/Gamma", "Robin Park", "Gamma", "Atlas Rebuild", "Secret plan", "Collaborators", "Dana Q"):
+            self.assertNotIn(leak, html)
+        # Default --redact private: sensitive AND private items are withheld (Atlas Rebuild has
+        # no sensitivity and no note -> private); normal items are kept whole.
+        self.assertEqual(data["withheld"], 4)
+        self.assertNotIn(alias("task:Ops/Tasks/Gamma"), ids)
+        self.assertIn("something", ids[alias("task:Ops/Tasks/Beta")]["text"])
         self.assertEqual(data["site"], "")
         self.assertNotIn("localhost", html)
-        gamma = ids["task:Ops/Tasks/Gamma"]
-        self.assertEqual(gamma["text"], "[[Gamma]]")
-        self.assertEqual(gamma["detail"], [])
-        self.assertNotIn("target", gamma)
-        self.assertIn("something", ids["task:Ops/Tasks/Beta"]["text"])  # normal kept whole
         self.assertIsNone(data["previous"])
+        self.assertEqual(data["items_hash"], br.items_hash(br.load_items(self.vault, DATE)))
+        # The alias map stays local, 0600, under outputs/ (gitignored).
+        mpath = br.artifact_map_path(self.vault, DATE)
+        self.assertEqual(mpath.parent, br.outputs_dir(self.vault))
+        self.assertEqual(oct(mpath.stat().st_mode & 0o777), oct(0o600))
+        self.assertEqual(json.loads(mpath.read_text())["aliases"][alias("task:Ops/Tasks/Gamma")], "task:Ops/Tasks/Gamma")
+
+        # --redact titles: private rows are answerable, title only.
+        [path] = self.built("--surface", "artifact", "--redact", "titles")
+        data = self.payload(path.read_text())
+        ids = {i["id"]: i for i in data["items"]}
+        self.assertEqual(data["withheld"], 1)
+        gamma = ids[alias("task:Ops/Tasks/Gamma")]
+        self.assertEqual((gamma["text"], gamma["detail"], gamma["group"], gamma["private"]), ("[[Gamma]]", [], "", True))
+        self.assertNotIn("target", gamma)
+        self.assertEqual(gamma["previous"], {"date": "2026-11-11", "action": "waiting", "params": {}})
+        robin = ids[alias("person:Atlas/People/Robin Park")]
+        self.assertEqual((robin["section_title"], robin["group"]), ("People", ""))
+        self.assertNotIn("Collaborators", path.read_text())
+        self.assertNotIn("Dana", path.read_text())
+
+        # --redact sensitive: private text kept, sensitive still dropped; none refused.
         [path] = self.built("--surface", "artifact", "--redact", "sensitive")
         data = self.payload(path.read_text())
-        self.assertIn("something", {i["id"]: i for i in data["items"]}["task:Ops/Tasks/Gamma"]["text"])
+        self.assertIn("something", {i["id"]: i for i in data["items"]}[alias("task:Ops/Tasks/Gamma")]["text"])
         self.assertEqual(data["withheld"], 1)
         res = self.run_cli("build", DATE, "--surface", "artifact", "--redact", "none", "--site", SITE)
         self.assertEqual(res.returncode, 2)
+
+    def test_artifact_sensitivity_from_frontmatter_and_links(self):
+        items = copy.deepcopy(GOOD_ITEMS)
+        items[0]["text"] = "[[Alpha]] — ask [[Robin Park]] first"   # links a private note
+        self.write_items(items)
+        notes = dict(self.ARTIFACT_NOTES, **{"Ops/Tasks/Beta.md": "sensitive"})  # item says normal
+        self.write_notes(notes)
+        [path] = self.built("--surface", "artifact", "--redact", "sensitive")
+        data = self.payload(path.read_text())
+        ids = {i["id"] for i in data["items"]}
+        self.assertNotIn(br.artifact_alias(DATE, "task:Ops/Tasks/Beta"), ids)  # frontmatter wins
+        self.assertIn(br.artifact_alias(DATE, "task:Ops/Tasks/Alpha"), ids)    # private kept at this level
+        [path] = self.built("--surface", "artifact")
+        ids = {i["id"] for i in self.payload(path.read_text())["items"]}
+        self.assertNotIn(br.artifact_alias(DATE, "task:Ops/Tasks/Alpha"), ids)  # linked private note
+        self.assertIn(br.artifact_alias(DATE, "capture:Inbox/memo"), ids)
+
+    def test_artifact_answers_map_aliases_back(self):
+        self.write_items()
+        self.write_notes(self.ARTIFACT_NOTES)
+        self.built("--surface", "artifact")
+        doc = {"schema": br.ANSWERS_SCHEMA, "date": DATE, "surface": "artifact", "submitted": True,
+               "answers": [{"id": br.artifact_alias(DATE, "task:Ops/Tasks/Beta"), "action": "done"},
+                           {"id": "capture:Inbox/memo", "action": "file"}],
+               "state": {br.artifact_alias(DATE, "task:Ops/Tasks/Beta"): {"action": "done"}}}
+        res = self.run_cli("save", DATE, "--surface", "artifact", stdin=json.dumps(doc))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        saved = json.loads(br.answers_path(self.vault, DATE).read_text())
+        self.assertEqual({a["id"]: a["action"] for a in saved["answers"]},
+                         {"task:Ops/Tasks/Beta": "done", "capture:Inbox/memo": "file"})
+        # Aliases are not accepted from other surfaces.
+        res = self.run_cli("save", DATE, "--surface", "cli", "--allow-empty", stdin=json.dumps(doc))
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("unknown id", res.stderr)
 
     def test_markdown_fallback_build_and_links(self):
         [path] = self.built()
@@ -765,6 +841,320 @@ class TestServer(VaultCase):
             br.make_server(self.vault, "0.0.0.0", 0)
         res = self.run_cli("serve", "--host", "0.0.0.0", "--port", "0")
         self.assertEqual(res.returncode, 2)
+
+
+class TestReviewFixes(VaultCase):
+    """Regression tests for the briefing-review review findings (one block per finding)."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_items()
+
+    def export_for(self, answers, items=None, part=None):
+        doc = br.load_items(self.vault, DATE) if items is None else items
+        normalized, _ = br.normalize_answers({"answers": answers}, doc, DATE)
+        return br.format_export(DATE, doc, normalized, part=part)
+
+    # 1 -- exports made against an older items.json
+    def test_export_rows_verified_against_items(self):
+        text = self.export_for([{"id": "task:Ops/Tasks/Beta", "action": "done"},
+                                {"id": "capture:Inbox/memo", "action": "file"}])
+        self.assertRegex(text.splitlines()[0], r"^Briefing review — 2026-11-12 · items [0-9a-f]{8} \(apply")
+        # The briefing is regenerated: a new item is inserted at the top, shifting every row.
+        shifted = [item("task:Ops/Tasks/Zeta", target="Ops/Tasks/Zeta.md", sensitivity="normal")] + copy.deepcopy(GOOD_ITEMS)
+        self.write_items(shifted)
+        res = self.run_cli("save", "--from-export", stdin=text)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("re-matched uniquely", res.stderr)
+        saved = {a["id"]: a["action"] for a in json.loads(br.answers_path(self.vault, DATE).read_text())["answers"]}
+        self.assertEqual(saved, {"task:Ops/Tasks/Beta": "done", "capture:Inbox/memo": "file"})
+
+    def test_export_unmatched_rows_write_nothing(self):
+        text = self.export_for([{"id": "task:Ops/Tasks/Beta", "action": "done"}])
+        others = copy.deepcopy(GOOD_ITEMS)
+        others[1] = item("task:Ops/Tasks/Omega", target="Ops/Tasks/Omega.md", sensitivity="normal")
+        self.write_items(others)   # Beta is gone; row [2] is now Omega
+        res = self.run_cli("save", "--from-export", stdin=text)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("row [2]", res.stderr)
+        self.assertIn("nothing was saved", res.stderr)
+        self.assertIn("items changed since the review page was built", res.stderr)
+        self.assertFalse(br.answers_path(self.vault, DATE).exists())
+        # Ambiguous re-match (two items with the same label + text) also refuses.
+        dup = copy.deepcopy(GOOD_ITEMS)
+        dup.insert(0, item("task:Ops/Tasks/Beta2", text="[[Beta]] — something", sensitivity="normal"))
+        self.write_items(dup)
+        res = self.run_cli("save", "--from-export", stdin=text)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("2 items match", res.stderr)
+
+    def test_export_old_header_still_parses(self):
+        text = self.export_for([{"id": "task:Ops/Tasks/Beta", "action": "done"}])
+        old = re.sub(r" · items [0-9a-f]{8}", "", text)
+        self.assertTrue(old.startswith(f"Briefing review — {DATE} (apply"))
+        res = self.run_cli("save", "--from-export", stdin=old)
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_json_items_hash_mismatch_warns(self):
+        res = self.run_cli("save", DATE, stdin=json.dumps({"items_hash": "00000000", "answers": [
+            {"id": "task:Ops/Tasks/Beta", "action": "done"}]}))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("warning: answers were made against items 00000000", res.stderr)
+        saved = json.loads(br.answers_path(self.vault, DATE).read_text())
+        self.assertEqual(saved["items_hash"], br.items_hash(br.load_items(self.vault, DATE)))
+        res = self.run_cli("save", DATE, stdin=json.dumps({"items_hash": saved["items_hash"], "answers": [
+            {"id": "task:Ops/Tasks/Beta", "action": "done"}]}))
+        self.assertNotIn("warning", res.stderr)
+
+    # 2 -- mark records the planned answer, not a re-submitted one
+    def test_mark_fingerprint_survives_resubmit(self):
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "defer", "params": {"date": "fri"}}])
+        plan = json.loads(self.run_cli("plan", DATE, "--json").stdout)
+        fp = plan["entries"][0]["fingerprint"]
+        # The user re-submits a different answer between plan and mark.
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "cancel", "note": "no longer needed"}])
+        res = self.run_cli("mark", DATE, "task:Ops/Tasks/Beta", "--result", "applied",
+                           "--summary", "due -> 2026-11-13", "--fingerprint", fp)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("changed since it was planned", res.stderr)
+        entry = json.loads(br.ledger_path(self.vault, DATE).read_text())["entries"]["task:Ops/Tasks/Beta"]
+        self.assertEqual((entry["fingerprint"], entry["action"], entry["params"]), (fp, "defer", {"date": "2026-11-13"}))
+        plan = json.loads(self.run_cli("plan", DATE, "--json").stdout)
+        self.assertEqual([(e["id"], e["action"], e["changed"]) for e in plan["entries"]],
+                         [("task:Ops/Tasks/Beta", "cancel", True)])
+        # annotate describes what was applied (DEFER), not the file's current CANCEL.
+        self.run_cli("annotate", DATE)
+        md = br.briefing_md_path(self.vault, DATE).read_text()
+        self.assertIn("- [2] DEFER(2026-11-13) — [[Beta]] — something — applied: due -> 2026-11-13", md)
+        self.assertNotIn("CANCEL", md)
+
+    def test_mark_without_fingerprint_warns(self):
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "keep"}])
+        res = self.run_cli("mark", DATE, "task:Ops/Tasks/Beta", "--result", "skipped")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("warning: mark without --fingerprint", res.stderr)
+        res = self.run_cli("mark", DATE, "task:Ops/Tasks/Beta", "--result", "skipped", "--fingerprint", "xyz")
+        self.assertEqual(res.returncode, 2)
+
+    # 3 -- the read-check-write in save is locked across processes
+    def test_save_waits_for_the_reviews_lock(self):
+        if br.fcntl is None:
+            self.skipTest("no fcntl on this platform")
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "done"}])
+        body = json.dumps({"answers": [{"id": "task:Ops/Tasks/Beta", "action": "keep"}]})
+        env = dict(os.environ)
+        env.pop("MEMEX_VAULT", None)
+        with br.reviews_lock(self.vault):
+            proc = subprocess.Popen([sys.executable, str(SCRIPT), "--vault", str(self.vault), "save", DATE],
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, env=env)
+            proc.stdin.write(body)
+            proc.stdin.close()
+            with self.assertRaises(subprocess.TimeoutExpired):
+                proc.wait(timeout=1.0)   # blocked on the lock we hold
+            self.assertEqual(json.loads(br.answers_path(self.vault, DATE).read_text())["answers"][0]["action"], "done")
+        self.assertEqual(proc.wait(timeout=30), 0, proc.stderr.read())
+        self.assertEqual(json.loads(br.answers_path(self.vault, DATE).read_text())["answers"][0]["action"], "keep")
+
+    def test_concurrent_drafts_never_replace_a_submit(self):
+        env = dict(os.environ)
+        env.pop("MEMEX_VAULT", None)
+        cmd = [sys.executable, str(SCRIPT), "--vault", str(self.vault), "save", DATE]
+        draft = json.dumps({"answers": [{"id": "task:Ops/Tasks/Beta", "action": "keep"}]})
+        submit = json.dumps({"answers": [{"id": "task:Ops/Tasks/Beta", "action": "done"}]})
+        procs = [subprocess.Popen(cmd + (["--draft"] if i % 2 else []), stdin=subprocess.PIPE,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True, env=env)
+                 for i in range(8)]
+        for i, p in enumerate(procs):
+            p.stdin.write(draft if i % 2 else submit)
+            p.stdin.close()
+        for p in procs:
+            self.assertEqual(p.wait(timeout=60), 0)
+        saved = json.loads(br.answers_path(self.vault, DATE).read_text())
+        self.assertTrue(saved["submitted"])
+        self.assertEqual(saved["answers"][0]["action"], "done")
+
+    # 4 -- carryover only for a submitted review with an items file
+    def test_carryover_needs_a_submitted_review(self):
+        res = self.run_cli("carryover", DATE, "--json")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("no review answers", res.stderr)
+        self.assertEqual(res.stdout, "")
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "keep"}], "--draft")
+        res = self.run_cli("carryover", DATE, "--json")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("never submitted", res.stderr)
+        res = self.run_cli("carryover", DATE, "--json", "--include-draft")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertFalse(json.loads(res.stdout)["submitted"])
+        # No items file: never the Markdown fallback (it would carry the whole briefing).
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "keep"}])
+        br.items_path(self.vault, DATE).unlink()
+        res = self.run_cli("carryover", DATE, "--json")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("items file not found", res.stderr)
+
+    # 6 -- pagination, Part lines, empty exports
+    def test_widget_pages_are_never_empty(self):
+        items = copy.deepcopy(GOOD_ITEMS)
+        items[4]["detail"] = ["x" * 9000]  # one row far bigger than the others
+        self.write_items(items)
+        whole = len(br.build(self.vault, DATE, "widget", SITE, 10**7)[0].encode())
+        shell = whole - 9000
+        res = self.run_cli("build", DATE, "--surface", "widget", "--site", SITE, "--max-bytes", str(shell + 3000))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("row 5 alone exceeds", res.stderr)
+        paths = [pathlib.Path(p) for p in res.stdout.split()]
+        ns = []
+        for p in paths:
+            data = TestBuild.payload(p.read_text())
+            self.assertTrue(data["items"], p.name)
+            self.assertEqual(data["rows"], [data["items"][0]["n"], data["items"][-1]["n"]])
+            ns += [i["n"] for i in data["items"]]
+        self.assertEqual(ns, list(range(1, len(items) + 1)))
+        self.assertEqual(br.DEFAULT_MAX_BYTES, 200000)
+
+    def test_part_line_always_present_and_empty_exports_refused(self):
+        doc = br.load_items(self.vault, DATE)
+        text = br.format_export(DATE, doc, [], part=(2, 3, 5, 8))
+        self.assertIn("Part 2 of 3 — rows 5-8.", text)
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "done"}])
+        empty = re.sub(r"Part .*\n", "", text)
+        for stdin, flags in ((empty, ["--from-export"]), (text, ["--from-export"]),
+                             (json.dumps({"answers": []}), [DATE])):
+            with self.subTest(flags=flags):
+                res = self.run_cli("save", *flags, stdin=stdin)
+                self.assertEqual(res.returncode, 1)
+                self.assertIn("--allow-empty", res.stderr)
+        self.assertEqual(json.loads(br.answers_path(self.vault, DATE).read_text())["answers"][0]["action"], "done")
+        res = self.run_cli("save", DATE, "--allow-empty", stdin=json.dumps({"answers": []}))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(json.loads(br.answers_path(self.vault, DATE).read_text())["answers"], [])
+
+    def test_compact_source_strips_comments_and_whitespace(self):
+        js, css = br.app_assets()
+        cjs, ccss = br.compact_source(js, "js"), br.compact_source(br.widget_css(css), "css")
+        self.assertNotIn("Briefing review client: one implementation", cjs)  # leading block comment
+        self.assertNotIn("/*", ccss)
+        self.assertNotIn("\n", ccss)
+        self.assertLess(len(cjs), len(js) * 0.9)
+        self.assertLess(len(ccss), len(css) * 0.9)
+
+    # 9 -- answer field types
+    def test_answer_field_types_validated(self):
+        cases = [
+            ({"id": ["x"], "action": "done"}, "id must be"),
+            ({"id": {"a": 1}, "action": "done"}, "id must be"),
+            ({"id": "task:Ops/Tasks/Beta", "action": 3}, "action must be"),
+            ({"id": "task:Ops/Tasks/Beta", "action": "done", "note": ["x"]}, "note must be"),
+            ({"id": "task:Ops/Tasks/Beta", "action": "defer", "params": {"date": {"x": 1}}}, "params.date"),
+            ({"id": "task:Ops/Tasks/Beta", "action": "defer", "params": ["mon"]}, "params must be"),
+            ({"id": "task:Ops/Tasks/Beta", "action": "done", "note": "x" * (br.MAX_NOTE_CHARS + 1)}, "longer than"),
+            ({"id": "x" * (br.MAX_ID_CHARS + 1), "action": "done"}, "id must be"),
+        ]
+        for ans, needle in cases:
+            with self.subTest(needle=needle, ans=str(ans)[:60]):
+                res = self.run_cli("save", DATE, stdin=json.dumps({"answers": [ans]}))
+                self.assertEqual(res.returncode, 1)
+                self.assertIn(needle, res.stderr)
+                self.assertNotIn("Traceback", res.stderr)
+
+    # 10 -- emphasised group labels in the Markdown fallback
+    def test_emphasised_group_labels(self):
+        br.items_path(self.vault, DATE).unlink()
+        md = br.briefing_md_path(self.vault, DATE)
+        md.write_text(BRIEFING_MD.replace("- Lab logistics:", "- **Lab logistics:**")
+                      .replace("- [[2026-11-11 voice memo]] — unprocessed\n  - mentions the retreat",
+                               "- *Grant:*\n  - [[2026-11-11 voice memo]] — unprocessed"))
+        items = json.loads(self.run_cli("items", DATE).stdout)["items"]
+        texts = [i["text"] for i in items]
+        self.assertFalse(any("Lab logistics" in t or "Grant:" in t for t in texts), texts)
+        groups = {i["text"].split("]]")[0].lstrip("["): i["group"] for i in items}
+        self.assertEqual(groups["Order reagents"], "Lab logistics")
+        self.assertEqual(groups["2026-11-11 voice memo"], "Grant")
+
+    # 11 -- one id function for the skill and the fallback parser
+    def test_id_command_matches_fallback_ids(self):
+        br.items_path(self.vault, DATE).unlink()
+        items = json.loads(self.run_cli("items", DATE).stdout)["items"]
+        targetless = [i for i in items if not i.get("target")]
+        self.assertTrue(targetless)
+        for it in targetless + [i for i in items if i.get("target")][:2]:
+            args = ["id", "--kind", it["kind"], "--section", it["section"], "--date", DATE, "--text", it["text"]]
+            if it.get("target"):
+                args += ["--target", it["target"]]
+            res = self.run_cli(*args)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(res.stdout.strip(), it["id"])
+        self.assertEqual(self.run_cli("id", "--kind", "widget", "--section", "3", "--text", "x").returncode, 2)
+        self.assertEqual(self.run_cli("id", "--kind", "item", "--section", "3").returncode, 2)
+        # Default date = latest briefing.
+        res = self.run_cli("id", "--kind", "item", "--section", "3", "--text", "Plain line")
+        self.assertTrue(res.stdout.startswith(f"item:{DATE}:3:"), res.stdout)
+
+    # 13 -- file modes
+    def test_file_modes(self):
+        md = br.briefing_md_path(self.vault, DATE)
+        os.chmod(md, 0o600)
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "keep"}])
+        self.run_cli("mark", DATE, "task:Ops/Tasks/Beta", "--result", "skipped")
+        self.assertEqual(self.run_cli("annotate", DATE).returncode, 0)
+        mode = lambda p: p.stat().st_mode & 0o777  # noqa: E731
+        self.assertEqual(oct(mode(md)), oct(0o600))
+        self.assertEqual(oct(mode(br.answers_path(self.vault, DATE))), oct(0o600))
+        self.assertEqual(oct(mode(br.ledger_path(self.vault, DATE))), oct(0o600))
+        # An existing file keeps a looser mode the user chose.
+        os.chmod(br.answers_path(self.vault, DATE), 0o640)
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "done"}])
+        self.assertEqual(oct(mode(br.answers_path(self.vault, DATE))), oct(0o640))
+
+
+class TestServerFixes(VaultCase):
+    def setUp(self):
+        super().setUp()
+        self.write_items()
+
+    def start(self, host):
+        server = br.make_server(self.vault, host, 0, SITE)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1]
+
+    # 9 -- clean 400s, no dropped connection, no vault paths
+    def test_bad_answer_types_are_clean_400s(self):
+        port = self.start("127.0.0.1")
+        for body in ({"answers": [{"id": ["x"], "action": "done"}]}, {"answers": [{"id": {"a": 1}}]},
+                     {"answers": "nope"}, ["not", "an", "object"]):
+            with self.subTest(body=body):
+                req = urllib.request.Request(f"http://127.0.0.1:{port}/api/review/{DATE}", method="POST",
+                                             data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+                with self.assertRaises(urllib.error.HTTPError) as cm:
+                    urllib.request.urlopen(req, timeout=10)
+                out = json.loads(cm.exception.read().decode())
+                self.assertEqual(cm.exception.code, 400)
+                self.assertFalse(out["ok"])
+                self.assertNotIn("Traceback", out["error"])
+                self.assertNotIn(str(self.vault), out["error"])
+
+    def test_error_text_has_no_vault_paths(self):
+        self.assertEqual(br.public_error(f"bad {self.vault}/Inbox/reviews/x.json", self.vault),
+                         "bad Inbox/reviews/x.json")
+        self.assertLessEqual(len(br.public_error("x" * 5000, self.vault)), br.MAX_ERROR_CHARS + 1)
+
+    # 12 -- IPv6 loopback
+    def test_ipv6_loopback(self):
+        try:
+            port = self.start("::1")
+        except br.ReviewError as exc:
+            self.assertEqual(exc.code, 2 if "IPv6" in str(exc) else 1)
+            res = self.run_cli("serve", "--host", "::1", "--port", "0")
+            self.assertIn(res.returncode, (1, 2))
+            self.assertNotIn("Traceback", res.stderr)
+            self.assertIn("::1", res.stderr)
+            self.skipTest(f"IPv6 loopback unavailable here: {exc}")
+        with urllib.request.urlopen(f"http://[::1]:{port}/review/{DATE}", timeout=10) as res:
+            self.assertEqual(res.status, 200)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
