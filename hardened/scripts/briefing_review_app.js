@@ -165,12 +165,18 @@
     return { target: target, shown: alias || target.split("/").pop() || inner };
   }
 
+  // Mirrors sluggify() in Quartz's util/path.ts, which names the published pages.
+  function quartzSlug(path) {
+    return path.split("/").map(function (seg) {
+      return seg.replace(/\s/g, "-").replace(/&/g, "-and-").replace(/%/g, "-percent").replace(/\?/g, "").replace(/#/g, "");
+    }).join("/").replace(/\/$/, "").replace(/(^|\/)_index$/, "$1index");
+  }
+
   function wikiLink(inner) {
     const w = wikiParts(inner);
     if (!R.site || !w.target) return h("span", { class: "rv-wl", text: w.shown });
     const path = (R.links && R.links[w.target]) || w.target;
-    const slug = path.replace(/ - /g, "---").replace(/ /g, "-");
-    const href = R.site + "/" + slug.split("/").map(encodeURIComponent).join("/");
+    const href = R.site + "/" + quartzSlug(path).split("/").map(encodeURIComponent).join("/");
     return h("a", { class: "rv-wl", href: href, target: "_blank", rel: "noopener noreferrer", tabindex: "-1", text: w.shown });
   }
 
@@ -208,6 +214,9 @@
   // state: {[id]: {action, params, note, raw}}; raw = what was typed in the param box.
   let state = {};
   let meta = { savedAt: 0, submittedAt: null, dirty: false, lastSubmitted: null };
+  // Bumped on every edit (not persisted): a submit records the revision it snapshotted,
+  // so an edit made while the submit is in flight stays dirty.
+  let editRev = 0;
 
   function answered(e) { return !!(e && (e.action || (e.note && e.note.trim()))); }
   function paramOf(action) { return action && ACTIONS[action] ? ACTIONS[action].param : null; }
@@ -566,6 +575,7 @@
   }
 
   function changed(id) {
+    editRev++;
     meta.savedAt = Date.now();
     if (meta.submittedAt) {
       meta.dirty = true;
@@ -739,10 +749,11 @@
 
   // ---------------------------------------------------------------- submit
 
-  function markSubmitted(obj) {
+  // `rev` is editRev when `obj` was snapshotted; edits made since keep the form dirty.
+  function markSubmitted(obj, rev) {
     meta.submittedAt = obj.submitted_at;
     meta.lastSubmitted = obj;
-    meta.dirty = false;
+    meta.dirty = rev !== undefined && rev !== editRev;
     saveLocal();
     refreshSubmit();
   }
@@ -826,10 +837,15 @@
   function submitServer(n) {
     ui.submit.disabled = true;
     setStatus("Submitting" + ELL);
-    const obj = answersObject(true);
+    const obj = answersObject(true), rev = editRev;
     remote.submit(obj).then(function () {
-      markSubmitted(obj);
+      markSubmitted(obj, rev);
       setStatus("");
+      if (meta.dirty) {
+        showBanner(ui.banner, "info", [h("b", { text: "Submitted " + n + (n === 1 ? " answer" : " answers") + "," }),
+          " but you edited while it was sending " + DASH + " " + SUBMIT_LABEL.toLowerCase() + " again to send the changes."]);
+        return;
+      }
       showBanner(ui.banner, "ok", [h("b", { text: CHECK + " Submitted " + n + (n === 1 ? " answer" : " answers") }),
         " at " + clock(Date.now()) + " " + DASH + " saved to ", h("code", { text: "Inbox/reviews/" + DATE + ".json" }),
         ". Ask Claude to apply your review."]);
@@ -885,8 +901,15 @@
   const noRemote = { schedule: function () {}, flush: function () { return Promise.resolve(false); },
     connected: function () { return false; }, lastError: function () { return ""; }, post: null };
 
+  // The page is served at <baseDir>/review/<date> (Quartz --baseDir); keep that prefix.
+  function apiBase() {
+    const path = (typeof location !== "undefined" && location.pathname) || "";
+    const m = path.match(/^(.*?)\/review(?:\/[^/]*)?\/?$/);
+    return m ? m[1] : "";
+  }
+
   function serverRemote() {
-    const api = "/api/review/" + encodeURIComponent(DATE);
+    const api = apiBase() + "/api/review/" + encodeURIComponent(DATE);
     function post(obj, draft) {
       return fetch(api + (draft ? "?draft=1" : ""), { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(obj), cache: "no-store" }).then(function (res) {

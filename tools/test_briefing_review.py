@@ -214,6 +214,7 @@ class TestValidate(VaultCase):
             "unknown kind": lambda d: d["items"][0].update(kind="widget"),
             "unknown actions": lambda d: d["items"][0].update(actions=["do", "explode"]),
             "must start with": lambda d: d["items"][0].update(actions=["done", "do"]),
+            "not valid for kind 'capture'": lambda d: d["items"][5].update(actions=["do", "cancel"]),
             "detail must be": lambda d: d["items"][0].update(detail="x"),
             "sensitivity must be": lambda d: d["items"][0].update(sensitivity="secret"),
             "n is display-only": lambda d: d["items"][0].update(n=1),
@@ -580,6 +581,68 @@ class TestCarryover(VaultCase):
             if c["previous"] is None:
                 del c["previous"]
         self.assertEqual(br.validate_items(nxt), [])
+
+
+class TestCarryoverDeferrals(VaultCase):
+    """A deferral past the next day is carried when it comes due, not lost."""
+
+    def review(self, date, items, answers):
+        doc = {"schema": br.ITEMS_SCHEMA, "date": date, "items": copy.deepcopy(items)}
+        (self.vault / "Ops" / "Briefings" / f"{date}.md").write_text(f"# {date}\n", encoding="utf-8")
+        br.items_path(self.vault, date).write_text(json.dumps(doc), encoding="utf-8")
+        ans = {"schema": br.ANSWERS_SCHEMA, "date": date, "answers": answers}
+        res = self.run_cli("save", date, stdin=json.dumps(ans))
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def carried(self, date):
+        res = self.run_cli("carryover", date, "--json")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return {c["id"]: c for c in json.loads(res.stdout)["carry"]}
+
+    def test_target_less_deferral_comes_back_when_due(self):
+        loose = item("proposal:2026-11-12:7:abcdef12", kind="proposal", section="7", text="Write up the timeline")
+        defer = {"id": "followup:2026-11-12:10:11112222", "action": "defer", "params": {"date": "2026-11-16"}}
+        fu = item(defer["id"], kind="followup", section="10", text="Ask about the samples")
+        self.review("2026-11-12", [loose, fu], [defer, {"id": loose["id"], "action": "skip"}])
+        other = item("task:Ops/Tasks/Beta", target="Ops/Tasks/Beta.md")
+        for day in ("2026-11-13", "2026-11-14"):
+            self.review(day, [other], [{"id": other["id"], "action": "done"}])
+        # 11-13 carries into 11-14; 11-14 into 11-15: not due yet.
+        self.assertNotIn(fu["id"], self.carried("2026-11-13"))
+        self.assertNotIn(fu["id"], self.carried("2026-11-14"))
+        self.review("2026-11-15", [other], [{"id": other["id"], "action": "done"}])
+        got = self.carried("2026-11-15")  # into 11-16: due
+        self.assertIn(fu["id"], got)
+        self.assertEqual(got[fu["id"]]["carried_from"], "2026-11-12")
+        self.assertEqual(got[fu["id"]]["reason"], "defer_due")
+        self.assertEqual(got[fu["id"]]["previous"]["params"], {"date": "2026-11-16"})
+        self.assertNotIn(loose["id"], got)
+        # Once it reappears in a later items file it is never carried from the old review again.
+        self.review("2026-11-16", [fu], [{"id": fu["id"], "action": "done"}])
+        self.assertNotIn(fu["id"], self.carried("2026-11-16"))
+
+    def test_deferral_due_next_day_not_carried_twice(self):
+        fu = item("followup:2026-11-12:10:33334444", kind="followup", section="10", text="Ping the core")
+        self.review("2026-11-12", [fu], [{"id": fu["id"], "action": "defer", "params": {"date": "tom"}}])
+        self.assertIn(fu["id"], self.carried("2026-11-12"))
+        # The next briefing carried it, so the user answered it there; the old deferral stays settled.
+        self.review("2026-11-13", [fu], [{"id": fu["id"], "action": "done"}])
+        self.assertNotIn(fu["id"], self.carried("2026-11-13"))
+
+
+class TestPlanCustomActions(VaultCase):
+    def test_foreign_action_refused_before_plan(self):
+        bad = copy.deepcopy(GOOD_ITEMS)
+        bad[5]["actions"] = ["do", "cancel"]
+        self.write_items(bad)
+        res = self.run_cli("validate", DATE)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("not valid for kind 'capture'", res.stdout)
+        # Every kind's own actions route without error.
+        for kind, actions in br.KIND_ACTIONS.items():
+            for action in actions:
+                with self.subTest(kind=kind, action=action):
+                    self.assertIsInstance(br.route_for(kind, action), str)
 
 
 class TestBuild(VaultCase):
