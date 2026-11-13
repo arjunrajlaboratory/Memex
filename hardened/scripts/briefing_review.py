@@ -718,6 +718,11 @@ def _item_problems(item, seen):
             unknown = [a for a in actions if a not in ACTIONS]
             if unknown:
                 out.append(f"unknown actions {unknown}")
+            elif isinstance(kind, str) and kind in KIND_ACTIONS:
+                foreign = [a for a in actions if a not in KIND_ACTIONS[kind]]
+                if foreign:
+                    out.append(f"actions {foreign} are not valid for kind {kind!r} "
+                               f"(allowed: {', '.join(KIND_ACTIONS[kind])})")
             if not actions or actions[0] != "do":
                 out.append("actions must start with \"do\"")
             if len(set(actions)) != len(actions):
@@ -1345,6 +1350,78 @@ def annotate(vault, date):
 
 # --------------------------------------------------------------------------- carryover
 
+DEFER_ACTIONS = ("defer", "push", "bump")
+DEFER_LOOKBACK_DAYS = 90
+
+
+def defer_due(ans, next_day):
+    """A deferral is due when its date is on/before next_day (no ISO date counts as due)."""
+    when = (ans.get("params") or {}).get("date")
+    return not isinstance(when, str) or not DATE_RE.match(when) or when <= next_day
+
+
+def carried_item(item, date, ans, reason):
+    out = {k: v for k, v in item.items() if k not in ("previous", "carried_from")}
+    out["carried_from"] = date
+    out["previous"] = ({"date": date, "action": ans.get("action"), "params": ans.get("params") or {},
+                        "note": ans.get("note") or ""} if ans else None)
+    out["reason"] = reason
+    return out
+
+
+def matured_deferrals(vault, date, next_day, already, include_draft):
+    """Deferrals from reviews before `date` that skipped the day after their own review
+    (their date was later) and are due now. Without this a target-less item deferred
+    past tomorrow would never come back: each briefing only reads yesterday's review.
+    An item is skipped once it has reappeared in any later items file (it was resurfaced
+    or is still being tracked), so it is carried at most once."""
+    folder = answers_path(vault, date).parent
+    if not folder.is_dir():
+        return []
+    oldest = (dt.date.fromisoformat(date) - dt.timedelta(days=DEFER_LOOKBACK_DAYS)).isoformat()
+    earlier = sorted(m.group(1) for p in folder.iterdir()
+                     for m in [re.match(r"^(\d{4}-\d{2}-\d{2})\.json$", p.name)]
+                     if m and oldest <= m.group(1) < date)
+    seen_later = {}  # review date -> ids in items files dated after it, up to `date`
+
+    def ids_after(review_date):
+        if review_date not in seen_later:
+            ids = set()
+            bdir = briefings_dir(vault)
+            if bdir.is_dir():
+                for p in bdir.iterdir():
+                    m = re.match(r"^(\d{4}-\d{2}-\d{2})\.items\.json$", p.name)
+                    if m and review_date < m.group(1) <= date:
+                        try:
+                            doc = json.loads(p.read_text(encoding="utf-8"))
+                            ids.update(i.get("id") for i in doc.get("items", []) if isinstance(i, dict))
+                        except (OSError, ValueError, AttributeError):
+                            continue
+            seen_later[review_date] = ids
+        return seen_later[review_date]
+
+    out = []
+    for review_date in reversed(earlier):  # newest first, so the latest deferral wins
+        try:
+            doc = load_answers(vault, review_date)
+            items_doc = load_items(vault, review_date, markdown_fallback=False)
+        except ReviewError:
+            continue
+        if not doc.get("submitted") and not include_draft:
+            continue
+        review_next = (dt.date.fromisoformat(review_date) + dt.timedelta(days=1)).isoformat()
+        by_id = {a["id"]: a for a in doc.get("answers", []) if isinstance(a, dict) and isinstance(a.get("id"), str)}
+        for item in items_doc["items"]:
+            ans = by_id.get(item["id"])
+            if (item["id"] in already or not ans or ans.get("action") not in DEFER_ACTIONS
+                    or defer_due(ans, review_next) or not defer_due(ans, next_day)
+                    or item["id"] in ids_after(review_date)):
+                continue
+            already.add(item["id"])
+            out.append(carried_item(item, review_date, ans, "defer_due"))
+    return out
+
+
 def carryover(vault, date, include_draft=False):
     """Items the next briefing must carry from the review of `date`.
 
@@ -1372,18 +1449,13 @@ def carryover(vault, date, include_draft=False):
             reason = "note_only"
         elif ans["action"] == "keep":
             reason = "keep"
-        elif ans["action"] in ("defer", "push", "bump"):
-            when = (ans.get("params") or {}).get("date")
-            if not when or when <= next_day:
+        elif ans["action"] in DEFER_ACTIONS:
+            if defer_due(ans, next_day):
                 reason = "defer_due"
         if not reason:
             continue
-        out = {k: v for k, v in item.items() if k not in ("previous", "carried_from")}
-        out["carried_from"] = date
-        out["previous"] = ({"date": date, "action": ans.get("action"), "params": ans.get("params") or {},
-                            "note": ans.get("note") or ""} if ans else None)
-        out["reason"] = reason
-        carry.append(out)
+        carry.append(carried_item(item, date, ans, reason))
+    carry.extend(matured_deferrals(vault, date, next_day, {c["id"] for c in carry}, include_draft))
     return {"schema": CARRYOVER_SCHEMA, "date": date, "next_date": next_day,
             "submitted": bool(doc.get("submitted")), "carry": carry,
             "answers": [{"id": a["id"], "n": a.get("n"), "action": a.get("action"),

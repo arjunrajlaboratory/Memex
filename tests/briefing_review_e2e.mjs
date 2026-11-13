@@ -16,7 +16,7 @@ const { chromium } = require("playwright");
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(REPO, "hardened", "scripts", "briefing_review.py");
-const SHOTS = "/tmp/claude-0/-home-user-Memex/a8109344-0f9f-5442-b3f0-107a5b7f43d2/scratchpad";
+const SHOTS = process.env.REVIEW_E2E_SHOTS || fs.mkdtempSync(path.join(os.tmpdir(), "briefing-review-shots-"));
 const DATE = "2026-11-12"; // Thursday
 const SITE = "http://localhost:4321";
 const sha1 = (s) => crypto.createHash("sha1").update(s, "utf8").digest("hex");
@@ -399,8 +399,68 @@ async function main() {
       check("edits after submit keep the submitted file", JSON.parse(fs.readFileSync(answersFile, "utf8")).submitted === true);
       check("button invites resubmission", (await p2.textContent("#review-root .rv-btn-primary")).includes("again"));
       await fresh.close();
+      // An edit made while the submit is in flight stays unsent: the form must not claim it was submitted.
+      const racer = await browser.newContext();
+      const p3 = await racer.newPage();
+      let release;
+      const held = new Promise((r) => { release = r; });
+      await p3.route(`**/api/review/${DATE}`, async (route) => {
+        if (route.request().method() === "POST") await held;
+        await route.continue();
+      });
+      await p3.goto(`http://127.0.0.1:${port}/review/${DATE}`);
+      await p3.waitForSelector(row(1));
+      await p3.click(`${row(7)} .rv-pill[data-action="keep"]`);
+      await p3.click("#review-root .rv-btn-primary");
+      await sleep(200);
+      await p3.click(`${row(8)} .rv-pill[data-action="keep"]`);
+      release();
+      const infoText = async () => (await p3.$$eval('#review-root .rv-banner[data-kind="info"]', (b) => b.map((x) => x.textContent).join(" ")));
+      await until(async () => (await infoText()).includes("edited while it was sending"), 5000);
+      check("edit during an in-flight submit keeps the form unsent",
+        (await p3.textContent("#review-root .rv-btn-primary")).includes("again")
+        && (await infoText()).includes("edited while it was sending"), await infoText());
+      await racer.close();
+      // Quartz --baseDir: the page at <base>/review/<date> calls <base>/api/review/<date>.
+      const based = await browser.newContext();
+      const p4 = await based.newPage();
+      const html = await (await fetch(`http://127.0.0.1:${port}/review/${DATE}`)).text();
+      const apiCalls = [];
+      await p4.route("**/site/**", async (route) => {
+        const u = new URL(route.request().url());
+        if (u.pathname === `/site/review/${DATE}`) return route.fulfill({ contentType: "text/html", body: html });
+        apiCalls.push(u.pathname);
+        return route.fulfill({ status: 404, contentType: "application/json", body: '{"ok":false}' });
+      });
+      await p4.goto(`http://127.0.0.1:${port}/site/review/${DATE}`);
+      await p4.waitForSelector(row(1));
+      await until(() => apiCalls.length > 0, 4000);
+      check("API calls keep the --baseDir prefix", apiCalls.length > 0 && apiCalls.every((u) => u === `/site/api/review/${DATE}`),
+        JSON.stringify(apiCalls));
+      await based.close();
       await context.close();
       fs.rmSync(answersFile);
+    });
+
+    await step("link slugs follow Quartz's sluggify", async () => {
+      const v2 = fs.mkdtempSync(path.join(os.tmpdir(), "briefing-review-slug-"));
+      const target = "Atlas/Projects/R&D 100% plan?.md";
+      fs.mkdirSync(path.join(v2, "Atlas", "Projects"), { recursive: true });
+      fs.writeFileSync(path.join(v2, target), "---\ntype: note\nsensitivity: normal\n---\n# x\n");
+      fs.mkdirSync(path.join(v2, "Ops", "Briefings"), { recursive: true });
+      fs.writeFileSync(path.join(v2, "Ops", "Briefings", `${DATE}.md`), `---\ntype: briefing\ndate: ${DATE}\n---\n# B\n`);
+      fs.writeFileSync(path.join(v2, "Ops", "Briefings", `${DATE}.items.json`), JSON.stringify({
+        schema: "memex.briefing-items/v1", date: DATE, items: [{ id: "project:Atlas/Projects/R&D 100% plan?",
+          section: "5", kind: "project", target, text: "[[R&D 100% plan?]] — overdue", sensitivity: "normal" }] }));
+      const file = cli(v2, ["build", DATE, "--site", SITE]);
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.waitForSelector(row(1));
+      const href = await page.$eval(`${row(1)} .rv-text a`, (a) => a.getAttribute("href"));
+      check("'&', '%', '?' slugged like Quartz", href === `${SITE}/Atlas/Projects/R-and-D-100-percent-plan`, href);
+      await context.close();
+      fs.rmSync(v2, { recursive: true, force: true });
     });
 
     await step("widget surface (inline, sendPrompt)", async () => {

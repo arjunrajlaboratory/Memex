@@ -73,7 +73,8 @@ New answers, ledger and alias-map files are created `0600`; rewriting an existin
 Rules:
 
 - Required per item: `id`, `section`, `kind`, `text`. Everything else is optional. `actions` defaults
-  from `kind`. `text` and `detail` are the briefing's Markdown (wikilinks kept).
+  from `kind`; a custom list must start with `do` and only narrow the kind's own actions (anything
+  else is a validation error, so `plan` can always route it). `text` and `detail` are the briefing's Markdown (wikilinks kept).
 - `id` is `<kind>:<target without .md>` when the item has a target note (stable across days);
   otherwise `<kind>:<date>:<section>:<8-hex sha1 of plain_text(text)>` (wikilinks kept), which is
   per-day. The daily-briefing skill never computes it by hand: it runs `briefing_review.py id`,
@@ -220,7 +221,7 @@ Vault root = parent of the script's directory, overridable with `--vault <path>`
 | `plan [date] [--json] [--include-draft]` | Print the apply plan: every answer not yet in the ledger, with its routing (see Apply) and `fingerprint`. |
 | `mark [date] <id> --result applied\|skipped\|failed\|drafted [--summary TEXT] [--fingerprint FP]` | Record one answer in the ledger. `FP` is the plan entry's fingerprint and is what gets stored, even when the file's answer changed since `plan` (a note is printed; the changed answer re-plans). Without it, the current answer's fingerprint is stored and a warning printed. |
 | `annotate [date]` | Rewrite the managed `Review resolved` block in the briefing's §0 from the ledger (idempotent; creates §0 heading only if it exists already, otherwise appends a `## Review resolved` section at the end). |
-| `carryover [date] [--json] [--include-draft]` | For the review of `<date>`: list the items the next briefing must carry — unanswered, `keep`, and `defer` whose date is on/before the next day — plus every answer, for pre-fill. Exit 1 when there was no review: no items file (never the Markdown fallback), no answers file, or only a draft (unless `--include-draft`). |
+| `carryover [date] [--json] [--include-draft]` | For the review of `<date>`: list the items the next briefing must carry — unanswered, `keep`, and `defer`/`push`/`bump` whose date is on/before the next day, plus deferrals from earlier reviews (up to 90 days back) that come due now (see Carry-over) — plus every answer, for pre-fill. Exit 1 when there was no review: no items file (never the Markdown fallback), no answers file, or only a draft (unless `--include-draft`). |
 
 Exit codes: 0 ok, 1 validation / not found, 2 usage.
 
@@ -228,7 +229,8 @@ Exit codes: 0 ok, 1 validation / not found, 2 usage.
 
 - `GET /review` and `GET /review/` → 302 to `/review/<latest date>`.
 - `GET /review/<date>` → the `server`-surface page, built fresh on each request
-  (`build <date> --surface server --stdout`).
+  (`build <date> --surface server --stdout`). Under Quartz `--baseDir /x` every route sits under `/x`;
+  the client derives the API prefix from its own path (`<prefix>/review/<date>` → `<prefix>/api/review/<date>`).
 - `GET /api/review/<date>` → the stored answers JSON, or `404`.
 - `POST /api/review/<date>` → body = answers JSON (≤ 2 MB), piped to `save <date> --surface server`
   (`?draft=1` adds `--draft`). `200 {"ok":true,"path":…}` or `400 {"ok":false,"error":…}`. Saves for
@@ -271,7 +273,7 @@ State: `{[id]: {action, params, note}}`, keyed by item id. Storage and submit de
 | surface | draft storage | submit |
 | --- | --- | --- |
 | `page` | localStorage | clipboard export (shown in a panel) |
-| `server` | localStorage + debounced `POST …?draft=1`; initial state from `GET /api/review/<date>` | `POST /api/review/<date>` through the same one-at-a-time write queue as drafts; submitting cancels a pending draft, and no draft is sent once the review is submitted; clipboard stays as a secondary button |
+| `server` | localStorage + debounced `POST …?draft=1`; initial state from `GET /api/review/<date>` | `POST /api/review/<date>` through the same one-at-a-time write queue as drafts; submitting cancels a pending draft, and no draft is sent once the review is submitted; an edit made while the submit is in flight leaves the form unsent ("Submit again"); clipboard stays as a secondary button |
 | `widget` | localStorage (best effort) | `sendPrompt(export)` when the host provides it; else, when framed (Memex Desktop), `window.parent.postMessage({type:"memex:sendPrompt", text}, "*")` and wait up to 1.5 s for `{type:"memex:sendPrompt:ack", ok}` from the parent — `ok:true` says the answers are in the message box and still need Enter (`staged:false`: behind the app's Insert button); `ok:false` or no ack shows the export panel + clipboard with "Couldn't hand the answers to the app — copy them instead"; clipboard as the last fallback |
 | `artifact` | `db` doc `reviews/<date>` (debounced, one write at a time) | same doc with `submitted: true` |
 
@@ -304,6 +306,9 @@ State: `{[id]: {action, params, note}}`, keyed by item id. Storage and submit de
   note titles never leave the machine through ids; the build writes the alias map locally and
   `save --surface artifact` maps aliases back (real ids are accepted too). Wikilinks render as
   plain text (no localhost links).
+
+On the other surfaces a wikilink links to `<site>/<slug>`, with the slug built as Quartz's `sluggify`
+does (whitespace → `-`, `&` → `-and-`, `%` → `-percent`, `?` and `#` dropped).
 
 The preferred surface is a vault preference in `_config/overrides.md`:
 `review_surface: auto | widget | server | page | artifact` (default `auto` = widget when the session
@@ -342,7 +347,14 @@ the answers file).
 The next daily briefing runs `carryover <previous date>` during input gathering; exit 1 (no items
 file, no answers, or only a draft) means there is nothing to carry and the step is skipped. Unanswered items,
 `keep`, and due `defer` items are carried into the matching sections with `carried_from`; each item's
-`previous` answer is attached so the review page can pre-fill the chip. Items whose answer was
+`previous` answer is attached so the review page can pre-fill the chip.
+
+A deferral to a date after the next day is not carried at first. Each later `carryover` also scans the
+submitted reviews of the previous 90 days for such deferrals: one whose date is now on/before the next
+day is carried with `carried_from` = the review that deferred it, unless the item has appeared in any
+items file since that review (it was resurfaced, or is still tracked and answered there). This is what
+brings back a target-less item, which has no note whose own dates would resurface it. A day with no
+submitted review skips carry-over; a matured deferral is picked up by the next review's carry-over. Items whose answer was
 applied (`done`, `cancel`, `drop`, `dismiss`, `skip`, `create_task`, …) are not carried.
 
 ## Memex Desktop prompt bridge
