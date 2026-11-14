@@ -1086,6 +1086,8 @@ def export_to_answers(parsed_rows, items_doc, header_hash=None):
     """Map export rows back to item ids. Returns (answers-object, notes, matched_by_position).
 
     Every row is checked against items[n-1] (label + a normalized prefix of its text).
+    Unless the export's items hash equals the current one, that positional match also
+    has to be unique among all items.
     On any mismatch every row is re-matched by label + text among all items; that
     succeeds only when every row matches exactly one item. Otherwise ReviewError,
     naming the rows that could not be matched, and nothing is written.
@@ -1105,7 +1107,14 @@ def export_to_answers(parsed_rows, items_doc, header_hash=None):
             return None
         item = items[n - 1]
         if row_matches_item(row, item):
-            return item
+            if header_hash == current_hash:
+                return item
+            # The items may have moved since the export was made: a positional match is
+            # trusted only when no other item fits the row too (two tasks that share a
+            # text prefix could have swapped places).
+            if sum(1 for it in items if row_matches_item(row, it)) == 1:
+                return item
+            return None
         if not _norm_export_text(row.get("text")) and header_hash == current_hash:
             return item  # nothing to compare, but the page was built from this very list
         return None
@@ -1631,6 +1640,25 @@ def previous_state(vault, date):
             "saved_at": doc.get("saved_at") or doc.get("submitted_at")}
 
 
+def scope_previous(prev, items):
+    """Stored answers limited to the rows a page shows. A withheld row's answer is
+    dropped; a title-only (private) row keeps its action and only a date param, never
+    its note, the same as `redact_items` does for the item's own `previous`."""
+    if not prev:
+        return prev
+    shown = {it["id"]: bool(it.get("private")) for it in items}
+    state = {}
+    for aid, ans in (prev.get("state") or {}).items():
+        if aid not in shown:
+            continue
+        if shown[aid]:
+            params = ans.get("params") if isinstance(ans.get("params"), dict) else {}
+            ans = {"action": ans.get("action"), "note": "",
+                   "params": {k: v for k, v in params.items() if k in ("date", "date_raw")}}
+        state[aid] = ans
+    return dict(prev, state=state)
+
+
 def build_payload(vault, date, items_doc, surface, site, redact, index):
     items = []
     for n, item in enumerate(items_doc["items"], 1):
@@ -1657,7 +1685,7 @@ def build_payload(vault, date, items_doc, surface, site, redact, index):
         "surface": surface,
         "site": site,
         "links": collect_links(items, index, site),
-        "previous": None if surface == "artifact" else previous_state(vault, date),
+        "previous": None if surface == "artifact" else scope_previous(previous_state(vault, date), items),
         "withheld": withheld,
         "total": len(items_doc["items"]),
         "page": 1,
@@ -1703,7 +1731,9 @@ def paginate_widget(payload, js, css, max_bytes):
         used = " ".join(i.get("text", "") + " " + " ".join(i.get("detail", [])) for i in items)
         links = {k: v for k, v in payload["links"].items() if k in used}
         rows = [items[0]["n"], items[-1]["n"]] if items else None
-        return render_surface(dict(payload, items=items, links=links, page=page, pages=pages, rows=rows),
+        previous = scope_previous(payload.get("previous"), items)  # only this page's answers
+        return render_surface(dict(payload, items=items, links=links, page=page, pages=pages, rows=rows,
+                                   previous=previous),
                               "widget", js, css)
 
     def fits(items):

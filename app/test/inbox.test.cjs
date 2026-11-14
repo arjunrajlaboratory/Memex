@@ -158,3 +158,15 @@ test('directory drops do not import nested symlinks', async (t) => {
   assert.equal(fs.readFileSync(path.join(vault, 'Inbox/folder/ordinary.txt'), 'utf8'), 'ordinary');
   assert.equal(fs.existsSync(path.join(vault, 'Inbox/folder/escape.txt')), false);
 });
+
+test('the Inbox list skips the system slots but keeps captures', (t) => {
+  const { readInbox } = require('../dist/main/vault.js');
+  const { vault } = makeTree(t);
+  for (const slot of ['_filed', '_journal', 'comms', 'reviews']) {
+    fs.mkdirSync(path.join(vault, 'Inbox', slot));
+  }
+  fs.writeFileSync(path.join(vault, 'Inbox', 'reviews', '2026-11-12.json'), '{}');
+  fs.writeFileSync(path.join(vault, 'Inbox', 'memo.md'), 'capture');
+  fs.writeFileSync(path.join(vault, 'Inbox', 'reviews.md'), 'a capture that only looks like a slot');
+  assert.deepEqual(readInbox(vault).map((e) => e.name).sort(), ['memo.md', 'reviews.md']);
+});

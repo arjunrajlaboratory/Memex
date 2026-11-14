@@ -283,7 +283,7 @@ body {
   font-weight: 650;
 }
 #review-root .rv-status {
-  color: var(--rv-faint);
+  color: var(--rv-muted);
   font-size: 12px;
 }
 #review-root .rv-status[data-kind="error"] {
@@ -410,9 +410,10 @@ body {
 }
 #review-root .rv-pill.rv-g-accent {
   border-color: var(--rv-accent);
-  background: var(--rv-accent-soft);
   color: var(--rv-accent);
-  font-weight: 600;
+}
+#review-root .rv-row.rv-answered .rv-pill:not([aria-pressed="true"]):not(:hover):not(:focus-visible) {
+  opacity: .55;
 }
 #review-root .rv-pill[aria-pressed="true"], #review-root .rv-pill[aria-pressed="true"]:hover {
   border-color: var(--g);
@@ -602,6 +603,28 @@ body {
   }
   #review-root .rv-hints {
     display: none;
+  }
+  /* 16px keeps iOS Safari from zooming on focus; pills get finger-sized targets. */
+  #review-root .rv-note, #review-root .rv-param input {
+    font-size: 16px;
+  }
+  #review-root .rv-pills {
+    gap: 6px;
+  }
+  #review-root .rv-pill {
+    padding: 6px 12px;
+  }
+}
+/* ---- wide: room for a row's pills on one line ---- */
+@container (min-width: 1100px) {
+  #review-root:not([data-surface="widget"]) .rv-row {
+    --rv-pills-w: 22rem;
+  }
+}
+/* seven pills on one line */
+@container (min-width: 1240px) {
+  #review-root:not([data-surface="widget"]) .rv-row {
+    --rv-pills-w: 28rem;
   }
 }
 @container (max-width: 520px) {

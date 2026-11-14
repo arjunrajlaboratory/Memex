@@ -444,6 +444,29 @@ async function main() {
       check("an edit made while answers load is kept", JSON.stringify(await pressed(p5, 9)) === '["keep"]',
         JSON.stringify(await pressed(p5, 9)));
       await loader.close();
+      // An unsent edit survives a reload even when the server copy carries the same
+      // whole-second timestamp (server times have no milliseconds).
+      const reloader = await browser.newContext();
+      const p7 = await reloader.newPage();
+      let stampMs = 0;
+      await p7.route(`**/api/review/${DATE}`, async (route) => {
+        if (route.request().method() === "POST") return route.abort(); // the draft never reaches the server
+        const res = await route.fetch();
+        const doc = await res.json();
+        if (stampMs) doc.saved_at = doc.submitted_at = new Date(Math.floor(stampMs / 1000) * 1000).toISOString();
+        return route.fulfill({ response: res, json: doc });
+      });
+      await p7.goto(`http://127.0.0.1:${port}/review/${DATE}`);
+      await p7.waitForSelector(row(1));
+      await sleep(500);
+      await p7.click(`${row(10)} .rv-pill[data-action="keep"]`);
+      stampMs = await p7.evaluate(() => Date.now());
+      await p7.reload();
+      await p7.waitForSelector(row(1));
+      await sleep(800);
+      check("an unsent edit wins over a server copy from the same second",
+        JSON.stringify(await pressed(p7, 10)) === '["keep"]', JSON.stringify(await pressed(p7, 10)));
+      await reloader.close();
       // Reset of a submitted review: the file keeps its answers until Submit clears it.
       const resetter = await browser.newContext();
       const p6 = await resetter.newPage();
@@ -510,7 +533,12 @@ async function main() {
       const paged = cli(vault, ["build", DATE, "--surface", "widget", "--site", SITE]).split("\n");
       const sizes = paged.map((p) => fs.statSync(p).size);
       check(`default --max-bytes 200000 respected (${paged.length} page(s), ${sizes.join("/")} bytes)`, sizes.every((s) => s <= 200000));
-      const small = cli(vault, ["build", DATE, "--surface", "widget", "--site", SITE, "--max-bytes", "56000",
+      // A budget a few rows above the script and styles, read from the CLI's own refusal.
+      let shell = 0;
+      try { cli(vault, ["build", DATE, "--surface", "widget", "--site", SITE, "--max-bytes", "1000", "--stdout"]); }
+      catch (err) { shell = Number((String(err.message).match(/\((\d+) bytes before any row\)/) || [])[1] || 0); }
+      check("CLI reports the widget's base size", shell > 0, String(shell));
+      const small = cli(vault, ["build", DATE, "--surface", "widget", "--site", SITE, "--max-bytes", String(shell + 6000),
         "--out", path.join(vault, "outputs", "briefing-review", "small.widget.html")]).split("\n");
       check("small budget splits into several non-empty pages", small.length > 1 && small.every((p) => /"items":\[\{/.test(fs.readFileSync(p, "utf8"))), String(small.length));
       const file = cli(vault, ["build", DATE, "--surface", "widget", "--site", SITE, "--max-bytes", "400000",
