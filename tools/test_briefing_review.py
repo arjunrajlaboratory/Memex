@@ -960,6 +960,67 @@ class TestReviewFixes(VaultCase):
         saved = {a["id"]: a["action"] for a in json.loads(br.answers_path(self.vault, DATE).read_text())["answers"]}
         self.assertEqual(saved, {"task:Ops/Tasks/Beta": "done", "capture:Inbox/memo": "file"})
 
+    def test_export_swapped_lookalikes_refuse(self):
+        # Two tasks share a long text prefix; the regenerated briefing swaps them.
+        prefix = "Send the revised quarterly budget spreadsheet to the facilities office before the"
+        a = item("task:Ops/Tasks/QA", target="Ops/Tasks/QA.md", sensitivity="normal",
+                 text=prefix + " Monday meeting")
+        b = item("task:Ops/Tasks/QB", target="Ops/Tasks/QB.md", sensitivity="normal",
+                 text=prefix + " Friday review")
+        before = copy.deepcopy(GOOD_ITEMS) + [a, b]
+        self.write_items(before)
+        text = self.export_for([{"id": "task:Ops/Tasks/QA", "action": "done"}])
+        self.write_items(copy.deepcopy(GOOD_ITEMS) + [b, a])
+        res = self.run_cli("save", "--from-export", stdin=text)
+        self.assertEqual(res.returncode, 1, res.stdout)
+        self.assertIn("2 items match", res.stderr)
+        self.assertFalse(br.answers_path(self.vault, DATE).exists())
+        # Built from the very same items, the positional match is trusted as before.
+        self.write_items(before)
+        res = self.run_cli("save", "--from-export", stdin=text)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        saved = {x["id"]: x["action"] for x in json.loads(br.answers_path(self.vault, DATE).read_text())["answers"]}
+        self.assertEqual(saved.get("task:Ops/Tasks/QA"), "done")
+        self.assertNotIn("task:Ops/Tasks/QB", saved)
+
+    def test_redacted_builds_scope_saved_answers(self):
+        for rel, sens in TestBuild.ARTIFACT_NOTES.items():
+            f = self.vault / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(f"---\ntype: note\nsensitivity: {sens}\n---\n# body\n", encoding="utf-8")
+        self.save([{"id": "task:Ops/Tasks/Beta", "action": "done", "note": "beta-note-ok"},
+                   {"id": "task:Ops/Tasks/Gamma", "action": "defer", "params": {"date": "fri"},
+                    "note": "gamma-private-note"},
+                   {"id": "item:2026-11-12:asks:12345678", "action": "drop", "note": "secret-sensitive-note"}])
+        [html] = br.build(self.vault, DATE, "page", SITE, redact="private")
+        self.assertNotIn("gamma-private-note", html)
+        self.assertNotIn("secret-sensitive-note", html)
+        self.assertNotIn("task:Ops/Tasks/Gamma", TestBuild.payload(html)["previous"]["state"])
+        self.assertIn("beta-note-ok", html)
+        [html] = br.build(self.vault, DATE, "page", SITE, redact="titles")
+        state = TestBuild.payload(html)["previous"]["state"]
+        self.assertNotIn("gamma-private-note", html)
+        self.assertNotIn("secret-sensitive-note", html)
+        self.assertEqual(state["task:Ops/Tasks/Gamma"]["action"], "defer")
+        self.assertEqual(state["task:Ops/Tasks/Gamma"]["note"], "")
+        self.assertIn("date", state["task:Ops/Tasks/Gamma"]["params"])
+        # Unredacted local builds keep every saved answer.
+        [html] = br.build(self.vault, DATE, "page", SITE)
+        self.assertIn("gamma-private-note", html)
+
+    def test_widget_pages_embed_only_their_answers(self):
+        # Twelve long notes: together they exceed the budget, so embedding every page's
+        # answers on each page would make even an empty page too big to split into.
+        self.save([{"id": it["id"], "action": None, "note": "n" * 15000} for it in GOOD_ITEMS])
+        limit = 150000
+        docs = br.build(self.vault, DATE, "widget", SITE, limit)
+        self.assertGreater(len(docs), 1)
+        for doc in docs:
+            self.assertLessEqual(len(doc.encode()), limit)
+            data = TestBuild.payload(doc)
+            page_ids = {it["id"] for it in data["items"]}
+            self.assertTrue(set(data["previous"]["state"]) <= page_ids)
+
     def test_export_unmatched_rows_write_nothing(self):
         text = self.export_for([{"id": "task:Ops/Tasks/Beta", "action": "done"}])
         others = copy.deepcopy(GOOD_ITEMS)

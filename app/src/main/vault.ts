@@ -267,13 +267,19 @@ export function readSources(vault: string): SourceRow[] {
   }));
 }
 
+// Folders that live in Inbox/ permanently and are never captures (the triage-inbox
+// skill's "system slots"): filed items, durable journals, comms digests, and saved
+// briefing reviews.
+export const INBOX_SYSTEM_SLOTS = new Set(['_filed', '_journal', 'comms', 'reviews']);
+
 export function readInbox(vault: string): FileEntry[] {
   const dir = path.join(vault, 'Inbox');
   const out: FileEntry[] = [];
   if (pathType(vault, 'Inbox') !== 'directory') return out;
   for (const ent of safeList(dir)) {
     if (out.length >= MAX_LISTED_FILES) break;
-    if (ent.name === 'README.md' || ent.name.startsWith('.') || ent.name === '_filed') continue;
+    if (ent.name === 'README.md' || ent.name.startsWith('.')) continue;
+    if (ent.isDirectory() && INBOX_SYSTEM_SLOTS.has(ent.name)) continue;
     if (isSyncArtifact(ent.name)) continue;
     if (ent.isSymbolicLink()) continue;
     const file = path.join(dir, ent.name);

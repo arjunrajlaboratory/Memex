@@ -38,7 +38,8 @@ files sit side by side and the Python locates the JS/CSS next to itself.
 New answers, ledger and alias-map files are created `0600`; rewriting an existing file (including
 `annotate` rewriting the briefing) keeps that file's mode.
 
-`Inbox/reviews/` is a system slot like `Inbox/comms/`: never triaged as a capture.
+`Inbox/reviews/` is a system slot like `Inbox/comms/`: never triaged as a capture, and never listed
+in the Memex Desktop Inbox (which skips `_filed/`, `_journal/`, `comms/` and `reviews/`).
 
 ### items.json (`schema: "memex.briefing-items/v1"`)
 
@@ -200,8 +201,10 @@ export always has a `Part <i> of <N> — rows <lo>-<hi>.` line under the header,
 
 `save --from-export` verifies every row against `items[n-1]`: same label, and the row's text
 (normalized: whitespace collapsed, case folded, the `…` dropped) is a prefix of the item's plain
-text (first 60 characters compared; a `--redact titles` row's `[[Title]]` also matches). If any
-row fails, every row is re-matched by label + text among all items; when each row matches exactly
+text (first 60 characters compared; a `--redact titles` row's `[[Title]]` also matches). Unless
+the export's items hash equals the current one, a positional match must also be unique: a row that
+fits more than one item (two tasks sharing a text prefix may have swapped places) counts as failed.
+If any row fails, every row is re-matched by label + text among all items; when each row matches exactly
 one distinct item the save proceeds and says so on stderr (a Part export then replaces only those
 rows' answers). Otherwise it exits 1, lists the unmatched rows, and writes nothing.
 
@@ -251,7 +254,9 @@ resolved); it never emits a static review page, so nothing reaches a public buil
 
 One implementation (`briefing_review_app.js` + `.css`) inlined into every surface. The page provides
 `window.__REVIEW__ = {date, items_hash, items, actions, kinds, surface, site, previous, withheld,
-page, pages, rows}` (`rows` = `[first n, last n]` of a widget page).
+page, pages, rows}` (`rows` = `[first n, last n]` of a widget page). `previous` (stored answers for
+pre-fill) covers only the rows that page shows: a withheld row's answer is left out, a title-only
+row keeps its action and a date param but no note, and a widget page carries only its own rows.
 
 Kept from the prototype: keyboard-first (Tab / Shift-Tab move between rows' note fields only; links
 and pills are out of the tab order), focused-row highlight, answered rows get a coloured left border,
@@ -274,7 +279,7 @@ State: `{[id]: {action, params, note}}`, keyed by item id. Storage and submit de
 | surface | draft storage | submit |
 | --- | --- | --- |
 | `page` | localStorage | clipboard export (shown in a panel) |
-| `server` | localStorage + debounced `POST …?draft=1`; initial state from `GET /api/review/<date>` | `POST /api/review/<date>` through the same one-at-a-time write queue as drafts; submitting cancels a pending draft, and no draft is sent once the review is submitted; an edit made while the submit is in flight leaves the form unsent ("Submit again"); a Reset of a submitted review keeps it on file until the next Submit, which clears it (`?clear=1`); answers loaded from the server never replace edits made while they were loading (same for the artifact `db` doc); clipboard stays as a secondary button |
+| `server` | localStorage + debounced `POST …?draft=1`; initial state from `GET /api/review/<date>` | `POST /api/review/<date>` through the same one-at-a-time write queue as drafts; submitting cancels a pending draft, and no draft is sent once the review is submitted; an edit made while the submit is in flight leaves the form unsent ("Submit again"); a Reset of a submitted review keeps it on file until the next Submit, which clears it (`?clear=1`); answers loaded from the server never replace edits made while they were loading, nor a local edit not yet sent from the same second as the server copy (server times are whole seconds) — the client then sends it (same for the artifact `db` doc); clipboard stays as a secondary button |
 | `widget` | localStorage (best effort) | `sendPrompt(export)` when the host provides it; else, when framed (Memex Desktop), `window.parent.postMessage({type:"memex:sendPrompt", text}, "*")` and wait up to 1.5 s for `{type:"memex:sendPrompt:ack", ok}` from the parent — `ok:true` says the answers are in the message box and still need Enter (`staged:false`: behind the app's Insert button); `ok:false` or no ack shows the export panel + clipboard with "Couldn't hand the answers to the app — copy them instead"; clipboard as the last fallback |
 | `artifact` | `db` doc `reviews/<date>` (debounced, one write at a time) | same doc with `submitted: true` |
 

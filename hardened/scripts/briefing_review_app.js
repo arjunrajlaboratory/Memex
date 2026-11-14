@@ -213,7 +213,7 @@
 
   // state: {[id]: {action, params, note, raw}}; raw = what was typed in the param box.
   let state = {};
-  let meta = { savedAt: 0, submittedAt: null, dirty: false, lastSubmitted: null, clearOnSubmit: false };
+  let meta = { savedAt: 0, submittedAt: null, dirty: false, lastSubmitted: null, clearOnSubmit: false, unsynced: false };
   // Bumped on every edit (not persisted): a submit records the revision it snapshotted,
   // so an edit made while the submit is in flight stays dirty.
   let editRev = 0;
@@ -317,7 +317,8 @@
 
   function saveLocal() {
     lsSet(STORE_KEY, { v: 1, state: state, savedAt: meta.savedAt, submittedAt: meta.submittedAt,
-      dirty: meta.dirty, lastSubmitted: meta.lastSubmitted, clearOnSubmit: !!meta.clearOnSubmit });
+      dirty: meta.dirty, lastSubmitted: meta.lastSubmitted, clearOnSubmit: !!meta.clearOnSubmit,
+      unsynced: !!meta.unsynced });
   }
 
   function loadInitial() {
@@ -329,6 +330,7 @@
       meta.dirty = !!local.dirty;
       meta.lastSubmitted = local.lastSubmitted || null;
       meta.clearOnSubmit = !!local.clearOnSubmit;
+      meta.unsynced = !!local.unsynced;
       return;
     }
     if (R.previous && R.previous.state) {
@@ -578,6 +580,7 @@
   function changed(id) {
     editRev++;
     meta.savedAt = Date.now();
+    meta.unsynced = true;
     if (meta.submittedAt) {
       meta.dirty = true;
       if (!ui.banner.hidden && ui.banner.getAttribute("data-kind") === "ok") {
@@ -754,6 +757,21 @@
 
   // ---------------------------------------------------------------- submit
 
+  // The remote copy now holds every edit up to `rev` (editRev when it was snapshotted).
+  function synced(rev) {
+    if (rev !== editRev) return;
+    meta.unsynced = false;
+    saveLocal();
+  }
+
+  // Should the copy in this browser win over a remote one saved at `remoteAt` (ms)?
+  // Server times are whole seconds, so a local edit not yet sent wins a tie within
+  // that second; an already-sent local copy wins only when clearly newer.
+  function localWins(remoteAt) {
+    if (!meta.savedAt) return false;
+    return meta.unsynced ? meta.savedAt >= remoteAt : meta.savedAt > remoteAt + 1000;
+  }
+
   // `rev` is editRev when `obj` was snapshotted; edits made since keep the form dirty.
   function markSubmitted(obj, rev) {
     meta.submittedAt = obj.submitted_at;
@@ -848,6 +866,7 @@
     remote.submit(obj, clear).then(function () {
       if (clear) meta.clearOnSubmit = false;
       markSubmitted(obj, rev);
+      synced(rev);
       setStatus("");
       if (meta.dirty) {
         showBanner(ui.banner, "info", [h("b", { text: "Submitted " + n + (n === 1 ? " answer" : " answers") + "," }),
@@ -935,7 +954,9 @@
         if (meta.dirty) setStatus("Edited since submit " + DASH + " not yet sent");
         return Promise.resolve(true);
       }
+      const rev = editRev;
       return post(answersObject(false), true).then(function () {
+        synced(rev);
         setStatus("Draft saved " + clock(Date.now()));
         return true;
       }, function (err) {
@@ -954,9 +975,10 @@
         if (!doc || !Array.isArray(doc.answers)) return;
         const serverAt = Date.parse(doc.saved_at || doc.submitted_at || "") || 0;
         if (editRev !== rev) return; // edited while loading: the user's edits win
-        if (meta.savedAt && meta.savedAt > serverAt + 1000) return; // newer local edits win
+        if (localWins(serverAt)) { if (meta.unsynced) q.schedule(); return; } // newer local edits win
         state = stateFromAnswers(doc.answers);
         meta.savedAt = serverAt;
+        meta.unsynced = false;
         meta.submittedAt = doc.submitted ? (doc.submitted_at || "earlier") : null;
         meta.dirty = false;
         saveLocal();
@@ -998,9 +1020,11 @@
     }
     const q = writeQueue(function () {
       if (!ref) return Promise.resolve(false);
+      const rev = editRev;
       let p;
       try { p = Promise.resolve(ref.set(docToStore())); } catch (e) { p = Promise.reject(e); }
       return p.then(function () {
+        synced(rev);
         lastErr = "";
         setStatus("Saved " + clock(Date.now()));
         return true;
@@ -1016,9 +1040,10 @@
       if (!data || !data.state) return;
       const remoteAt = Date.parse(data.saved_at || data.submitted_at || "") || 0;
       // Edited while loading, or newer local edits: keep them and write them back.
-      if (editRev !== rev || (meta.savedAt && meta.savedAt > remoteAt + 1000)) { q.schedule(); return; }
+      if (editRev !== rev || localWins(remoteAt)) { q.schedule(); return; }
       state = stateFromMap(data.state);
       meta.savedAt = remoteAt;
+      meta.unsynced = false;
       meta.submittedAt = data.submitted ? (data.submitted_at || "earlier") : null;
       meta.lastSubmitted = data.submitted ? data : null;
       meta.dirty = !!data.edited_since_submit;
