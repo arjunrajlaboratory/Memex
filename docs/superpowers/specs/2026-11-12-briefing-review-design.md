@@ -378,3 +378,7 @@ notice with an **Insert** button holds the text instead. Every message is answer
 
 MCP App surface (a Memex MCP server exposing the review UI as an MCP Apps resource and `apply` as a
 tool). The CLI is the seam it would wrap.
+
+Proposed next (not yet agreed): opening the review instead of the briefing page, and a read-only
+"Today" header on the form, in
+[2026-11-14-briefing-review-today-header-design.md](2026-11-14-briefing-review-today-header-design.md).
