@@ -8,7 +8,7 @@
 //   GET  /review, /review/      -> 302 /review/<latest Ops/Briefings/YYYY-MM-DD.md>
 //   GET  /review/<date>         -> `briefing_review.py build <date> --surface server --stdout`
 //   GET  /api/review/<date>     -> <vault>/Inbox/reviews/<date>.json, or 404
-//   POST /api/review/<date>     -> body piped to `briefing_review.py save <date> --surface server [--draft]`
+//   POST /api/review/<date>     -> body piped to `briefing_review.py save <date> --surface server [--draft | --allow-empty]`
 //
 // All work is delegated to <vault>/scripts/briefing_review.py via execFile/spawn
 // with an argument array (never a shell). The only request-derived value that
@@ -230,6 +230,8 @@ async function route(req, res, opts) {
   const draft = ["1", "true"].includes(url.searchParams.get("draft") ?? "")
   const args = [script, "--vault", vaultDir, "save", date, "--surface", "server"]
   if (draft) args.push("--draft")
+  // ?clear=1: an empty submit after an explicit Reset may replace a submitted file.
+  else if (["1", "true"].includes(url.searchParams.get("clear") ?? "")) args.push("--allow-empty")
   // One save per vault+date at a time, in arrival order: a draft POST can never
   // overtake the submit that followed it (the script also locks across processes).
   const result = await serialize(`${vaultDir}\0${date}`, () =>

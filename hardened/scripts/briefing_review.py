@@ -532,6 +532,13 @@ def _letters(i):
     return out
 
 
+def strip_managed_block(md):
+    """Drop the `annotate`-managed Review resolved block: its bullets are summaries, not items."""
+    start = md.find(BLOCK_START)
+    end = md.find(BLOCK_END, start + 1) if start >= 0 else -1
+    return md if start < 0 or end < 0 else md[:start] + md[end + len(BLOCK_END):]
+
+
 def parse_briefing_markdown(md, date):
     """Parse a briefing's Markdown into raw rows (dicts) in document order.
 
@@ -539,7 +546,7 @@ def parse_briefing_markdown(md, date):
     12, 13 and `### Upcoming meetings` are skipped; `\u21b3` lines are detail of the
     row above; a childful list item ending in ':' without a wikilink is a group label.
     """
-    lines = strip_frontmatter(md).splitlines()
+    lines = strip_managed_block(strip_frontmatter(md)).splitlines()
     rows = []
     section = None
     title = ""
@@ -1422,7 +1429,7 @@ def matured_deferrals(vault, date, next_day, already, include_draft):
     return out
 
 
-def carryover(vault, date, include_draft=False):
+def carryover(vault, date, include_draft=False, to=None):
     """Items the next briefing must carry from the review of `date`.
 
     Exit 1 (ReviewError) when there was no review: no items file (the Markdown
@@ -1438,7 +1445,11 @@ def carryover(vault, date, include_draft=False):
                           "nothing to carry (pass --include-draft to use the draft)")
     answers = [a for a in doc.get("answers", []) if isinstance(a, dict) and isinstance(a.get("id"), str)]
     by_id = {a["id"]: a for a in answers}
-    next_day = (dt.date.fromisoformat(date) + dt.timedelta(days=1)).isoformat()
+    # `to` is the briefing being generated (it may be days later after a gap); deferrals
+    # due on/before it are carried. Default: the next calendar day.
+    next_day = to or (dt.date.fromisoformat(date) + dt.timedelta(days=1)).isoformat()
+    if next_day <= date:
+        raise ReviewError(f"--to {next_day} must be after the review date {date}", code=2)
     carry = []
     for item in items_doc["items"]:
         ans = by_id.get(item["id"])
@@ -1924,10 +1935,12 @@ class ReviewHandler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             return self._json(400, {"ok": False, "error": f"bad JSON: {exc}"})
-        draft = urllib.parse.parse_qs(parts.query).get("draft", ["0"])[0] in ("1", "true")
+        query = urllib.parse.parse_qs(parts.query)
+        draft = query.get("draft", ["0"])[0] in ("1", "true")
+        clear = not draft and query.get("clear", ["0"])[0] in ("1", "true")
         try:
             with self.server.save_lock:
-                path, kept = save_answers(self.vault, date, body, "server", draft=draft)
+                path, kept = save_answers(self.vault, date, body, "server", draft=draft, allow_empty=clear)
         except ReviewError as exc:
             return self._json(400, {"ok": False, "error": public_error(exc, self.vault)})
         out = {"ok": True, "path": str(path)}
@@ -2102,7 +2115,8 @@ def cmd_annotate(vault, args):
 
 def cmd_carryover(vault, args):
     date = pick_date(vault, args.date)
-    doc = carryover(vault, date, include_draft=args.include_draft)
+    to = check_date_arg(args.to) if args.to else None
+    doc = carryover(vault, date, include_draft=args.include_draft, to=to)
     sys.stdout.write(dump_json(doc) if args.json else format_carryover(doc))
     return 0
 
@@ -2186,6 +2200,7 @@ def build_parser():
 
     p = sub.add_parser("carryover", parents=[common], help="items the next briefing must carry")
     p.add_argument("date", nargs="?")
+    p.add_argument("--to", help="date of the briefing being generated (default: the day after <date>)")
     p.add_argument("--json", action="store_true")
     p.add_argument("--include-draft", action="store_true")
     p.set_defaults(func=cmd_carryover)

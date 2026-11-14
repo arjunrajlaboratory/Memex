@@ -213,7 +213,7 @@ Vault root = parent of the script's directory, overridable with `--vault <path>`
 | command | behaviour |
 | --- | --- |
 | `id --kind K --section S [--date D] [--target PATH] --text "…"` | Print the item id (the same function the Markdown fallback uses). `--date` defaults to the latest briefing, else today. |
-| `items [date] [--write]` | Print the normalized items JSON. Uses `Ops/Briefings/<date>.items.json` when present, else parses the Markdown (fallback, `kind` inferred from the wikilink target folder, else `item`). `--write` saves the fallback result as `<date>.items.json` (never overwrites an existing one). |
+| `items [date] [--write]` | Print the normalized items JSON. Uses `Ops/Briefings/<date>.items.json` when present, else parses the Markdown (fallback, skipping the `annotate`-managed Review resolved block, `kind` inferred from the wikilink target folder, else `item`). `--write` saves the fallback result as `<date>.items.json` (never overwrites an existing one). |
 | `validate [date\|path]` | Validate an items.json; exit 1 and print problems on failure. |
 | `build [date] [--surface page\|server\|widget\|artifact] [--out PATH] [--stdout] [--site URL] [--max-bytes N] [--redact private\|titles\|sensitive\|none]` | Generate the review UI. Default surface `page`. Prints the written path(s), one per line. See Surfaces. |
 | `serve [--port N] [--host 127.0.0.1\|localhost\|::1]` | Stdlib HTTP server with the same routes as the Quartz serve handler (for vaults not running Quartz). Loopback only; `::1` binds IPv6 (a clean exit 1/2 where IPv6 is unavailable). |
@@ -221,7 +221,7 @@ Vault root = parent of the script's directory, overridable with `--vault <path>`
 | `plan [date] [--json] [--include-draft]` | Print the apply plan: every answer not yet in the ledger, with its routing (see Apply) and `fingerprint`. |
 | `mark [date] <id> --result applied\|skipped\|failed\|drafted [--summary TEXT] [--fingerprint FP]` | Record one answer in the ledger. `FP` is the plan entry's fingerprint and is what gets stored, even when the file's answer changed since `plan` (a note is printed; the changed answer re-plans). Without it, the current answer's fingerprint is stored and a warning printed. |
 | `annotate [date]` | Rewrite the managed `Review resolved` block in the briefing's §0 from the ledger (idempotent; creates §0 heading only if it exists already, otherwise appends a `## Review resolved` section at the end). |
-| `carryover [date] [--json] [--include-draft]` | For the review of `<date>`: list the items the next briefing must carry — unanswered, `keep`, and `defer`/`push`/`bump` whose date is on/before the next day, plus deferrals from earlier reviews (up to 90 days back) that come due now (see Carry-over) — plus every answer, for pre-fill. Exit 1 when there was no review: no items file (never the Markdown fallback), no answers file, or only a draft (unless `--include-draft`). |
+| `carryover [date] [--to D] [--json] [--include-draft]` | For the review of `<date>`: list the items the briefing of `D` (default: the day after `<date>`; daily-briefing always passes its own date, so a weekend gap works) must carry — unanswered, `keep`, and `defer`/`push`/`bump` whose date is on/before `D`, plus deferrals from earlier reviews (up to 90 days back) that are due by `D` (see Carry-over) — plus every answer, for pre-fill. Exit 1 when there was no review: no items file (never the Markdown fallback), no answers file, or only a draft (unless `--include-draft`). |
 
 Exit codes: 0 ok, 1 validation / not found, 2 usage.
 
@@ -233,7 +233,8 @@ Exit codes: 0 ok, 1 validation / not found, 2 usage.
   the client derives the API prefix from its own path (`<prefix>/review/<date>` → `<prefix>/api/review/<date>`).
 - `GET /api/review/<date>` → the stored answers JSON, or `404`.
 - `POST /api/review/<date>` → body = answers JSON (≤ 2 MB), piped to `save <date> --surface server`
-  (`?draft=1` adds `--draft`). `200 {"ok":true,"path":…}` or `400 {"ok":false,"error":…}`. Saves for
+  (`?draft=1` adds `--draft`; `?clear=1` on a non-draft adds `--allow-empty`, sent only by an empty submit
+  after an explicit Reset). `200 {"ok":true,"path":…}` or `400 {"ok":false,"error":…}`. Saves for
   one date run one at a time in arrival order (a per-date promise chain in Quartz, a lock in
   `serve`, and the script's file lock across processes). Error text is short: no tracebacks, no
   absolute paths (Quartz sends only the last stderr line, capped at 300 chars; `serve` makes vault
@@ -273,7 +274,7 @@ State: `{[id]: {action, params, note}}`, keyed by item id. Storage and submit de
 | surface | draft storage | submit |
 | --- | --- | --- |
 | `page` | localStorage | clipboard export (shown in a panel) |
-| `server` | localStorage + debounced `POST …?draft=1`; initial state from `GET /api/review/<date>` | `POST /api/review/<date>` through the same one-at-a-time write queue as drafts; submitting cancels a pending draft, and no draft is sent once the review is submitted; an edit made while the submit is in flight leaves the form unsent ("Submit again"); clipboard stays as a secondary button |
+| `server` | localStorage + debounced `POST …?draft=1`; initial state from `GET /api/review/<date>` | `POST /api/review/<date>` through the same one-at-a-time write queue as drafts; submitting cancels a pending draft, and no draft is sent once the review is submitted; an edit made while the submit is in flight leaves the form unsent ("Submit again"); a Reset of a submitted review keeps it on file until the next Submit, which clears it (`?clear=1`); answers loaded from the server never replace edits made while they were loading (same for the artifact `db` doc); clipboard stays as a secondary button |
 | `widget` | localStorage (best effort) | `sendPrompt(export)` when the host provides it; else, when framed (Memex Desktop), `window.parent.postMessage({type:"memex:sendPrompt", text}, "*")` and wait up to 1.5 s for `{type:"memex:sendPrompt:ack", ok}` from the parent — `ok:true` says the answers are in the message box and still need Enter (`staged:false`: behind the app's Insert button); `ok:false` or no ack shows the export panel + clipboard with "Couldn't hand the answers to the app — copy them instead"; clipboard as the last fallback |
 | `artifact` | `db` doc `reviews/<date>` (debounced, one write at a time) | same doc with `submitted: true` |
 
@@ -344,14 +345,14 @@ the answers file).
 
 ## Carry-over
 
-The next daily briefing runs `carryover <previous date>` during input gathering; exit 1 (no items
+The next daily briefing runs `carryover <previous date> --to <its date>` during input gathering; exit 1 (no items
 file, no answers, or only a draft) means there is nothing to carry and the step is skipped. Unanswered items,
 `keep`, and due `defer` items are carried into the matching sections with `carried_from`; each item's
 `previous` answer is attached so the review page can pre-fill the chip.
 
 A deferral to a date after the next day is not carried at first. Each later `carryover` also scans the
-submitted reviews of the previous 90 days for such deferrals: one whose date is now on/before the next
-day is carried with `carried_from` = the review that deferred it, unless the item has appeared in any
+submitted reviews of the previous 90 days for such deferrals: one whose date is now on/before the
+destination date (`--to`) is carried with `carried_from` = the review that deferred it, unless the item has appeared in any
 items file since that review (it was resurfaced, or is still tracked and answered there). This is what
 brings back a target-less item, which has no note whose own dates would resurface it. A day with no
 submitted review skips carry-over; a matured deferral is picked up by the next review's carry-over. Items whose answer was

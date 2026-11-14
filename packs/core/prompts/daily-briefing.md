@@ -68,7 +68,7 @@ Gather the following inputs (read only what exists; skip gracefully if absent):
    `status: complete`; exclude `partial` and `failed` write-ahead digests
 9. Surfaced followups — `Ops/Followups/*.md` where `surface_on <= {{date}}` AND `status: pending`
 10. People needing a touch — `Atlas/People/*.md` where `next_touch <= {{date}}` AND `status: active`
-11. Previous review carry-over — `python3 scripts/briefing_review.py carryover <previous briefing date> --json`
+11. Previous review carry-over — `python3 scripts/briefing_review.py carryover <previous briefing date> --to {{date}} --json`
     (it exits 1 when that day has no items file or no submitted review; then skip silently). Put
     each carried item — unanswered, `keep`, or a `defer` that has come due — in its natural
     section, marked as carried, with the `id` the output reports. Do not drop one just

@@ -87,8 +87,10 @@ Also pull yesterday's briefing's "## Shutdown notes" section if present — it c
 Run this alongside the Step 2 reads. Find the previous briefing date — the newest `Ops/Briefings/YYYY-MM-DD.md` dated before `<date>` — and run:
 
 ```
-python3 scripts/briefing_review.py carryover <previous briefing date> --json
+python3 scripts/briefing_review.py carryover <previous briefing date> --to <date> --json
 ```
+
+`--to <date>` (today's briefing date) matters after a gap such as a weekend: a deferral is carried when its date is on/before the briefing being generated, not just the day after the review.
 
 If there is no previous briefing, or the command exits 1, skip this step silently — say nothing about it in the briefing or the chat. It exits 1 whenever that day had no review: no `Ops/Briefings/<previous date>.items.json` (it never falls back to parsing the Markdown, which would carry the whole briefing), no `Inbox/reviews/<previous date>.json`, or only an unsubmitted draft there. Do not pass `--include-draft` unless the user asks to carry from an unsubmitted review.
 

@@ -56,7 +56,7 @@ search.
   `status: complete`; exclude `partial` and `failed` write-ahead digests
 - All followups with `surface_on <= today` and `status: pending`
 - All people whose `next_touch <= today` and `status: active`
-- The previous review's carry-over: `python3 scripts/briefing_review.py carryover <previous briefing date> --json`
+- The previous review's carry-over: `python3 scripts/briefing_review.py carryover <previous briefing date> --to <today> --json`
   (it exits 1 when that day has no items file or no submitted review; then skip silently). Place
   each carried item — unanswered, `keep`, or a `defer` that has come due — in its natural section,
   marked as carried, reusing the `id` the carryover output reports verbatim; never drop one just
