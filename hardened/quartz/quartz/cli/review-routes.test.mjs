@@ -179,6 +179,17 @@ test("POST ?draft=1 passes --draft", async () => {
   assert.deepEqual(stored._argv.slice(2), ["save", "2026-11-12", "--surface", "server", "--draft"])
 })
 
+test("POST ?clear=1 passes --allow-empty, never with a draft", async () => {
+  const headers = { "Content-Type": "application/json" }
+  const file = path.join(vault, "Inbox", "reviews", "2026-11-12.json")
+  assert.equal((await post("/api/review/2026-11-12?clear=1", { answers: [] }, headers)).status, 200)
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8"))._argv.slice(2),
+    ["save", "2026-11-12", "--surface", "server", "--allow-empty"])
+  assert.equal((await post("/api/review/2026-11-12?draft=1&clear=1", { answers: [] }, headers)).status, 200)
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8"))._argv.slice(2),
+    ["save", "2026-11-12", "--surface", "server", "--draft"])
+})
+
 test("POST: script validation failure is 400 with stderr", async () => {
   const r = await post("/api/review/2026-11-12", { bad: true })
   assert.equal(r.status, 400)

@@ -1148,7 +1148,7 @@ class TestBriefingReviewContract(unittest.TestCase):
             "prompt": self.briefing_prompt,
         }.items():
             with self.subTest(artifact=name):
-                self.assertRegex(artifact, r"briefing_review\.py carryover <previous briefing date> --json")
+                self.assertRegex(artifact, r"briefing_review\.py carryover <previous briefing date> --to \S+ --json")
                 self.assertRegex(artifact, r"(?is)skip (?:this step )?silently")
                 self.assertRegex(artifact, r"(?is)(?:not|never) drop.{0,60}because nothing new happened")
                 self.assertRegex(artifact, r"(?is)(?:not|never) carry.{0,40}answers? (?:was|were) applied|"

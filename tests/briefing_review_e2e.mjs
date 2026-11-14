@@ -421,6 +421,49 @@ async function main() {
         (await p3.textContent("#review-root .rv-btn-primary")).includes("again")
         && (await infoText()).includes("edited while it was sending"), await infoText());
       await racer.close();
+      // Answers loaded from the server never replace an edit made while they were loading.
+      const loader = await browser.newContext();
+      const p5 = await loader.newPage();
+      let releaseGet;
+      const getHeld = new Promise((r) => { releaseGet = r; });
+      await p5.route(`**/api/review/${DATE}`, async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        await getHeld;
+        // Stamp the stored answers "now", as if saved within a second of the edit
+        // (the timestamp guard alone would then let them win).
+        const res = await route.fetch();
+        const doc = await res.json();
+        doc.saved_at = doc.submitted_at = new Date().toISOString();
+        return route.fulfill({ response: res, json: doc });
+      });
+      await p5.goto(`http://127.0.0.1:${port}/review/${DATE}`);
+      await p5.waitForSelector(row(1));
+      await p5.click(`${row(9)} .rv-pill[data-action="keep"]`);
+      releaseGet();
+      await sleep(800);
+      check("an edit made while answers load is kept", JSON.stringify(await pressed(p5, 9)) === '["keep"]',
+        JSON.stringify(await pressed(p5, 9)));
+      await loader.close();
+      // Reset of a submitted review: the file keeps its answers until Submit clears it.
+      const resetter = await browser.newContext();
+      const p6 = await resetter.newPage();
+      await p6.goto(`http://127.0.0.1:${port}/review/${DATE}`);
+      await p6.waitForSelector(row(1));
+      await until(async () => (await pressed(p6, 5)).length === 1, 4000);
+      await p6.click("#review-root .rv-btn-quiet");
+      await p6.click("#review-root .rv-btn-quiet");
+      await sleep(1200);
+      const kept = JSON.parse(fs.readFileSync(answersFile, "utf8"));
+      check("Reset alone leaves the submitted answers on file", kept.submitted === true && kept.answers.length > 0,
+        String(kept.answers.length));
+      check("after Reset the button offers to submit again", (await p6.textContent("#review-root .rv-btn-primary")).includes("again"));
+      await p6.click("#review-root .rv-btn-primary");
+      const cleared = await until(() => {
+        const d = JSON.parse(fs.readFileSync(answersFile, "utf8"));
+        return d.submitted === true && d.answers.length === 0 ? d : null;
+      });
+      check("Submit after Reset clears the answers on file", !!cleared);
+      await resetter.close();
       // Quartz --baseDir: the page at <base>/review/<date> calls <base>/api/review/<date>.
       const based = await browser.newContext();
       const p4 = await based.newPage();

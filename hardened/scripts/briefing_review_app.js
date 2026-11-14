@@ -213,7 +213,7 @@
 
   // state: {[id]: {action, params, note, raw}}; raw = what was typed in the param box.
   let state = {};
-  let meta = { savedAt: 0, submittedAt: null, dirty: false, lastSubmitted: null };
+  let meta = { savedAt: 0, submittedAt: null, dirty: false, lastSubmitted: null, clearOnSubmit: false };
   // Bumped on every edit (not persisted): a submit records the revision it snapshotted,
   // so an edit made while the submit is in flight stays dirty.
   let editRev = 0;
@@ -317,7 +317,7 @@
 
   function saveLocal() {
     lsSet(STORE_KEY, { v: 1, state: state, savedAt: meta.savedAt, submittedAt: meta.submittedAt,
-      dirty: meta.dirty, lastSubmitted: meta.lastSubmitted });
+      dirty: meta.dirty, lastSubmitted: meta.lastSubmitted, clearOnSubmit: !!meta.clearOnSubmit });
   }
 
   function loadInitial() {
@@ -328,6 +328,7 @@
       meta.submittedAt = local.submittedAt || null;
       meta.dirty = !!local.dirty;
       meta.lastSubmitted = local.lastSubmitted || null;
+      meta.clearOnSubmit = !!local.clearOnSubmit;
       return;
     }
     if (R.previous && R.previous.state) {
@@ -697,12 +698,16 @@
     }
     disarmReset();
     state = {};
-    meta.submittedAt = null; meta.dirty = false; meta.lastSubmitted = null;
+    // A submitted server review stays on file until a submit clears it: drafts never
+    // replace a submitted file, so keep the submitted state and mark the form dirty.
+    const onFile = SURFACE === "server" && !!meta.submittedAt;
+    if (onFile) meta.clearOnSubmit = true;
+    else { meta.submittedAt = null; meta.dirty = false; meta.lastSubmitted = null; }
     ui.banner.hidden = true;
     ui.exportWrap.hidden = true;
     ITEMS.forEach(function (it) { refs[it.id].input.value = ""; syncRow(it.id); });
     changed(null);
-    setStatus("Cleared");
+    setStatus(onFile ? "Cleared here " + DASH + " " + SUBMIT_LABEL.toLowerCase() + " again to clear the answers on file" : "Cleared");
   }
   function disarmReset() {
     clearTimeout(resetTimer);
@@ -838,7 +843,10 @@
     ui.submit.disabled = true;
     setStatus("Submitting" + ELL);
     const obj = answersObject(true), rev = editRev;
-    remote.submit(obj).then(function () {
+    // An empty submit replaces the file on record only after an explicit Reset.
+    const clear = !!meta.clearOnSubmit && obj.answers.length === 0;
+    remote.submit(obj, clear).then(function () {
+      if (clear) meta.clearOnSubmit = false;
       markSubmitted(obj, rev);
       setStatus("");
       if (meta.dirty) {
@@ -910,8 +918,8 @@
 
   function serverRemote() {
     const api = apiBase() + "/api/review/" + encodeURIComponent(DATE);
-    function post(obj, draft) {
-      return fetch(api + (draft ? "?draft=1" : ""), { method: "POST", headers: { "Content-Type": "application/json" },
+    function post(obj, draft, clear) {
+      return fetch(api + (draft ? "?draft=1" : clear ? "?clear=1" : ""), { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(obj), cache: "no-store" }).then(function (res) {
         return res.json().catch(function () { return { ok: false, error: "HTTP " + res.status }; }).then(function (body) {
           if (!res.ok || !body.ok) throw new Error(body.error || ("HTTP " + res.status));
@@ -937,6 +945,7 @@
     });
     function init() {
       if (location.protocol === "file:") { setStatus("Offline copy " + DASH + " answers stay in this browser"); return; }
+      const rev = editRev;
       fetch(api, { cache: "no-store" }).then(function (res) {
         if (res.status === 404) return null;
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -944,6 +953,7 @@
       }).then(function (doc) {
         if (!doc || !Array.isArray(doc.answers)) return;
         const serverAt = Date.parse(doc.saved_at || doc.submitted_at || "") || 0;
+        if (editRev !== rev) return; // edited while loading: the user's edits win
         if (meta.savedAt && meta.savedAt > serverAt + 1000) return; // newer local edits win
         state = stateFromAnswers(doc.answers);
         meta.savedAt = serverAt;
@@ -960,9 +970,9 @@
         setStatus("Server not reachable (" + (err && err.message || err) + ") " + DASH + " answers stay in this browser", "error");
       });
     }
-    function submitNow(obj) {
+    function submitNow(obj, clear) {
       meta.submitting = true;
-      return q.run(function () { return post(obj, false); }).then(function (body) {
+      return q.run(function () { return post(obj, false, clear); }).then(function (body) {
         meta.submitting = false;
         return body;
       }, function (err) {
@@ -1002,10 +1012,11 @@
         return false;
       });
     });
-    function adopt(data) {
+    function adopt(data, rev) {
       if (!data || !data.state) return;
       const remoteAt = Date.parse(data.saved_at || data.submitted_at || "") || 0;
-      if (meta.savedAt && meta.savedAt > remoteAt + 1000) { q.schedule(); return; }
+      // Edited while loading, or newer local edits: keep them and write them back.
+      if (editRev !== rev || (meta.savedAt && meta.savedAt > remoteAt + 1000)) { q.schedule(); return; }
       state = stateFromMap(data.state);
       meta.savedAt = remoteAt;
       meta.submittedAt = data.submitted ? (data.submitted_at || "earlier") : null;
@@ -1018,6 +1029,7 @@
     }
     function init() {
       setStatus("Connecting" + ELL);
+      const rev = editRev;
       let use;
       try { use = (window.claude && window.claude.use) ? Promise.resolve(window.claude.use("db")) : Promise.resolve(null); }
       catch (e) { use = Promise.resolve(null); }
@@ -1029,7 +1041,8 @@
         }
         ref = db.doc("reviews/" + DATE);
         return Promise.resolve(ref.get()).then(function (snap) {
-          if (snap && snap.exists) adopt(snap.data());
+          if (snap && snap.exists) adopt(snap.data(), rev);
+          else if (editRev !== rev) q.schedule();
           setStatus("Connected");
         });
       }).catch(function (err) {

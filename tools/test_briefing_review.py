@@ -526,6 +526,11 @@ class TestAnnotate(VaultCase):
         sec0, sec1 = once.index("## 0."), once.index("## 1.")
         self.assertTrue(sec0 < once.index(br.BLOCK_START) < sec1)
         self.assertIn("DONE — [[Send revised budget to Dana]]", once)
+        # The Markdown fallback ignores the managed block: same items before and after.
+        before = br.parse_briefing_markdown(BRIEFING_MD, DATE)
+        after = br.parse_briefing_markdown(once, DATE)
+        self.assertEqual([(r["section"], r["label"], r["text"]) for r in after],
+                         [(r["section"], r["label"], r["text"]) for r in before])
         self.assertIn("applied: closed", once)
         # Markdown parsing still works after annotation (block is not a row).
         self.assertEqual(len(json.loads(self.run_cli("items", DATE).stdout)["items"]), 12)
@@ -620,6 +625,20 @@ class TestCarryoverDeferrals(VaultCase):
         # Once it reappears in a later items file it is never carried from the old review again.
         self.review("2026-11-16", [fu], [{"id": fu["id"], "action": "done"}])
         self.assertNotIn(fu["id"], self.carried("2026-11-16"))
+
+    def test_to_covers_a_gap(self):
+        # Friday's review, Monday's briefing: a deferral to Monday is due for Monday.
+        fri, mon = "2026-11-13", "2026-11-16"
+        fu = item("followup:2026-11-13:10:55556666", kind="followup", section="10", text="Chase the quote")
+        self.review(fri, [fu], [{"id": fu["id"], "action": "defer", "params": {"date": mon}}])
+        self.assertNotIn(fu["id"], self.carried(fri))
+        res = self.run_cli("carryover", fri, "--to", mon, "--json")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        doc = json.loads(res.stdout)
+        self.assertEqual(doc["next_date"], mon)
+        self.assertIn(fu["id"], {c["id"] for c in doc["carry"]})
+        self.assertEqual(self.run_cli("carryover", fri, "--to", fri).returncode, 2)
+        self.assertEqual(self.run_cli("carryover", fri, "--to", "monday").returncode, 2)
 
     def test_deferral_due_next_day_not_carried_twice(self):
         fu = item("followup:2026-11-12:10:33334444", kind="followup", section="10", text="Ping the core")
@@ -879,6 +898,15 @@ class TestServer(VaultCase):
         self.assertEqual((status, stored["submitted"], stored["surface"]), (200, True, "server"))
         status, _, out = self.req(f"/api/review/{DATE}?draft=1", "POST", body)
         self.assertTrue(json.loads(out).get("kept_submitted"))
+        # An empty submit cannot replace a submitted file, unless it is a Reset (?clear=1).
+        empty = dict(body, answers=[])
+        status, _, out = self.req(f"/api/review/{DATE}", "POST", empty)
+        self.assertEqual(status, 400, out)
+        status, _, out = self.req(f"/api/review/{DATE}?draft=1&clear=1", "POST", empty)
+        self.assertTrue(json.loads(out).get("kept_submitted"))  # clear never applies to drafts
+        status, _, out = self.req(f"/api/review/{DATE}?clear=1", "POST", empty)
+        self.assertEqual(status, 200, out)
+        self.assertEqual(json.loads(br.answers_path(self.vault, DATE).read_text())["answers"], [])
 
     def test_post_guards(self):
         good = {"answers": []}
