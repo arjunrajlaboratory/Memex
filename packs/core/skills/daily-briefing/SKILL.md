@@ -182,12 +182,12 @@ sensitivity: private
 Right under the frontmatter, before any section, write the H1 (`# Daily briefing — <date>`), then the **review link line**, then the **summary paragraph**:
 
 ```
-> Review: [answer today's items](../../outputs/briefing-review/<date>.html) · <N> items, <K> carried
+> Review: [answer today's items](http://localhost:{{QUARTZ_PORT}}/review/<date>) · [standalone page](../../outputs/briefing-review/<date>.html) · <N> items, <K> carried
 
 <1–3 sentences on the shape of the day: the main time constraint and where the focus goes.>
 ```
 
-The link points at the standalone review page, which Step 5b always builds, so it opens from Obsidian as well as from the file system. Write the same summary text into the items file's `context.summary` (Step 3b) so the briefing and the review form agree. Summarize `private` matters one level higher, as everywhere else; never put `sensitive` content in the summary.
+The first link opens the form through the local site (it works from the site, Memex Desktop and Obsidian whenever the site is running); the second is the standalone page, which Step 5b always builds, for when the site is down. (The site does not serve `outputs/`, so the second link only works from the file system or Obsidian.) Write the same summary text into the items file's `context.summary` (Step 3b) so the briefing and the review form agree. Summarize `private` matters one level higher, as everywhere else; never put `sensitive` content in the summary.
 
 Body — the 13 sections, in this exact order with this exact heading text:
 
@@ -328,7 +328,7 @@ Append one line to `log.md`:
 
 **Unattended runs open nothing.** A run is unattended when its prompt says so (scheduled tasks say "unattended run") or it was started non-interactively with `claude -p`. A missing terminal alone does not count: Memex Desktop has none. In an unattended run, whatever `briefing_open` says: never open, show or publish anything, and never ask the one-time question. Still build the review page (Step 5b, `page` only), check whether the site answers (the `curl` check in Step 5b), and put exactly one review link in the report and the log line: `http://localhost:{{QUARTZ_PORT}}/review/<date>` when the site answers, else `outputs/briefing-review/<date>.html`. With no review items, report "No review items today" and no review link.
 
-**Opening the briefing** (only for `both` and `briefing`). In Memex Desktop, show the note with `show_artifact` and `path: Ops/Briefings/<date>.md`. Elsewhere, open it in the browser through the local site (rendered HTML with working wikilinks and graph), not the terminal or Obsidian:
+**Start the local site** for every interactive run except `none`, whatever opens: the review form's links (to notes and to the full briefing) point at it, so it has to be up even when only the review opens. Then **open the briefing** only for `both` and `briefing`: in Memex Desktop, show the note with `show_artifact` and `path: Ops/Briefings/<date>.md`; elsewhere, open it in the browser through the local site (rendered HTML with working wikilinks and graph), not the terminal or Obsidian:
 
 ```
 # 1. Ensure Quartz dev server is up on :{{QUARTZ_PORT}}
@@ -341,7 +341,7 @@ if ! lsof -ti :{{QUARTZ_PORT}} >/dev/null 2>&1; then
   done
 fi
 
-# 2. Open today's briefing
+# 2. Open today's briefing (only for `both` and `briefing`)
 open "http://localhost:{{QUARTZ_PORT}}/Ops/Briefings/<date>"
 ```
 

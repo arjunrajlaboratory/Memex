@@ -84,7 +84,7 @@ Use this as the actual prompt for the briefing run.
 ```markdown
 # Daily briefing — {{today}}
 
-> Review: [answer today's items](../../outputs/briefing-review/{{today}}.html) · <N> items, <K> carried
+> Review: [answer today's items](http://localhost:{{QUARTZ_PORT}}/review/{{today}}) · [standalone page](../../outputs/briefing-review/{{today}}.html) · <N> items, <K> carried
 
 <1–3 sentences: the shape of the day.>
 
