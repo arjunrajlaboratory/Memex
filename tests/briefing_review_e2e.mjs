@@ -187,6 +187,10 @@ async function main() {
       check("renders every item", (await page.$$("#review-root .rv-row")).length === items.length);
       check("counter starts at 0", (await counter(page)) === "0");
       check("submit label is 'Copy for Claude'", (await page.textContent("#review-root .rv-btn-primary")).trim() === "Copy for Claude");
+      check("Submit is marked disabled with no answers", (await page.getAttribute("#review-root .rv-btn-primary", "aria-disabled")) === "true");
+      await page.click("#review-root .rv-btn-primary", { force: true });
+      check("Submit with no answers does nothing and says why", (await page.textContent("#review-root .rv-status")).includes("Answer at least one row")
+        && await page.$eval("#review-root", (r) => r.querySelector(".rv-export").hidden && r.querySelector(".rv-next").hidden));
       check("'Do it' is the first pill on every row", await page.$$eval("#review-root .rv-row", (rows) =>
         rows.every((r) => r.querySelector(".rv-pill").getAttribute("data-action") === "do")));
       const link = await page.$eval(`${row(1)} .rv-text a`, (a) => a.href);
@@ -288,6 +292,7 @@ async function main() {
       check("export section headings", exported.includes("§0 State confirmation needed") && exported.includes("§7 Agent opportunities"));
       check("export footer", exported.trimEnd().endsWith(`(${items.length - 4} rows left unanswered — leave as is.)`));
       check("submit button shows confirmation", (await page.textContent("#review-root .rv-btn-primary")).includes("Copied"));
+      check("header says what to do next (paste into Claude)", await page.$eval("#review-root .rv-head .rv-next", (n) => !n.hidden && n.textContent.includes("paste it into your Claude session")));
       cli(vault, ["save", "--from-export"], exported);
       const saved = JSON.parse(fs.readFileSync(path.join(vault, "Inbox", "reviews", `${DATE}.json`), "utf8"));
       const got = Object.fromEntries(saved.answers.map((x) => [x.n, [x.action, JSON.stringify(x.params), x.note]]));
@@ -453,6 +458,7 @@ async function main() {
       check("Submit writes Inbox/reviews/<date>.json with submitted: true", sub.submitted === true && sub.answers[0].id === items[4].id
         && sub.unanswered.length === items.length - 1, JSON.stringify(sub).slice(0, 200));
       check("confirmation names the file", (await page.textContent('#review-root .rv-banner[data-kind="ok"]')).includes(`Inbox/reviews/${DATE}.json`));
+      check("sticky header says to tell Claude to apply it", await page.$eval("#review-root .rv-head .rv-next", (n) => !n.hidden && n.textContent.includes("apply my briefing review")));
       // A fresh browser restores from the server.
       const fresh = await browser.newContext();
       const p2 = await fresh.newPage();
@@ -660,6 +666,10 @@ async function main() {
       await acked.frame.waitForSelector('#review-root .rv-banner[data-kind="ok"]', { timeout: 3000 });
       const okText = await acked.frame.textContent('#review-root .rv-banner[data-kind="ok"]');
       check("acked: says the answers are in the message box, not sent yet", okText.includes("In the message box") && okText.includes("press Enter"), okText);
+      check("mid-sentence label keeps Claude capitalized", (await acked.frame.textContent("#review-root .rv-hints")).includes("send to Claude"));
+      check("acked: header next step says to press Enter in Memex", (await acked.frame.textContent("#review-root .rv-head .rv-next")).includes("press Enter in the Memex message box"));
+      await acked.frame.click(`${row(4)} .rv-pill[data-action="keep"]`);
+      check("an edit after sending hides the next step", await acked.frame.$eval("#review-root .rv-next", (n) => n.hidden));
       await acked.ctx.close();
 
       const silent = await framedHost("");

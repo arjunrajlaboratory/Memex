@@ -219,6 +219,16 @@ body {
   background: var(--rv-positive);
   border-color: var(--rv-positive);
 }
+#review-root .rv-btn-primary[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+#review-root .rv-next {
+  margin-top: 6px;
+  color: var(--rv-positive);
+  font-size: 13px;
+  font-weight: 600;
+}
 #review-root .rv-btn-quiet {
   border-color: transparent;
   background: transparent;
