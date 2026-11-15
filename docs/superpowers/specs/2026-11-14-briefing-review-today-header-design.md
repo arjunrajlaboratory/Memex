@@ -1,6 +1,6 @@
 # Briefing review — open after the briefing, and a "Today" header
 
-Status: proposal (2026-11-14). Not implemented. Builds on the briefing review contract in
+Status: proposal (2026-11-14), open questions answered 2026-11-14 (see "Decisions"). Not implemented. Builds on the briefing review contract in
 [2026-11-12-briefing-review-design.md](2026-11-12-briefing-review-design.md) and assumes
 arjunrajlaboratory/Memex#57 has merged. Nothing here changes that contract until the open questions
 are settled and this file moves to "implementing".
@@ -38,8 +38,11 @@ briefing_open: review | both | briefing | none
 `review_surface` keeps deciding *where* the review opens (widget, server, page, artifact);
 `briefing_open` decides *what* opens. They are independent.
 
-**Absent key = not asked yet.** The skill behaves as `both` (no behaviour change for anyone who
-has not answered) and asks once.
+**New vaults default to `review`.** `memex_bake.py init` seeds `_config/overrides.md` with
+`briefing_open: review` (seeds are write-once, so existing vaults never get it from an update).
+
+**Absent key = an existing vault not asked yet.** The skill behaves as `both` (no behaviour change
+for anyone who has not answered) and asks (see "Asking once").
 
 Options considered for where the preference lives:
 
@@ -60,9 +63,9 @@ one closing question:
 On an answer, the skill adds `briefing_open: <value>` to `_config/overrides.md` (appending one line;
 creating the file with a frontmatter block if it is missing; never rewriting other lines), appends a
 `log.md` line, and confirms in one sentence how to change it later. On no answer, it writes
-`briefing_open_asked: <date>` instead, and asks again only after 7 days, so an ignored question does
-not reappear every morning. A user can also say "always open the review" at any time; the skill
-treats that as an answer.
+`briefing_open_asked: <date>` instead and asks **once more** after 7 days. If that is ignored too, it
+writes `briefing_open: both` (today's behaviour) with a `log.md` line and never asks again. A user
+can also say "always open the review" at any time; the skill treats that as an answer.
 
 The question is never asked in a scheduled or headless run (there is nobody to answer), and is not
 asked until the Today header (Part 2) ships, since `review` is only a fair default once the form
@@ -82,20 +85,22 @@ Step 5 and Step 5b merge into one "Open" step driven by `briefing_open`:
 | **`review_surface: artifact`** | Publish the private artifact (redacted, see Part 2), and give the link. | Also open the local briefing page. | Build nothing remote; the artifact is never published without being opened. |
 | **Scheduled / headless** | Never open, show, or publish anything. Build the `page` surface (a local file, harmless), check whether Quartz answers, and put exactly one review link in the report and the log: `/review/<date>` when Quartz is up, else the `outputs/…html` path. | Same, plus the briefing link. | Briefing link only. |
 
-A run counts as **headless** when the skill was started by a scheduled task, a `claude -p`
-invocation, or any prompt that says it is unattended (the scheduled-task prompts in this repo will
-say so explicitly; see open question 4). The existing "don't open it" / "just write the file"
+A run counts as **headless** when the prompt says it is unattended (the scheduled-task prompts in
+this repo will carry an explicit "unattended run" marker) or the skill was started non-interactively
+with `claude -p`. A missing TTY alone does not count: Memex Desktop and other GUI hosts have none. The existing "don't open it" / "just write the file"
 phrases keep meaning `none` for that run without changing the preference.
 
 The briefing Markdown also gains one line under its frontmatter, written in every mode, so the
-classic page always links to the form and a headless run's output is reachable from the site:
+classic page always links to the form. It links to the generated page file, which opens from
+Obsidian (the briefing note's own folder is `Ops/Briefings/`):
 
 ```
-> Review: [answer today's items](/review/<date>) · <N> items, <K> carried
+> Review: [answer today's items](../../outputs/briefing-review/<date>.html) · <N> items, <K> carried
 ```
 
-(Quartz resolves the absolute path under its `--baseDir`; in Obsidian it is a dead link, which is
-acceptable. Alternative: omit the line and rely on the chat report.)
+The skill therefore always builds the `page` surface, whatever `review_surface` says, so the link
+never dangles. On the Quartz site the line does not reach the form (`outputs/` is not published);
+there the Today header and the site's `/review/<date>` route are the way in.
 
 ### No review items
 
@@ -119,10 +124,10 @@ An items file with zero items is valid today and the form renders "No reviewable
 | --- | --- | --- |
 | Summary (new) | yes, first | 1–3 sentences the skill writes: the shape of the day. The briefing Markdown gets the same paragraph under the title so both views agree. |
 | §1 Top 3 outcomes | yes | Numbered list, wikilinks kept. Each outcome may list the review rows it depends on (`item_ids`); clicking the outcome scrolls to the first of them. |
-| §2 Calendar / time map | yes, today only | Compact time column + title + the "come prepared with" line, collapsed to one line per event. The next-7-days tail stays in the classic briefing. |
+| §2 Calendar / time map | yes, today only (decided) | Compact time column + title + the "come prepared with" line, collapsed to one line per event. The next-7-days tail stays in the classic briefing. |
 | §9 "Upcoming meetings" | merged into the calendar | It is skipped by the items parser today and overlaps §2. Today's meetings only. |
 | Notable signals | yes | The comms-coverage warning (always first when present, never collapsible), the one "Notable" line from the Step 6 report, the count of carried items, and on the artifact surface the withheld count. At most 5 entries. |
-| §12 Starter prompts | no (open question 3) | Long, paste-ready paragraphs. Option: a mouse-only "Copy starter prompt" button per outcome. |
+| §12 Starter prompts | as a button (decided) | Not shown as text. Each outcome with a starter prompt gets a mouse-only "Copy starter prompt" button (out of the tab order, `mousedown` default prevented). `context.outcomes[].starter` carries the text, capped at 2,000 characters; on the artifact surface it is dropped with its outcome and dropped entirely at `--redact titles`. |
 | §13 End-of-day prompts | no | Belong to the evening `shutdown-review`. |
 | §0, §§3–11 | no | Already the form's rows. |
 
@@ -148,7 +153,8 @@ engines keep working with newer items files; the schema stays `memex.briefing-it
     "summary_sensitivity": "private",
     "outcomes": [
       {"text": "Finish the [[R01 resubmission]] specific aims page", "target": "Atlas/Projects/R01 resubmission.md",
-       "item_ids": ["task:Ops/Tasks/Draft specific aims"], "sensitivity": "normal"}
+       "item_ids": ["task:Ops/Tasks/Draft specific aims"], "sensitivity": "normal",
+       "starter": "Open the aims page draft and tighten aim 2 against the reviewer comments …"}
     ],
     "calendar": [
       {"start": "09:00", "end": "09:30", "title": "Lab meeting", "prep": "bring the imaging QC plots",
@@ -274,6 +280,8 @@ The classic briefing is always written and always reachable:
   headless runs.
 - `packs/core/workflows/daily-briefing.md` and `_schemas/briefing.md`: the summary paragraph and the
   review link line.
+- `tools/memex_bake.py`: the `_config/overrides.md` seed for new vaults gains `briefing_open: review`
+  and documents the key.
 - `hardened/contract/CLAUDE.base.md`: document `briefing_open` (and `review_today` if adopted) under
   "Known override keys".
 - `hardened/scripts/briefing_review.py`: `validate` checks `context`; `parse_context_markdown`;
@@ -295,7 +303,22 @@ The classic briefing is always written and always reachable:
    Open step, and the headless link-only path.
 3. Keep `review_today` out until someone asks for it.
 
-## Open questions for the user
+## Decisions (2026-11-14)
+
+1. **Default:** `review` is the default for new vaults (seeded in `_config/overrides.md`);
+   existing vaults are asked, with `review` recommended.
+2. **Calendar horizon:** today only.
+3. **Starter prompts:** a mouse-only "Copy starter prompt" button per outcome; the text is not shown.
+4. **Headless detection:** an explicit "unattended run" marker in the prompt, or a `claude -p` start.
+   A missing TTY alone does not count.
+5. **Private events on the artifact surface:** busy blocks (time range only, labelled "Busy").
+6. **Review link line:** kept, but it links to `outputs/briefing-review/<date>.html` so it opens from
+   Obsidian; the `page` surface is always built.
+7. **Re-asking:** once more after 7 days, then `both` is recorded and the question never returns.
+
+The original questions, for reference:
+
+## Open questions for the user (answered above)
 
 1. **Default once asked.** Should the question recommend `review`, or should `review` simply become
    the default for new vaults (with existing vaults asked once)?
