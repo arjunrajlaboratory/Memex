@@ -24,7 +24,18 @@
   const STORE_KEY = "memex-briefing-review:" + DATE + (PAGED ? ":p" + R.page : "");
   const IS_MAC = /Mac|iPhone|iPad/.test((navigator.platform || "") + " " + (navigator.userAgent || ""));
   const SUBMIT_LABEL = { page: "Copy for Claude", server: "Submit", widget: "Send to Claude", artifact: "Submit" }[SURFACE] || "Submit";
+  // The label mid-sentence: only the first letter lowercased, so "Claude" keeps its capital.
+  const SUBMIT_VERB = SUBMIT_LABEL.charAt(0).toLowerCase() + SUBMIT_LABEL.slice(1);
   const DONE_LABEL = { page: "Copied", server: "Submitted", widget: "Sent", artifact: "Submitted" }[SURFACE] || "Done";
+  // What the user still has to do after a submit, shown in the sticky header so it is in
+  // view wherever the page is scrolled. A widget submit replaces it with what actually happened.
+  const APPLY_PHRASE = "\u201capply my briefing review\u201d";
+  const NEXT_STEP = {
+    page: "Next: paste it into your Claude session and send it.",
+    server: "Next: tell Claude " + APPLY_PHRASE + ".",
+    artifact: "Next: tell Claude " + APPLY_PHRASE + ".",
+    widget: "Next: send the review message so Claude applies it.",
+  }[SURFACE] || "Next: tell Claude " + APPLY_PHRASE + ".";
 
   function findRoot() {
     var s = document.currentScript, el = s && s.previousElementSibling;
@@ -510,13 +521,14 @@
     ui.status = h("span", { class: "rv-status", "aria-live": "polite" });
     const sub = fmtDay(DATE, true) + (PAGED ? " " + DOT + " part " + R.page + " of " + R.pages : "");
     if (!ITEMS.length && !PAGED) {  // nothing to answer: no progress, no Submit / Reset
-      ui.submit = ui.reset = ui.counter = ui.bar = null;  // submit() and the counters check these
+      ui.submit = ui.reset = ui.counter = ui.bar = ui.next = null;  // submit() and the counters check these
       return h("header", { class: "rv-head" },
         h("div", { class: "rv-head-row" },
           h("h1", { class: "rv-title" }, "Briefing review", h("span", { class: "rv-sub", text: sub })),
           h("div", { class: "rv-spacer" }), ui.status));
     }
     ui.submit = h("button", { type: "button", class: "rv-btn rv-btn-primary", onclick: submit, text: SUBMIT_LABEL });
+    ui.next = h("div", { class: "rv-next", hidden: true, role: "status" });
     ui.reset = h("button", { type: "button", class: "rv-btn rv-btn-quiet", onclick: onReset, text: "Reset" });
     const copy = SURFACE === "page" ? null :
       h("button", { type: "button", class: "rv-btn", onclick: onCopy, text: "Copy" });
@@ -528,13 +540,14 @@
         h("div", { class: "rv-spacer" }),
         ui.status,
         h("div", { class: "rv-buttons" }, ui.reset, copy, ui.submit)),
+      ui.next,
       h("div", { class: "rv-hints" },
         h("span", null, keyLabel("Tab"), " next note"),
         h("span", null, keyLabel(alt), "+", keyLabel("1"), DASH, keyLabel("9"), " pick"),
         h("span", null, keyLabel(alt), "+", keyLabel("0"), " clear"),
         h("span", null, keyLabel(alt), "+", keyLabel("R"), " reuse yesterday"),
         CTX ? h("span", null, keyLabel(alt), "+", keyLabel("T"), " today") : null,
-        h("span", null, keyLabel(mod), "+", keyLabel("Enter"), " " + SUBMIT_LABEL.toLowerCase())));
+        h("span", null, keyLabel(mod), "+", keyLabel("Enter"), " " + SUBMIT_VERB)));
   }
 
   function renderRow(item, kindMode) {
@@ -700,11 +713,31 @@
     ui.bar.style.width = ITEMS.length ? Math.round(100 * n / ITEMS.length) + "%" : "0";
   }
 
+  // Nothing to send: no answers, unless a server Reset is waiting to clear the file on record.
+  function nothingToSend() {
+    return countAnswered() === 0 && !(SURFACE === "server" && meta.clearOnSubmit);
+  }
+
   function refreshSubmit() {
     if (!ui.submit) return;
     const done = !!meta.submittedAt && !meta.dirty;
     ui.submit.textContent = done ? CHECK + " " + DONE_LABEL : (meta.submittedAt ? SUBMIT_LABEL + " again" : SUBMIT_LABEL);
     if (done) ui.submit.setAttribute("data-state", "done"); else ui.submit.removeAttribute("data-state");
+    if (!done && nothingToSend()) {
+      ui.submit.setAttribute("aria-disabled", "true");
+      ui.submit.title = "Answer at least one row first";
+    } else {
+      ui.submit.removeAttribute("aria-disabled");
+      ui.submit.removeAttribute("title");
+    }
+    if (!done) showNext(null);
+    else if (ui.next && ui.next.hidden) showNext(NEXT_STEP);
+  }
+
+  function showNext(text) {
+    if (!ui.next) return;
+    ui.next.textContent = text || "";
+    ui.next.hidden = !text;
   }
 
   let statusTimer = null;
@@ -745,7 +778,7 @@
     if (meta.submittedAt) {
       meta.dirty = true;
       if (!ui.banner.hidden && ui.banner.getAttribute("data-kind") === "ok") {
-        showBanner(ui.banner, "info", "Edited since you submitted " + DASH + " " + SUBMIT_LABEL.toLowerCase() + " again to send the changes.");
+        showBanner(ui.banner, "info", "Edited since you submitted " + DASH + " " + SUBMIT_VERB + " again to send the changes.");
       }
     }
     if (id) syncRow(id);
@@ -872,7 +905,7 @@
     ui.exportWrap.hidden = true;
     ITEMS.forEach(function (it) { refs[it.id].input.value = ""; syncRow(it.id); });
     changed(null);
-    setStatus(onFile ? "Cleared here " + DASH + " " + SUBMIT_LABEL.toLowerCase() + " again to clear the answers on file" : "Cleared");
+    setStatus(onFile ? "Cleared here " + DASH + " " + SUBMIT_VERB + " again to clear the answers on file" : "Cleared");
   }
   function disarmReset() {
     clearTimeout(resetTimer);
@@ -946,6 +979,7 @@
   function submit() {
     if (!ui.submit) return;  // nothing to answer today
     const n = countAnswered();
+    if (nothingToSend()) { setStatus("Answer at least one row first."); return; }
     if (SURFACE === "server") return submitServer(n);
     if (SURFACE === "artifact" && remote.connected()) return submitArtifact(n);
     if (SURFACE === "widget") return submitWidget(n);
@@ -958,6 +992,8 @@
     showExport(text);
     copyText(text).then(function (ok) {
       markSubmitted(obj);
+      showNext(ok ? "Next: paste it into your Claude session and send it."
+        : "Next: copy the text below, then paste it into your Claude session.");
       const lead = why ? [h("b", { text: why }), " "] : [];
       showBanner(ui.banner, why ? "error" : "ok", lead.concat(ok
         ? [h("b", { text: CHECK + " Copied " + n + (n === 1 ? " answer" : " answers") }), " " + DASH + " paste into Claude to apply them."]
@@ -974,6 +1010,7 @@
       if (typeof window.sendPrompt === "function") {
         window.sendPrompt(text);
         markSubmitted(obj);
+        showNext("Sent to the chat " + DASH + " Claude applies it from there.");
         showBanner(ui.banner, "ok", [h("b", { text: CHECK + " Sent to Claude" }), " " + DASH + " " + count + "."]);
         return;
       }
@@ -991,6 +1028,8 @@
         return;
       }
       markSubmitted(obj);
+      showNext(ack.staged === false ? "Next: click Insert under the Memex message box, then press Enter."
+        : "Next: press Enter in the Memex message box to send it to Claude.");
       showBanner(ui.banner, "ok", ack.staged === false
         ? [h("b", { text: CHECK + " Handed to Memex" }), " " + DASH + " " + count + ". Click Insert under the message box, then press Enter there to send them."]
         : [h("b", { text: CHECK + " In the message box" }), " " + DASH + " " + count + " are not sent yet: press Enter in the Memex message box to send them."]);
@@ -1033,12 +1072,12 @@
       setStatus("");
       if (meta.dirty) {
         showBanner(ui.banner, "info", [h("b", { text: "Submitted " + n + (n === 1 ? " answer" : " answers") + "," }),
-          " but you edited while it was sending " + DASH + " " + SUBMIT_LABEL.toLowerCase() + " again to send the changes."]);
+          " but you edited while it was sending " + DASH + " " + SUBMIT_VERB + " again to send the changes."]);
         return;
       }
       showBanner(ui.banner, "ok", [h("b", { text: CHECK + " Submitted " + n + (n === 1 ? " answer" : " answers") }),
         " at " + clock(Date.now()) + " " + DASH + " saved to ", h("code", { text: "Inbox/reviews/" + DATE + ".json" }),
-        ". Ask Claude to apply your review."]);
+        ". Next, tell Claude " + APPLY_PHRASE + "."]);
     }, function (err) {
       setStatus("");
       showBanner(ui.banner, "error", [h("b", { text: "Not submitted: " }), String(err && err.message || err),
@@ -1054,7 +1093,7 @@
       setStatus("");
       if (ok) {
         showBanner(ui.banner, "ok", [h("b", { text: CHECK + " Submitted " + n + (n === 1 ? " answer" : " answers") }),
-          " " + DASH + " ask Claude to apply your briefing review."]);
+          " " + DASH + " next, tell Claude " + APPLY_PHRASE + "."]);
       } else {
         meta.dirty = true;
         refreshSubmit();
@@ -1248,7 +1287,7 @@
   const remote = SURFACE === "server" ? serverRemote() : SURFACE === "artifact" ? artifactRemote() : noRemote;
   render();
   if (meta.submittedAt && !meta.dirty) {
-    showBanner(ui.banner, "ok", [h("b", { text: CHECK + " " + DONE_LABEL }), " earlier " + DASH + " edit and " + SUBMIT_LABEL.toLowerCase() + " again to change your answers."]);
+    showBanner(ui.banner, "ok", [h("b", { text: CHECK + " " + DONE_LABEL }), " earlier " + DASH + " edit and " + SUBMIT_VERB + " again to change your answers."]);
   }
   root.addEventListener("focusin", onFocusIn);
   // Note boxes size to their text; re-fit them when the width changes (a pane opened narrow).
