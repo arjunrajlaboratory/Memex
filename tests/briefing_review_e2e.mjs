@@ -316,6 +316,68 @@ async function main() {
       await context.close();
     });
 
+    await step("Today header (page surface)", async () => {
+      const { vault: v3, items: its } = makeVault();
+      const itemsFile = path.join(v3, "Ops", "Briefings", `${DATE}.items.json`);
+      const doc = JSON.parse(fs.readFileSync(itemsFile, "utf8"));
+      doc.context = {
+        summary: "Heavy morning; the afternoon is for [[Send revised budget to Dana]].",
+        outcomes: [{ text: "Get the budget out", item_ids: [its[4].id], starter: "Open the budget sheet and finish it." },
+          { text: "Nothing linked here" }],
+        calendar: [{ start: "09:00", end: "09:30", title: "Lab meeting", prep: "bring plots" }, { all_day: true, title: "Offsite" }],
+        signals: [{ kind: "coverage", text: "Slack did not scan 18:00-23:59." }, { kind: "notable", text: "Something notable." }],
+      };
+      fs.writeFileSync(itemsFile, JSON.stringify(doc));
+      const file = cli(v3, ["build", DATE, "--surface", "page", "--site", SITE]);
+      const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await page.goto(pathToFileURL(file).href);
+      await page.waitForSelector("#review-root .rv-today");
+      check("header shows summary, outcomes, calendar and coverage", await page.$eval("#review-root .rv-today", (t) =>
+        t.textContent.includes("Heavy morning") && t.querySelectorAll(".rv-today-outcome").length === 2
+        && t.querySelectorAll(".rv-today-event").length === 2 && !!t.querySelector(".rv-today-coverage")));
+      check("header links and buttons are out of the tab order", await page.$$eval("#review-root .rv-today a, #review-root .rv-today button",
+        (els) => els.length > 0 && els.every((e) => e.tabIndex === -1)));
+      await page.focus("#review-root .rv-btn-primary");
+      await page.keyboard.press("Tab");
+      let a = await activeRow(page);
+      check("Tab from Submit skips the header and lands on row 1's note", a && a.n === "1" && a.cls.includes("rv-note"), JSON.stringify(a));
+      await page.keyboard.press("Shift+Tab");
+      const inHeader = await page.evaluate(() => !!document.activeElement.closest(".rv-today"));
+      check("Shift+Tab from row 1 does not enter the header", !inHeader);
+      await page.click(`${row(1)} .rv-note`);
+      await page.keyboard.press("Alt+t");
+      check("Alt+T collapses the header and keeps focus", await page.$eval("#review-root .rv-today", (t) => t.getAttribute("data-collapsed") === "1")
+        && (await activeRow(page))?.n === "1");
+      check("collapsed header keeps a one-line count and the coverage warning", await page.$eval("#review-root .rv-today", (t) =>
+        t.querySelector(".rv-today-line").textContent.includes("2 outcomes") && t.querySelector(".rv-today-coverage").offsetParent !== null));
+      await page.reload();
+      await page.waitForSelector("#review-root .rv-today");
+      check("collapsed state is remembered", await page.$eval("#review-root .rv-today", (t) => t.getAttribute("data-collapsed") === "1"));
+      await page.click("#review-root .rv-today-toggle");
+      await page.click("#review-root .rv-today-outcome.rv-linked");
+      a = await activeRow(page);
+      check("clicking a linked outcome focuses its row", a && a.n === "5", JSON.stringify(a));
+      check("hints mention Alt+T", (await page.textContent("#review-root .rv-hints")).includes("today"));
+      check("full-briefing link points at the site", (await page.$eval("#review-root a.rv-today-full", (l) => l.href)) === `${SITE}/Ops/Briefings/${DATE}`);
+      // No items: the header still shows, with no Submit and no progress.
+      doc.items = [];
+      fs.writeFileSync(itemsFile, JSON.stringify(doc));
+      const empty = cli(v3, ["build", DATE, "--surface", "page", "--site", SITE]);
+      await page.goto(pathToFileURL(empty).href);
+      await page.waitForSelector("#review-root .rv-empty");
+      check("empty review says there is nothing to answer", (await page.textContent("#review-root .rv-empty")).includes("Nothing to answer today"));
+      check("empty review has no Submit, Reset or progress", !(await page.$("#review-root .rv-btn-primary")) && !(await page.$("#review-root .rv-btn-quiet"))
+        && !(await page.$("#review-root .rv-progress")));
+      await page.keyboard.press("Control+Enter");
+      check("Today header renders with no items", !!(await page.$("#review-root .rv-today")));
+      check("no page errors (Today header)", errors.length === 0, errors.join(" | "));
+      await context.close();
+      fs.rmSync(v3, { recursive: true, force: true });
+    });
+
     await step("screenshots (light + dark)", async () => {
       const file = path.join(vault, "outputs", "briefing-review", `${DATE}.html`);
       const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 2, colorScheme: "light" });

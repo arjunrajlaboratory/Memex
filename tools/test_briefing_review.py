@@ -784,7 +784,9 @@ class TestBuild(VaultCase):
         robin = ids[alias("person:Atlas/People/Robin Park")]
         self.assertEqual((robin["section_title"], robin["group"]), ("People", ""))
         self.assertNotIn("Collaborators", path.read_text())
-        self.assertNotIn("Dana", path.read_text())
+        # The answer's note and `who` never leak (a Today-header outcome may show a note title).
+        self.assertNotIn("ask Dana", path.read_text())
+        self.assertNotIn("Dana Q", path.read_text())
 
         # --redact sensitive: private text kept, sensitive still dropped; none refused.
         [path] = self.built("--surface", "artifact", "--redact", "sensitive")
@@ -1307,6 +1309,228 @@ class TestServerFixes(VaultCase):
             self.skipTest(f"IPv6 loopback unavailable here: {exc}")
         with urllib.request.urlopen(f"http://[::1]:{port}/review/{DATE}", timeout=10) as res:
             self.assertEqual(res.status, 200)
+
+
+TODAY_MD = """---
+type: briefing
+date: 2026-11-12
+---
+# Daily briefing — 2026-11-12
+
+> Review: [answer today's items](../../outputs/briefing-review/2026-11-12.html)
+
+Heavy meeting morning; the afternoon is the only block for the
+[[Grant report draft]] figures.
+
+## 0. State confirmation needed
+
+> ⚠️ Comms coverage is partial — Slack: 18:00–23:59 (rate limit). Absence in that range is inconclusive.
+
+1. [[Send revised budget to Dana]] — `status: in_progress`
+
+## 1. Top 3 outcomes for today
+1. Finish the [[Grant report draft]] figures
+2. (none)
+
+## 2. Calendar / time map
+- **09:00–09:30** Lab meeting
+  - bring the imaging QC plots
+- 1:15 pm 1:1 with [[Robin Park]]
+- All-hands later (time tbd)
+- _(no data for the evening calendar)_
+
+## 9. People
+### Upcoming meetings
+- 16:00 Seminar with [[Alex Chen]]
+- 09:00 Lab meeting
+- 2026-11-14 10:00 Retreat planning
+"""
+
+
+class TestTodayContext(VaultCase):
+    """The Today header: items.json `context`, the Markdown fallback, redaction, pages."""
+
+    CTX = {
+        "summary": "Heavy morning; afternoon for [[Beta]].",
+        "summary_sensitivity": "normal",
+        "outcomes": [
+            {"text": "Ship [[Beta]]", "target": "Ops/Tasks/Beta.md", "sensitivity": "normal",
+             "item_ids": ["task:Ops/Tasks/Beta", "task:Ops/Tasks/Gamma"], "starter": "Open Beta and finish it."},
+            {"text": "[[Gamma]] plan", "target": "Ops/Tasks/Gamma.md", "sensitivity": "normal",
+             "starter": "gamma-starter-secret"},
+            {"text": "Secret outcome text", "sensitivity": "sensitive"},
+        ],
+        "calendar": [
+            {"start": "09:00", "end": "09:30", "title": "Lab meeting", "prep": "bring plots",
+             "people": ["[[Beta]]"], "sensitivity": "normal"},
+            {"start": "13:00", "end": "14:00", "title": "1:1 with Dana Q", "people": ["Dana Q"], "sensitivity": "normal"},
+            {"start": "15:00", "title": "[[Gamma]] review", "sensitivity": "normal"},
+            {"all_day": True, "title": "Secret offsite", "sensitivity": "sensitive"},
+        ],
+        "signals": [
+            {"kind": "coverage", "text": "Slack did not scan 18:00-23:59."},
+            {"kind": "notable", "text": "[[Beta]] review is 9 days overdue.", "sensitivity": "normal"},
+            {"kind": "notable", "text": "[[Gamma]] slipped.", "sensitivity": "normal"},
+        ],
+    }
+
+    def setUp(self):
+        super().setUp()
+        for rel, sens in TestBuild.ARTIFACT_NOTES.items():
+            f = self.vault / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(f"---\ntype: note\nsensitivity: {sens}\n---\n# body\n", encoding="utf-8")
+
+    def write_ctx(self, ctx=None, items=None):
+        doc = items_doc(copy.deepcopy(items if items is not None else GOOD_ITEMS))
+        doc["context"] = copy.deepcopy(ctx if ctx is not None else self.CTX)
+        br.items_path(self.vault, DATE).write_text(json.dumps(doc), encoding="utf-8")
+        return doc
+
+    def page(self, *flags, surface="page"):
+        res = self.run_cli("build", DATE, "--site", SITE, "--surface", surface, "--stdout", *flags)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return res.stdout
+
+    def test_markdown_fallback(self):
+        ctx = br.parse_context_markdown(TODAY_MD, DATE)
+        self.assertEqual(ctx["source"], "markdown")
+        self.assertTrue(ctx["summary"].startswith("Heavy meeting morning"))
+        self.assertIn("[[Grant report draft]] figures.", ctx["summary"])
+        self.assertEqual(ctx["outcomes"], [{"text": "Finish the [[Grant report draft]] figures"}])
+        cal = ctx["calendar"]
+        self.assertEqual(cal[0], {"start": "09:00", "end": "09:30", "title": "Lab meeting", "prep": "bring the imaging QC plots"})
+        self.assertEqual(cal[1], {"start": "13:15", "title": "1:1 with [[Robin Park]]"})
+        self.assertEqual(cal[2], {"start": "16:00", "title": "Seminar with [[Alex Chen]]"})  # from Upcoming meetings
+        self.assertEqual(cal[3], {"title": "All-hands later (time tbd)"})
+        self.assertEqual(len(cal), 4)  # the duplicate 09:00 and the 2026-11-14 meeting are left out
+        self.assertEqual(ctx["calendar_note"], "(no data for the evening calendar)")
+        self.assertEqual(ctx["signals"][0]["kind"], "coverage")
+        self.assertTrue(ctx["signals"][0]["text"].startswith("Comms coverage is partial"))
+        # The fixture briefing: one outcome, one event, no summary.
+        ctx = br.parse_context_markdown(BRIEFING_MD, DATE)
+        self.assertNotIn("summary", ctx)
+        self.assertEqual(ctx["calendar"], [{"start": "09:00", "title": "standup"}])
+        # The item parser is unchanged by the summary paragraph and review link line.
+        self.assertEqual([r["section"] for r in br.parse_briefing_markdown(TODAY_MD, DATE)], ["0"])
+
+    def test_items_write_and_payload_use_markdown_context(self):
+        res = self.run_cli("items", DATE, "--write")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        doc = json.loads(br.items_path(self.vault, DATE).read_text())
+        self.assertEqual(doc["context"]["source"], "markdown")
+        self.assertEqual(self.run_cli("validate", DATE).returncode, 0)
+        data = TestBuild.payload(self.page())
+        self.assertEqual(data["context"]["calendar"][0]["title"], "standup")
+        self.assertEqual(data["briefing"], f"Ops/Briefings/{DATE}")
+
+    def test_validate_context(self):
+        bad = {"summary": 3, "outcomes": [{"text": ""}, "x"], "calendar": [{"title": "a", "start": "9am", "all_day": "yes"}],
+               "signals": [{"kind": "gossip", "text": "x"}], "summary_sensitivity": "secret"}
+        self.write_ctx(bad)
+        res = self.run_cli("validate", DATE)
+        self.assertEqual(res.returncode, 1)
+        for frag in ("context: summary must be a string", "context: outcomes[1] missing required string 'text'",
+                     "context: outcomes[2] must be an object", "context: calendar[1].start must be HH:MM",
+                     "context: calendar[1].all_day must be true or false", "context: signals[1].kind must be one of",
+                     "context: summary_sensitivity must be one of"):
+            self.assertIn(frag, res.stdout)
+        self.write_ctx()
+        self.assertEqual(self.run_cli("validate", DATE).returncode, 0)
+        # The items hash covers ids only, so adding a header changes nothing for answers.
+        plain = items_doc(copy.deepcopy(GOOD_ITEMS))
+        self.assertEqual(br.items_hash(plain), br.items_hash(self.write_ctx()))
+
+    def test_local_surfaces_are_not_redacted(self):
+        self.write_ctx()
+        ctx = TestBuild.payload(self.page())["context"]
+        self.assertEqual(ctx["summary"], self.CTX["summary"])
+        self.assertEqual(len(ctx["outcomes"]), 3)
+        self.assertEqual(ctx["outcomes"][0]["starter"], "Open Beta and finish it.")
+        self.assertEqual(ctx["calendar"][1]["title"], "1:1 with Dana Q")
+        self.assertEqual(ctx["outcomes"][0]["item_ids"], ["task:Ops/Tasks/Beta", "task:Ops/Tasks/Gamma"])
+
+    def test_artifact_redaction_levels(self):
+        self.write_ctx()
+        alias = lambda i: br.artifact_alias(DATE, i)  # noqa: E731
+        html = self.page(surface="artifact")
+        data = TestBuild.payload(html)
+        ctx = data["context"]
+        for leak in ("Heavy morning", "Secret outcome", "Secret offsite", "Dana Q", "gamma-starter-secret", "Gamma"):
+            self.assertNotIn(leak, html)
+        self.assertNotIn("summary", ctx)
+        self.assertEqual([o["text"] for o in ctx["outcomes"]], ["Ship [[Beta]]"])
+        # Gamma is a private row, so it is withheld and its id leaves item_ids; Beta is aliased.
+        self.assertEqual(ctx["outcomes"][0]["item_ids"], [alias("task:Ops/Tasks/Beta")])
+        cal = ctx["calendar"]
+        self.assertEqual(cal[0]["title"], "Lab meeting")
+        self.assertEqual(cal[1], {"start": "13:00", "end": "14:00", "title": "Busy", "busy": True})  # bare name
+        self.assertEqual(cal[2]["title"], "Busy")   # links a private note
+        self.assertEqual(cal[3], {"all_day": True, "title": "Busy", "busy": True})
+        self.assertEqual([g["kind"] for g in ctx["signals"]], ["coverage", "notable"])
+        self.assertEqual(data["context_hidden"], {"busy": 3, "outcomes": 2, "signals": 1, "summary": 1})
+
+        data = TestBuild.payload(self.page("--redact", "titles", surface="artifact"))
+        ctx = data["context"]
+        self.assertNotIn("summary", ctx)
+        self.assertEqual([o["text"] for o in ctx["outcomes"]], ["Ship [[Beta]]", "[[Gamma]]"])
+        self.assertTrue(all("starter" not in o for o in ctx["outcomes"]))
+        self.assertEqual([c["title"] for c in ctx["calendar"]], ["Lab meeting", "(private event)", "[[Gamma]]", "Busy"])
+        self.assertNotIn("Dana", json.dumps(ctx))
+
+        data = TestBuild.payload(self.page("--redact", "sensitive", surface="artifact"))
+        ctx = data["context"]
+        self.assertEqual(ctx["summary"], self.CTX["summary"])
+        self.assertEqual(len(ctx["outcomes"]), 2)
+        self.assertEqual(ctx["outcomes"][1]["starter"], "gamma-starter-secret")
+        self.assertEqual([c["title"] for c in ctx["calendar"]], ["Lab meeting", "1:1 with Dana Q", "[[Gamma]] review", "Busy"])
+        ctx2 = copy.deepcopy(self.CTX)
+        ctx2["summary_sensitivity"] = "sensitive"
+        self.write_ctx(ctx2)
+        self.assertNotIn("summary", TestBuild.payload(self.page("--redact", "sensitive", surface="artifact"))["context"])
+
+    def test_markdown_context_on_artifact_is_all_busy(self):
+        (self.vault / "Ops" / "Briefings" / f"{DATE}.md").write_text(TODAY_MD, encoding="utf-8")
+        self.write_items()
+        data = TestBuild.payload(self.page(surface="artifact"))
+        ctx = data["context"]
+        self.assertNotIn("summary", ctx)
+        self.assertNotIn("outcomes", ctx)
+        self.assertTrue(all(c["title"] == "Busy" for c in ctx["calendar"]))
+        self.assertEqual([g["kind"] for g in ctx["signals"]], ["coverage"])
+
+    def test_widget_header_on_first_page_only(self):
+        ctx = copy.deepcopy(self.CTX)
+        ctx["summary"] = "s" * 590
+        self.write_ctx(ctx)
+        whole = len(br.build(self.vault, DATE, "widget", SITE, 10**7)[0].encode())
+        docs = br.build(self.vault, DATE, "widget", SITE, whole - 1500)
+        self.assertGreater(len(docs), 1)
+        datas = [TestBuild.payload(d) for d in docs]
+        self.assertEqual(datas[0]["context"]["summary"], ctx["summary"])
+        for d in datas[1:]:
+            self.assertIsNone(d["context"])
+            self.assertEqual(d["context_stub"], {"outcomes": 3, "events": 4, "signals": 3})
+        self.assertEqual(sum(len(d["items"]) for d in datas), len(GOOD_ITEMS))
+
+    def test_widget_header_too_big_is_trimmed_not_fatal(self):
+        ctx = copy.deepcopy(self.CTX)
+        for o in ctx["outcomes"]:
+            o["starter"] = "x" * 2000
+        self.write_ctx(ctx, items=[])
+        shell = len(br.build(self.vault, DATE, "widget", SITE, 10**7)[0].encode()) - 6000
+        res = self.run_cli("build", DATE, "--surface", "widget", "--site", SITE, "--stdout", "--max-bytes", str(shell))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("Today header too big", res.stderr)
+        data = TestBuild.payload(res.stdout)
+        self.assertTrue(all("starter" not in o for o in data["context"]["outcomes"]))
+        self.assertLessEqual(len(res.stdout.encode()), shell)
+
+    def test_empty_items_still_build_with_header(self):
+        self.write_ctx(items=[])
+        data = TestBuild.payload(self.page())
+        self.assertEqual(data["items"], [])
+        self.assertEqual(data["context"]["summary"], self.CTX["summary"])
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

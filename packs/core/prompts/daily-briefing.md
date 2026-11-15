@@ -133,10 +133,17 @@ Rules:
   instead of repeats; `carried_from`/`previous` for carried items. Follow the field rules in
   `_workflows/daily-briefing.md`. Run `python3 scripts/briefing_review.py validate {{date}}` and fix
   every problem it reports before continuing.
-- Open the review form: `python3 scripts/briefing_review.py build {{date}}` writes
-  `outputs/briefing-review/{{date}}.html`; open it (or, when the local site is running, open
-  `http://localhost:{{QUARTZ_PORT}}/review/{{date}}`). The user answers there; apply the submitted
-  answers with the `apply-review` skill. A chat reply such as "yes to 1,3" still works for §0.
+- Under the H1, write the review link line `> Review: [answer today's items](../../outputs/briefing-review/{{date}}.html) · <N> items, <K> carried`
+  and a 1–3 sentence summary paragraph; put the same summary, §1 (with the `item_ids` each
+  outcome depends on and its §12 starter prompt), today's calendar and the §0 coverage warning
+  in the items file's `context` object (the review form's Today header).
+- Build the review form: `python3 scripts/briefing_review.py build {{date}}` writes
+  `outputs/briefing-review/{{date}}.html` (always build it). Then open what `briefing_open` in
+  `_config/overrides.md` says: `review` (the form only), `both` (briefing, then form; also when
+  absent), `briefing`, or `none`. Open the form at
+  `http://localhost:{{QUARTZ_PORT}}/review/{{date}}` when the local site is running, else the file.
+  In an unattended run open nothing and report one review link. The user answers there; apply the
+  submitted answers with the `apply-review` skill. A chat reply such as "yes to 1,3" still works for §0.
 - After saving the file, append exactly one line to `log.md`:
   `<datetime> — agent:planner — briefing — [[Ops/Briefings/{{date}}]] — daily briefing generated`
 ```

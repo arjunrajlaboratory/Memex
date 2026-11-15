@@ -84,6 +84,10 @@ Use this as the actual prompt for the briefing run.
 ```markdown
 # Daily briefing — {{today}}
 
+> Review: [answer today's items](../../outputs/briefing-review/{{today}}.html) · <N> items, <K> carried
+
+<1–3 sentences: the shape of the day.>
+
 ## 1. Top 3 outcomes for today
 ## 2. Calendar / time map
 ## 3. Tasks due or scheduled today
@@ -120,9 +124,21 @@ anything else is `item`), and `text` (the briefing's Markdown, wikilinks kept). 
 reconcile-sourced items, inherit `sensitivity` from the target (default `private`; the artifact build re-checks the note's
 frontmatter and never trusts this field alone), list other
 sections in `also_in` instead of repeating an item, mark carried items with `carried_from` and
-`previous`, and set `actions` only to narrow the kind's default. Then run `python3
+`previous`, and set `actions` only to narrow the kind's default. Add a top-level `context` object
+for the review's Today header: `summary` (the summary paragraph, with `summary_sensitivity`),
+`outcomes` (§1, each with the `item_ids` of the rows it depends on and its §12 `starter`),
+`calendar` (today only: `start`/`end` as `HH:MM` or `all_day`, `title`, `prep`, wikilinked `people`),
+`calendar_note` (a §2 gap note) and `signals` (`coverage`: the §0 warning; `notable`: the report's
+Notable line), each entry with a `sensitivity` like items. Then run `python3
 scripts/briefing_review.py validate {{today}}` and fix every reported problem before continuing.
 Regenerating the briefing overwrites the items file together with the `.md`.
+
+Always build the standalone page (`python3 scripts/briefing_review.py build {{today}}`), so the
+briefing's review link works. What opens next is `briefing_open` in `_config/overrides.md`:
+`review` (the review only; seeded for new vaults), `both` (the briefing, then the review), `briefing`
+(the briefing only), `none` (nothing; report the links). Absent means `both`, and the skill asks the
+user once (once more after 7 days if unanswered, then records `both`). An unattended run (a
+scheduled run that says so, or `claude -p`) opens nothing and reports one review link.
 
 Open the review on the surface named by `review_surface` in `_config/overrides.md` (absent =
 `auto`: an inline widget when the session has one, else the local site's `/review/{{today}}`

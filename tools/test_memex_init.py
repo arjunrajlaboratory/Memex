@@ -226,6 +226,19 @@ class TestSeedSafety(unittest.TestCase):
             self.assertIn("PRECIOUS HISTORY", (target / "log.md").read_text())
             self.assertTrue((target / "index.md").exists())  # absent seeds still written
 
+    def test_new_vault_opens_the_review_after_the_briefing(self):
+        import tempfile, pathlib, re
+        from memex_bake import _write_seed_files, BakeResult
+        with tempfile.TemporaryDirectory() as tmp:
+            target = pathlib.Path(tmp)
+            _write_seed_files(target, {"OWNER_NAME": "X"}, ["email"], "local", "2026-06-12", BakeResult())
+            overrides = (target / "_config" / "overrides.md").read_text()
+            self.assertRegex(overrides, re.compile(r"^briefing_open: review$", re.M))
+            # An existing overrides file is never rewritten, so existing vaults keep asking once.
+            (target / "_config" / "overrides.md").write_text("# mine\n")
+            _write_seed_files(target, {"OWNER_NAME": "X"}, ["email"], "local", "2026-06-12", BakeResult())
+            self.assertEqual((target / "_config" / "overrides.md").read_text(), "# mine\n")
+
 class TestStripSectionsNested(unittest.TestCase):
     def test_cross_token_nesting_resolves(self):
         from memex_bake import strip_sections
