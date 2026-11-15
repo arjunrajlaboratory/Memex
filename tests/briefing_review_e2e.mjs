@@ -371,7 +371,12 @@ async function main() {
       check("empty review says there is nothing to answer", (await page.textContent("#review-root .rv-empty")).includes("Nothing to answer today"));
       check("empty review has no Submit, Reset or progress", !(await page.$("#review-root .rv-btn-primary")) && !(await page.$("#review-root .rv-btn-quiet"))
         && !(await page.$("#review-root .rv-progress")));
+      await page.click("#review-root .rv-empty");
       await page.keyboard.press("Control+Enter");
+      await page.keyboard.press("Meta+Enter");
+      await page.waitForTimeout(150);
+      check("Cmd/Ctrl+Enter does nothing on an empty review", await page.$eval("#review-root", (r) =>
+        r.querySelector(".rv-export").hidden && [...r.querySelectorAll(".rv-banner")].every((b) => b.hidden)));
       check("Today header renders with no items", !!(await page.$("#review-root .rv-today")));
       check("no page errors (Today header)", errors.length === 0, errors.join(" | "));
       await context.close();

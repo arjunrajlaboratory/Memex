@@ -1874,10 +1874,10 @@ def redact_context(ctx, level, index, shown_ids, alias=None):
     """The Today header for the artifact surface, redacted like the rows.
     `shown_ids` are the (real) ids of rows on the page; `alias` maps a real id to the
     page's id. Returns (context or None, counts of what was hidden)."""
-    counts = {"busy": 0, "outcomes": 0, "signals": 0, "summary": 0}
+    counts = {"busy": 0, "outcomes": 0, "signals": 0, "summary": 0, "note": 0}
     if not ctx:
         return ctx, counts
-    out = {k: ctx[k] for k in ("calendar_note", "source") if isinstance(ctx.get(k), str)}
+    out = {k: ctx[k] for k in ("source",) if isinstance(ctx.get(k), str)}
 
     def ids(entry):
         kept = [i for i in entry.get("item_ids") or [] if i in shown_ids]
@@ -1890,6 +1890,15 @@ def redact_context(ctx, level, index, shown_ids, alias=None):
             out["summary"] = summary
         else:
             counts["summary"] = 1
+
+    # The calendar gap note is free prose (it can name people or link notes), so it is
+    # gated like the summary: unclassified prose is private, shown from --redact sensitive.
+    note = ctx.get("calendar_note")
+    if isinstance(note, str) and note.strip():
+        if level == "none" or (level == "sensitive" and _entry_sensitivity({}, index, [note]) != "sensitive"):
+            out["calendar_note"] = note
+        else:
+            counts["note"] = 1
 
     def gate(entry, chunks, people=()):
         if level == "none":
