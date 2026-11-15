@@ -36,7 +36,7 @@ coverage.
 
 ## Body sections (daily)
 
-Under the H1, before any section: a review link line (`> Review: [answer today's items](../../outputs/briefing-review/<date>.html) · <N> items, <K> carried`) and a 1–3 sentence summary paragraph on the shape of the day. Both are optional for hand-written briefings.
+Under the H1, before any section: a review link line (`> Review: [answer today's items](http://localhost:<port>/review/<date>) · [standalone page](../../outputs/briefing-review/<date>.html) · <N> items, <K> carried`) and a 1–3 sentence summary paragraph on the shape of the day. Both are optional for hand-written briefings.
 
 - (optional) `## 0. State confirmation needed` — rendered above § 1 when the default comms loop-closing pass ([[reconcile-from-comms]], via daily-briefing Step 1b) or the stale-state queries surface items whose vault status likely lags reality, **or when `comms_coverage: partial`**. A partial capture starts the section with a warning naming each source/direction and un-scanned range; absence there is inconclusive. State proposals remain numbered: the user answers them in the briefing review (the number is the item's `label`), or with the batched "yes to 1,3" chat confirmation as a fallback. After answers are applied, `apply-review` maintains a `Review resolved` block in this section. Absent only when the pass has neither state items nor coverage gaps.
 1. `## 1. Top 3 outcomes for today`

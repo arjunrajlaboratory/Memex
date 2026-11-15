@@ -1217,6 +1217,8 @@ class TestBriefingReviewContract(unittest.TestCase):
         self.assertRegex(step5, r"(?is)unattended run.{0,80}`claude -p`")
         self.assertRegex(step5, r"(?is)missing terminal alone does not count")
         self.assertRegex(step5, r"(?is)never open, show or publish anything, and never ask the one-time question")
+        # The site starts even when only the review opens (its links point there).
+        self.assertRegex(step5, r"(?is)Start the local site\*\* for every interactive run except `none`")
         step5b = markdown_section(self.briefing, "## Step 5b — Open the review", "## Step 6 — Report back")
         self.assertRegex(step5b, r"(?is)Always build the standalone page first")
         report = markdown_section(self.briefing, "## Step 6 — Report back", "## What this skill does NOT do")
@@ -1231,6 +1233,7 @@ class TestBriefingReviewContract(unittest.TestCase):
             "## Step 3b — Write the review items (`Ops/Briefings/<date>.items.json`)",
         )
         self.assertIn("../../outputs/briefing-review/<date>.html", step3)
+        self.assertIn("http://localhost:{{QUARTZ_PORT}}/review/<date>", step3)
         self.assertRegex(step3, r"(?is)summary paragraph")
         step3b = markdown_section(
             self.briefing,

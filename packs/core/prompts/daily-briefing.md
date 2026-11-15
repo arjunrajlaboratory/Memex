@@ -133,7 +133,7 @@ Rules:
   instead of repeats; `carried_from`/`previous` for carried items. Follow the field rules in
   `_workflows/daily-briefing.md`. Run `python3 scripts/briefing_review.py validate {{date}}` and fix
   every problem it reports before continuing.
-- Under the H1, write the review link line `> Review: [answer today's items](../../outputs/briefing-review/{{date}}.html) · <N> items, <K> carried`
+- Under the H1, write the review link line `> Review: [answer today's items](http://localhost:{{QUARTZ_PORT}}/review/{{date}}) · [standalone page](../../outputs/briefing-review/{{date}}.html) · <N> items, <K> carried`
   and a 1–3 sentence summary paragraph; put the same summary, §1 (with the `item_ids` each
   outcome depends on and its §12 starter prompt), today's calendar and the §0 coverage warning
   in the items file's `context` object (the review form's Today header).

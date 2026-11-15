@@ -1489,6 +1489,36 @@ class TestTodayContext(VaultCase):
         self.write_ctx(ctx2)
         self.assertNotIn("summary", TestBuild.payload(self.page("--redact", "sensitive", surface="artifact"))["context"])
 
+    def test_noon_crossing_range(self):
+        self.assertEqual(br.parse_calendar_line("11:30\u20131:00 pm Lunch"), {"start": "11:30", "end": "13:00", "title": "Lunch"})
+        self.assertEqual(br.parse_calendar_line("1:00-2:30 pm Seminar"), {"start": "13:00", "end": "14:30", "title": "Seminar"})
+        self.assertEqual(br.parse_calendar_line("11:00 am-12:00 pm Talk"), {"start": "11:00", "end": "12:00", "title": "Talk"})
+
+    def test_redaction_sees_full_entries_and_classified_coverage(self):
+        secret = self.vault / "Ops" / "Tasks" / "Hush.md"
+        secret.write_text("---\ntype: note\nsensitivity: sensitive\n---\n# body\n", encoding="utf-8")
+        ctx = {
+            # The sensitive link sits past the 2,000-character starter cap.
+            "outcomes": [{"text": "Ship [[Beta]]", "sensitivity": "normal", "starter": "x" * 2100 + " see [[Hush]]"}],
+            "calendar": [{"start": "09:00", "title": "Lab meeting", "sensitivity": "normal", "prep": "y" * 300 + " [[Hush]]"}],
+            "summary": "Mostly [[Hush]] today.",
+            "signals": [{"kind": "coverage", "text": "Mail for [[Hush]] not scanned.", "sensitivity": "sensitive"},
+                        {"kind": "coverage", "text": "Slack did not scan 18:00-23:59."}],
+        }
+        self.write_ctx(ctx)
+        html = self.page("--redact", "sensitive", surface="artifact")
+        data = TestBuild.payload(html)
+        self.assertNotIn("xxxx", html)
+        self.assertNotIn("Hush", html)
+        self.assertNotIn("outcomes", data["context"])
+        self.assertEqual(data["context"]["calendar"][0]["title"], "Busy")
+        self.assertNotIn("summary", data["context"])  # links a sensitive note, though unclassified
+        self.assertEqual([g["text"] for g in data["context"]["signals"]],
+                         ["Comms coverage is partial; the details are local-only.", "Slack did not scan 18:00-23:59."])
+        # Local surfaces are not redacted, but still capped.
+        local = TestBuild.payload(self.page())["context"]
+        self.assertEqual(len(local["outcomes"][0]["starter"]), 2000)
+
     def test_markdown_context_on_artifact_is_all_busy(self):
         (self.vault / "Ops" / "Briefings" / f"{DATE}.md").write_text(TODAY_MD, encoding="utf-8")
         self.write_items()

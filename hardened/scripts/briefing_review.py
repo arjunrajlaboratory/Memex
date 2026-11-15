@@ -715,11 +715,12 @@ def parse_calendar_line(text):
     start = _hhmm(m.group(1), m.group(2) or m.group(4))
     if start is None:
         return {"title": text.strip()}
+    end = _hhmm(m.group(3), m.group(4)) if m.group(3) else None
+    if end and not m.group(2) and m.group(4) and start > end:
+        start = _hhmm(m.group(1), "am")  # `11:30-1:00 pm`: the range crosses noon
     entry = {"start": start}
-    if m.group(3):
-        end = _hhmm(m.group(3), m.group(4))
-        if end:
-            entry["end"] = end
+    if end:
+        entry["end"] = end
     entry["title"] = m.group(5).strip() or "(untitled)"
     return entry
 
@@ -1884,7 +1885,8 @@ def redact_context(ctx, level, index, shown_ids, alias=None):
 
     summary = ctx.get("summary")
     if isinstance(summary, str) and summary.strip():
-        if level == "none" or (level == "sensitive" and ctx.get("summary_sensitivity") != "sensitive"):
+        if level == "none" or (level == "sensitive" and _entry_sensitivity(
+                {"sensitivity": ctx.get("summary_sensitivity")}, index, [summary]) != "sensitive"):
             out["summary"] = summary
         else:
             counts["summary"] = 1
@@ -1934,8 +1936,15 @@ def redact_context(ctx, level, index, shown_ids, alias=None):
 
     signals = []
     for g in ctx.get("signals") or []:
-        if g.get("kind") == "coverage":  # names a source and a time range, never a person
-            signals.append({"kind": "coverage", "text": g.get("text", "")})
+        if g.get("kind") == "coverage":
+            # A plain coverage warning names a source and a time range, never a person, so it
+            # is shown. One that is classified or links notes goes through the gate, and when
+            # hidden is replaced by a generic warning: the gap itself must stay visible.
+            plain = g.get("sensitivity") is None and not WIKILINK_RE.search(g.get("text") or "")
+            sens = "normal" if plain else gate(g, [g.get("text")])
+            hidden = sens == "sensitive" or (sens == "private" and level in ("private", "titles"))
+            signals.append({"kind": "coverage", "text": "Comms coverage is partial; the details are local-only."
+                            if hidden else g.get("text", "")})
             continue
         sens = gate(g, [g.get("text")])
         if sens == "sensitive" or (sens == "private" and level == "private"):
@@ -2065,8 +2074,9 @@ def build_payload(vault, date, items_doc, surface, site, redact, index):
         p.pop("sensitivity", None)
     shown = {p["id"] for p in items}
     alias = (lambda i: artifact_alias(date, i)) if surface == "artifact" else None
-    context, hidden = redact_context(cap_context(load_context(vault, date, items_doc)), redact, index,
-                                     shown, alias)
+    # Redact the full entries (a sensitive link past a cap still counts), then cap.
+    context, hidden = redact_context(load_context(vault, date, items_doc), redact, index, shown, alias)
+    context = cap_context(context)
     if surface == "artifact":
         site = ""
         for p in items:  # opaque ids: note titles never leave the machine through ids
