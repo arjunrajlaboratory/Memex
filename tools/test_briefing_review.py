@@ -1468,7 +1468,7 @@ class TestTodayContext(VaultCase):
         self.assertEqual(cal[2]["title"], "Busy")   # links a private note
         self.assertEqual(cal[3], {"all_day": True, "title": "Busy", "busy": True})
         self.assertEqual([g["kind"] for g in ctx["signals"]], ["coverage", "notable"])
-        self.assertEqual(data["context_hidden"], {"busy": 3, "outcomes": 2, "signals": 1, "summary": 1})
+        self.assertEqual(data["context_hidden"], {"busy": 3, "outcomes": 2, "signals": 1, "summary": 1, "note": 0})
 
         data = TestBuild.payload(self.page("--redact", "titles", surface="artifact"))
         ctx = data["context"]
@@ -1488,6 +1488,29 @@ class TestTodayContext(VaultCase):
         ctx2["summary_sensitivity"] = "sensitive"
         self.write_ctx(ctx2)
         self.assertNotIn("summary", TestBuild.payload(self.page("--redact", "sensitive", surface="artifact"))["context"])
+
+    def test_calendar_note_is_gated_like_the_summary(self):
+        ctx = copy.deepcopy(self.CTX)
+        ctx["calendar_note"] = "Evening held for Dana Q re [[Gamma]]"
+        self.write_ctx(ctx)
+        for level in ((), ("--redact", "titles")):
+            data = TestBuild.payload(self.page(*level, surface="artifact"))
+            self.assertNotIn("calendar_note", data["context"])
+            self.assertEqual(data["context_hidden"]["note"], 1)
+        # Links a private note: shown at --redact sensitive.
+        data = TestBuild.payload(self.page("--redact", "sensitive", surface="artifact"))
+        self.assertEqual(data["context"]["calendar_note"], ctx["calendar_note"])
+        # Local surfaces keep it.
+        self.assertEqual(TestBuild.payload(self.page())["context"]["calendar_note"], ctx["calendar_note"])
+
+    def test_calendar_note_from_markdown_is_not_exported(self):
+        md = TODAY_MD.replace("(no data for the evening calendar)", "(no meetings: off-site with Dana Q)")
+        (self.vault / "Ops" / "Briefings" / f"{DATE}.md").write_text(md, encoding="utf-8")
+        self.write_items()
+        local = TestBuild.payload(self.page())["context"]
+        self.assertIn("calendar_note", local)
+        html = self.page(surface="artifact")
+        self.assertNotIn(local["calendar_note"], html)
 
     def test_noon_crossing_range(self):
         self.assertEqual(br.parse_calendar_line("11:30\u20131:00 pm Lunch"), {"start": "11:30", "end": "13:00", "title": "Lunch"})

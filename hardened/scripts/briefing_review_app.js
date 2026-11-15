@@ -480,6 +480,7 @@
       if (hid.outcomes) bits.push(plural(hid.outcomes, "outcome") + " withheld");
       if (hid.signals) bits.push(plural(hid.signals, "signal") + " withheld");
       if (hid.summary) bits.push("summary withheld");
+      if (hid.note) bits.push("calendar note withheld");
       notes.push(h("li", { class: "rv-today-hidden", text: bits.join(", ") + " (local-only)" }));
     }
     if (notes.length) body.appendChild(h("ul", { class: "rv-today-signals" }, notes));
@@ -507,17 +508,18 @@
     ui.counter = h("b", { text: "0" });
     ui.bar = h("span");
     ui.status = h("span", { class: "rv-status", "aria-live": "polite" });
-    ui.submit = h("button", { type: "button", class: "rv-btn rv-btn-primary", onclick: submit, text: SUBMIT_LABEL });
-    ui.reset = h("button", { type: "button", class: "rv-btn rv-btn-quiet", onclick: onReset, text: "Reset" });
-    const copy = SURFACE === "page" ? null :
-      h("button", { type: "button", class: "rv-btn", onclick: onCopy, text: "Copy" });
     const sub = fmtDay(DATE, true) + (PAGED ? " " + DOT + " part " + R.page + " of " + R.pages : "");
     if (!ITEMS.length && !PAGED) {  // nothing to answer: no progress, no Submit / Reset
+      ui.submit = ui.reset = ui.counter = ui.bar = null;  // submit() and the counters check these
       return h("header", { class: "rv-head" },
         h("div", { class: "rv-head-row" },
           h("h1", { class: "rv-title" }, "Briefing review", h("span", { class: "rv-sub", text: sub })),
           h("div", { class: "rv-spacer" }), ui.status));
     }
+    ui.submit = h("button", { type: "button", class: "rv-btn rv-btn-primary", onclick: submit, text: SUBMIT_LABEL });
+    ui.reset = h("button", { type: "button", class: "rv-btn rv-btn-quiet", onclick: onReset, text: "Reset" });
+    const copy = SURFACE === "page" ? null :
+      h("button", { type: "button", class: "rv-btn", onclick: onCopy, text: "Copy" });
     return h("header", { class: "rv-head" },
       h("div", { class: "rv-head-row" },
         h("h1", { class: "rv-title" }, "Briefing review", h("span", { class: "rv-sub", text: sub })),
