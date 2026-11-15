@@ -1206,6 +1206,47 @@ class TestBriefingReviewContract(unittest.TestCase):
         self.assertRegex(step, r"(?is)--max-bytes.{0,40}default 200000")
         self.assertIn("reviews/<date>", step)
 
+    def test_briefing_open_decides_what_opens(self):
+        step5 = markdown_section(
+            self.briefing, "## Step 5 — Decide what opens, then open the briefing", "## Step 5b — Open the review"
+        )
+        for value in ("`review`", "`both`", "`briefing`", "`none`"):
+            self.assertIn(value, step5)
+        self.assertRegex(step5, r"(?is)absent \| Behave as `both`, and ask the one-time question")
+        # Unattended: explicit marker or `claude -p`, never a missing TTY alone; opens nothing.
+        self.assertRegex(step5, r"(?is)unattended run.{0,80}`claude -p`")
+        self.assertRegex(step5, r"(?is)missing terminal alone does not count")
+        self.assertRegex(step5, r"(?is)never open, show or publish anything, and never ask the one-time question")
+        step5b = markdown_section(self.briefing, "## Step 5b — Open the review", "## Step 6 — Report back")
+        self.assertRegex(step5b, r"(?is)Always build the standalone page first")
+        report = markdown_section(self.briefing, "## Step 6 — Report back", "## What this skill does NOT do")
+        self.assertRegex(report, r"(?is)\*\*review\*\* \(recommended\)")
+        self.assertRegex(report, r"(?is)`briefing_open_asked: <date>`.{0,80}7 days")
+        self.assertRegex(report, r"(?is)second time it goes unanswered.{0,120}`briefing_open: both`")
+        self.assertRegex(report, r"(?is)never rewrite other lines")
+
+    def test_briefing_writes_the_today_header(self):
+        step3 = markdown_section(
+            self.briefing, "## Step 3 — Write the briefing",
+            "## Step 3b — Write the review items (`Ops/Briefings/<date>.items.json`)",
+        )
+        self.assertIn("../../outputs/briefing-review/<date>.html", step3)
+        self.assertRegex(step3, r"(?is)summary paragraph")
+        step3b = markdown_section(
+            self.briefing,
+            "## Step 3b — Write the review items (`Ops/Briefings/<date>.items.json`)",
+            "## Step 4 — Log",
+        )
+        for key in ('"context"', '"outcomes"', '"item_ids"', '"starter"', '"calendar"', '"signals"', '"coverage"'):
+            self.assertIn(key, step3b)
+        self.assertRegex(step3b, r"(?is)Calendar: today only")
+        self.assertRegex(step3b, r"(?is)not all resolvable wikilinks is treated as private")
+        for artifact in (self.briefing_workflow, self.briefing_prompt, self.briefing_schema):
+            self.assertIn("context", artifact)
+            self.assertIn("outputs/briefing-review/", artifact)
+        self.assertIn("briefing_open", self.briefing_workflow)
+        self.assertIn("briefing_open", self.briefing_prompt)
+
     def test_briefing_hands_answers_to_apply_review_and_keeps_chat_fallback(self):
         report = markdown_section(
             self.briefing, "## Step 6 — Report back", "## What this skill does NOT do"

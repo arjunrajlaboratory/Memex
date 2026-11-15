@@ -672,10 +672,256 @@ def items_from_markdown(vault, date, index=None):
     path = briefing_md_path(vault, date)
     if not path.is_file():
         raise ReviewError(f"briefing not found: {path}")
-    rows = parse_briefing_markdown(path.read_text(encoding="utf-8"), date)
+    md = path.read_text(encoding="utf-8")
+    rows = parse_briefing_markdown(md, date)
     items = rows_to_items(rows, date, index or NoteIndex(vault))
-    return {"schema": ITEMS_SCHEMA, "date": date, "generated_at": now_iso(),
-            "source": "markdown", "items": items}
+    doc = {"schema": ITEMS_SCHEMA, "date": date, "generated_at": now_iso(),
+           "source": "markdown", "items": items}
+    ctx = parse_context_markdown(md, date)
+    if ctx:
+        doc["context"] = ctx
+    return doc
+
+
+# --------------------------------------------------------------------------- Today context
+
+# Caps the build applies to `context` (a warning on stderr when one is hit).
+CONTEXT_CAPS = {"summary": 600, "outcomes": 3, "calendar": 25, "signals": 5, "prep": 200, "starter": 2000}
+SIGNAL_KINDS = ("coverage", "notable")
+HHMM_RE = re.compile(r"^(?:[01]?\d|2[0-3]):[0-5]\d$")
+CAL_TIME_RE = re.compile(
+    r"^\s*(?:\*\*|__)?\s*(\d{1,2}:\d{2})\s*(am|pm|AM|PM)?"
+    r"(?:\s*(?:\u2013|\u2014|-|to)\s*(\d{1,2}:\d{2})\s*(am|pm|AM|PM)?)?\s*(?:\*\*|__)?\s*[\u2014\u2013:,-]?\s*(.*)$")
+GAP_NOTE_RE = re.compile(r"^[_*(]*\s*\(?\s*(?:no |nothing )", re.I)
+ISO_IN_TEXT_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+
+
+def _hhmm(clock, ampm):
+    h, m = (int(x) for x in clock.split(":"))
+    if ampm:
+        ampm = ampm.lower()
+        if h == 12:
+            h = 0
+        if ampm == "pm":
+            h += 12
+    return f"{h:02d}:{m:02d}" if 0 <= h <= 23 and 0 <= m <= 59 else None
+
+
+def parse_calendar_line(text):
+    """`**09:00\u201309:30** Lab meeting` -> {start, end, title}; a line without a time -> {title}."""
+    m = CAL_TIME_RE.match(text)
+    if not m:
+        return {"title": text.strip()}
+    start = _hhmm(m.group(1), m.group(2) or m.group(4))
+    if start is None:
+        return {"title": text.strip()}
+    entry = {"start": start}
+    if m.group(3):
+        end = _hhmm(m.group(3), m.group(4))
+        if end:
+            entry["end"] = end
+    entry["title"] = m.group(5).strip() or "(untitled)"
+    return entry
+
+
+def _section_blocks(md):
+    """Briefing body -> (preamble lines after the H1, {section number: [(sub, line)]})."""
+    lines = strip_managed_block(strip_frontmatter(md)).splitlines()
+    pre, blocks, section, sub = [], {}, None, ""
+    for line in lines:
+        if line.startswith("## "):
+            m = H2_NUM_RE.match(line)
+            section = str(int(m.group(1))) if m else ("asks" if H2_ASKS_RE.match(line) else "?")
+            sub = ""
+            continue
+        if line.startswith("### "):
+            sub = line[4:].strip()
+            continue
+        if section is None:
+            pre.append(line)
+        else:
+            blocks.setdefault(section, []).append((sub, line))
+    return pre, blocks
+
+
+def _list_entries(lines):
+    """Top-level list items of a block, each with its child / `\u21b3` lines."""
+    out, base = [], None
+    for line in lines:
+        if not line.strip():
+            continue
+        m_detail = DETAIL_RE.match(line)
+        m = LIST_RE.match(line)
+        if m and not m_detail:
+            indent = _indent(m.group(1))
+            if base is None or indent <= base:
+                base = indent
+                out.append({"text": re.sub(r"^\[[ xX]\]\s+", "", m.group(3).strip()), "children": []})
+                continue
+        if out:
+            child = (m_detail.group(1) if m_detail else (m.group(3) if m else line)).strip()
+            if child:
+                out[-1]["children"].append(child)
+    return out
+
+
+def parse_context_markdown(md, date):
+    """The Today header parsed from a briefing's Markdown (fallback when items.json has
+    no `context`). Entries carry no sensitivity, so the artifact build treats them as
+    private. Returns None when nothing was found."""
+    pre, blocks = _section_blocks(md)
+    ctx = {"source": "markdown"}
+    para, started = [], False
+    for line in pre:
+        s = line.strip()
+        if s.startswith("# "):
+            started = True
+            continue
+        if not s:
+            if para:
+                break
+            continue
+        if s.startswith((">", "|", "<!--", "#")) or LIST_RE.match(line):
+            if para:
+                break
+            continue
+        para.append(s)
+        started = True
+    if para:
+        ctx["summary"] = " ".join(para)
+    outcomes = [{"text": e["text"]} for e in _list_entries(l for _, l in blocks.get("1", []))
+                if e["text"] and not EMPTY_ITEM_RE.match(e["text"])]
+    if outcomes:
+        ctx["outcomes"] = outcomes
+    calendar, note = [], None
+    for sub_line in blocks.get("2", []):
+        s = sub_line[1].strip()
+        if s and not LIST_RE.match(sub_line[1]) and GAP_NOTE_RE.match(s.lstrip("_*")):
+            note = note or s.strip("_* ")
+    for e in _list_entries(l for _, l in blocks.get("2", [])):
+        if GAP_NOTE_RE.match(e["text"].lstrip("_*")) and not CAL_TIME_RE.match(e["text"]):
+            note = note or e["text"].strip("_* ")
+            continue
+        entry = parse_calendar_line(e["text"])
+        if e["children"]:
+            entry["prep"] = e["children"][0]
+        calendar.append(entry)
+    seen = {(c.get("start"), plain_text(c["title"]).lower()) for c in calendar}
+    upcoming = [l for sub, l in blocks.get("9", []) if sub.lower().startswith("upcoming meetings")]
+    for e in _list_entries(upcoming):
+        entry = parse_calendar_line(e["text"])
+        dates = ISO_IN_TEXT_RE.findall(e["text"])
+        if "start" not in entry or any(d != date for d in dates):
+            continue  # only today's timed meetings
+        key = (entry.get("start"), plain_text(entry["title"]).lower())
+        if key not in seen:
+            seen.add(key)
+            calendar.append(entry)
+    if calendar:
+        calendar.sort(key=lambda c: (c.get("start") is None, c.get("start") or ""))
+        ctx["calendar"] = calendar
+    if note:
+        ctx["calendar_note"] = note
+    for _, line in blocks.get("0", []):
+        s = line.strip()
+        if s.startswith(">") and "coverage" in s.lower():
+            text = re.sub("^>\\s*(?:\u26a0\ufe0f?|\u26a0)?\\s*", "", s).strip()
+            ctx["signals"] = [{"kind": "coverage", "text": text}]
+            break
+    return ctx if len(ctx) > 1 else None
+
+
+def _str_list(val):
+    return isinstance(val, list) and all(isinstance(v, str) for v in val)
+
+
+def context_problems(ctx):
+    """Problems with an items file's optional `context` block (empty when valid)."""
+    if not isinstance(ctx, dict):
+        return ["must be an object"]
+    out = []
+    for key in ("summary", "calendar_note", "source"):
+        if ctx.get(key) is not None and not isinstance(ctx[key], str):
+            out.append(f"{key} must be a string")
+    if ctx.get("summary_sensitivity") is not None and ctx["summary_sensitivity"] not in SENSITIVITIES:
+        out.append(f"summary_sensitivity must be one of {list(SENSITIVITIES)}")
+
+    def entries(key, required, strings, lists=()):
+        val = ctx.get(key)
+        if val is None:
+            return []
+        if not isinstance(val, list):
+            out.append(f"{key} must be a list")
+            return []
+        good = []
+        for i, e in enumerate(val, 1):
+            where = f"{key}[{i}]"
+            if not isinstance(e, dict):
+                out.append(f"{where} must be an object")
+                continue
+            if not isinstance(e.get(required), str) or not e[required].strip():
+                out.append(f"{where} missing required string {required!r}")
+            for k in strings:
+                if e.get(k) is not None and not isinstance(e[k], str):
+                    out.append(f"{where}.{k} must be a string")
+            for k in lists:
+                if e.get(k) is not None and not _str_list(e[k]):
+                    out.append(f"{where}.{k} must be a list of strings")
+            if e.get("sensitivity") is not None and e["sensitivity"] not in SENSITIVITIES:
+                out.append(f"{where}.sensitivity must be one of {list(SENSITIVITIES)}")
+            good.append((where, e))
+        return good
+
+    entries("outcomes", "text", ("target", "starter"), ("item_ids",))
+    for where, e in entries("calendar", "title", ("start", "end", "prep", "target"), ("people",)):
+        for k in ("start", "end"):
+            if isinstance(e.get(k), str) and not HHMM_RE.match(e[k]):
+                out.append(f"{where}.{k} must be HH:MM (got {e[k]!r})")
+        if e.get("all_day") is not None and not isinstance(e["all_day"], bool):
+            out.append(f"{where}.all_day must be true or false")
+    for where, e in entries("signals", "text", ("kind",)):
+        if e.get("kind") is not None and e["kind"] not in SIGNAL_KINDS:
+            out.append(f"{where}.kind must be one of {list(SIGNAL_KINDS)}")
+    return out
+
+
+def cap_context(ctx):
+    """Apply CONTEXT_CAPS (in a copy), warning on stderr for each cap hit."""
+    if not ctx:
+        return ctx
+    ctx = json.loads(json.dumps(ctx))
+    caps = CONTEXT_CAPS
+
+    def warn(what):
+        print(f"briefing_review: warning: Today header {what}", file=sys.stderr)
+    if isinstance(ctx.get("summary"), str) and len(ctx["summary"]) > caps["summary"]:
+        ctx["summary"] = truncate_export(ctx["summary"], caps["summary"])
+        warn(f"summary cut to {caps['summary']} characters")
+    for key in ("outcomes", "calendar", "signals"):
+        if len(ctx.get(key) or []) > caps[key]:
+            ctx[key] = ctx[key][:caps[key]]
+            warn(f"{key} cut to {caps[key]} entries")
+    for c in ctx.get("calendar") or []:
+        if isinstance(c.get("prep"), str) and len(c["prep"]) > caps["prep"]:
+            c["prep"] = truncate_export(c["prep"], caps["prep"])
+    for o in ctx.get("outcomes") or []:
+        if isinstance(o.get("starter"), str) and len(o["starter"]) > caps["starter"]:
+            o["starter"] = o["starter"][:caps["starter"]]
+            warn(f"a starter prompt cut to {caps['starter']} characters")
+    return ctx
+
+
+def load_context(vault, date, items_doc):
+    """items.json `context`, else the briefing Markdown's, else None."""
+    if isinstance(items_doc.get("context"), dict):
+        return items_doc["context"]
+    path = briefing_md_path(vault, date)
+    if not path.is_file():
+        return None
+    try:
+        return parse_context_markdown(path.read_text(encoding="utf-8"), date)
+    except OSError:
+        return None
 
 
 # --------------------------------------------------------------------------- items.json
@@ -691,6 +937,8 @@ def validate_items(doc, date=None):
         problems.append(f"date must be YYYY-MM-DD (got {doc.get('date')!r})")
     elif date and doc["date"] != date:
         problems.append(f"date {doc['date']!r} does not match {date!r}")
+    if "context" in doc:
+        problems.extend(f"context: {p}" for p in context_problems(doc["context"]))
     items = doc.get("items")
     if not isinstance(items, list):
         return problems + ["items must be a list"]
@@ -1607,6 +1855,137 @@ def redact_items(items, level):
     return kept, withheld
 
 
+def _entry_sensitivity(entry, index, chunks, people=()):
+    """Effective sensitivity of a Today-header entry: the strictest of its own value,
+    its target note, and every wikilinked note in `chunks`. People that are not all
+    wikilinks to existing notes make it at least private (a bare name can't be checked)."""
+    pseudo = {"sensitivity": entry.get("sensitivity"), "target": entry.get("target"),
+              "text": " ".join(c for c in chunks if isinstance(c, str))}
+    sens = effective_sensitivity(pseudo, index)
+    for person in people:
+        links = WIKILINK_RE.findall(person or "")
+        if not links or not all(index.resolve(l) for l in links):
+            sens = _strictest([sens, "private"])
+    return sens
+
+
+def redact_context(ctx, level, index, shown_ids, alias=None):
+    """The Today header for the artifact surface, redacted like the rows.
+    `shown_ids` are the (real) ids of rows on the page; `alias` maps a real id to the
+    page's id. Returns (context or None, counts of what was hidden)."""
+    counts = {"busy": 0, "outcomes": 0, "signals": 0, "summary": 0}
+    if not ctx:
+        return ctx, counts
+    out = {k: ctx[k] for k in ("calendar_note", "source") if isinstance(ctx.get(k), str)}
+
+    def ids(entry):
+        kept = [i for i in entry.get("item_ids") or [] if i in shown_ids]
+        return [alias(i) if alias else i for i in kept]
+
+    summary = ctx.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        if level == "none" or (level == "sensitive" and ctx.get("summary_sensitivity") != "sensitive"):
+            out["summary"] = summary
+        else:
+            counts["summary"] = 1
+
+    def gate(entry, chunks, people=()):
+        if level == "none":
+            return "normal"
+        return _entry_sensitivity(entry, index, chunks, people)
+
+    outcomes = []
+    for o in ctx.get("outcomes") or []:
+        sens = gate(o, [o.get("text"), o.get("starter")])
+        if sens == "sensitive" or (sens == "private" and level == "private"):
+            counts["outcomes"] += 1
+            continue
+        if sens == "private" and level == "titles":
+            title = leading_title(o.get("text"))
+            outcomes.append({"text": f"[[{title}]]" if title else "(private outcome)", "item_ids": ids(o),
+                             "private": True})
+            continue
+        e = {"text": o.get("text", ""), "item_ids": ids(o)}
+        if isinstance(o.get("starter"), str) and level != "titles":
+            e["starter"] = o["starter"]
+        outcomes.append(e)
+    if outcomes:
+        out["outcomes"] = outcomes
+
+    calendar = []
+    for c in ctx.get("calendar") or []:
+        sens = gate(c, [c.get("title"), c.get("prep")] + list(c.get("people") or []), c.get("people") or [])
+        times = {k: c[k] for k in ("start", "end", "all_day") if k in c}
+        if sens == "sensitive" or (sens == "private" and level == "private"):
+            counts["busy"] += 1
+            calendar.append(dict(times, title="Busy", busy=True))
+            continue
+        if sens == "private" and level == "titles":
+            title = leading_title(c.get("title"))
+            calendar.append(dict(times, title=f"[[{title}]]" if title else "(private event)", private=True))
+            continue
+        e = dict(times, title=c.get("title", ""))
+        for k in ("prep", "people"):
+            if c.get(k):
+                e[k] = c[k]
+        calendar.append(e)
+    if calendar:
+        out["calendar"] = calendar
+
+    signals = []
+    for g in ctx.get("signals") or []:
+        if g.get("kind") == "coverage":  # names a source and a time range, never a person
+            signals.append({"kind": "coverage", "text": g.get("text", "")})
+            continue
+        sens = gate(g, [g.get("text")])
+        if sens == "sensitive" or (sens == "private" and level == "private"):
+            counts["signals"] += 1
+            continue
+        if sens == "private" and level == "titles":
+            title = leading_title(g.get("text"))
+            if not title:
+                counts["signals"] += 1
+                continue
+            signals.append({"kind": g.get("kind") or "notable", "text": f"[[{title}]]", "private": True})
+            continue
+        signals.append({"kind": g.get("kind") or "notable", "text": g.get("text", "")})
+    if signals:
+        out["signals"] = signals
+    return out, counts
+
+
+def context_stub(ctx):
+    """One-line summary of the header for widget pages after the first."""
+    if not ctx:
+        return None
+    return {"outcomes": len(ctx.get("outcomes") or []), "events": len(ctx.get("calendar") or []),
+            "signals": len(ctx.get("signals") or [])}
+
+
+def trim_context(ctx, step):
+    """Shrink the header for a tight widget budget; `step` 1.. drops more. None = gone."""
+    ctx = json.loads(json.dumps(ctx))
+    if step >= 1:
+        for o in ctx.get("outcomes") or []:
+            o.pop("starter", None)
+    if step >= 2:
+        for c in ctx.get("calendar") or []:
+            c.pop("prep", None)
+    if step >= 3 and len(ctx.get("calendar") or []) > 10:
+        ctx["calendar"] = ctx["calendar"][:10]
+    if step >= 4:
+        ctx["signals"] = [g for g in ctx.get("signals") or [] if g.get("kind") == "coverage"]
+    if step >= 5 and ctx.get("summary"):
+        ctx["summary"] = truncate_export(ctx["summary"], 160)
+    if step >= 6:
+        return None
+    return ctx
+
+
+TRIM_STEPS = ("dropped starter prompts", "dropped calendar prep lines", "kept the first 10 events",
+              "kept only the coverage signal", "shortened the summary", "left the header out")
+
+
 def collect_links(items, index, site):
     """wikilink target text -> vault path (no .md), for the client's link renderer."""
     if not site:
@@ -1659,6 +2038,18 @@ def scope_previous(prev, items):
     return dict(prev, state=state)
 
 
+def context_chunks(ctx):
+    """Markdown strings of a Today header (for link collection)."""
+    if not ctx:
+        return []
+    out = [ctx.get("summary") or "", ctx.get("calendar_note") or ""]
+    out += [o.get("text") or "" for o in ctx.get("outcomes") or []]
+    for c in ctx.get("calendar") or []:
+        out += [c.get("title") or "", c.get("prep") or ""] + list(c.get("people") or [])
+    out += [g.get("text") or "" for g in ctx.get("signals") or []]
+    return [c for c in out if c]
+
+
 def build_payload(vault, date, items_doc, surface, site, redact, index):
     items = []
     for n, item in enumerate(items_doc["items"], 1):
@@ -1672,10 +2063,18 @@ def build_payload(vault, date, items_doc, surface, site, redact, index):
         items, withheld = redact_items(items, redact)
     for p in items:
         p.pop("sensitivity", None)
+    shown = {p["id"] for p in items}
+    alias = (lambda i: artifact_alias(date, i)) if surface == "artifact" else None
+    context, hidden = redact_context(cap_context(load_context(vault, date, items_doc)), redact, index,
+                                     shown, alias)
     if surface == "artifact":
         site = ""
         for p in items:  # opaque ids: note titles never leave the machine through ids
             p["id"] = artifact_alias(date, p["id"])
+    links = collect_links(items, index, site)
+    if site and context:
+        extra = collect_links([{"text": c} for c in context_chunks(context)], index, site)
+        links.update({k: v for k, v in extra.items() if k not in links})
     return {
         "date": date,
         "items_hash": items_hash(items_doc),
@@ -1684,9 +2083,12 @@ def build_payload(vault, date, items_doc, surface, site, redact, index):
         "kinds": KIND_ACTIONS,
         "surface": surface,
         "site": site,
-        "links": collect_links(items, index, site),
+        "links": links,
         "previous": None if surface == "artifact" else scope_previous(previous_state(vault, date), items),
         "withheld": withheld,
+        "context": context or None,
+        "context_hidden": hidden if any(hidden.values()) else None,
+        "briefing": f"Ops/Briefings/{date}",
         "total": len(items_doc["items"]),
         "page": 1,
         "pages": 1,
@@ -1726,32 +2128,56 @@ def section_runs(items):
 
 
 def paginate_widget(payload, js, css, max_bytes):
-    """Split by section (consecutive runs, so every page covers a contiguous n range)."""
+    """Split by section (consecutive runs, so every page covers a contiguous n range).
+    The Today header renders on page 1 only; later pages carry a one-line stub."""
+    ctx = payload.get("context")
+
     def render(items, page=1, pages=1):
+        page_ctx = ctx if page == 1 else None
         used = " ".join(i.get("text", "") + " " + " ".join(i.get("detail", [])) for i in items)
+        used += " " + " ".join(context_chunks(page_ctx))
         links = {k: v for k, v in payload["links"].items() if k in used}
         rows = [items[0]["n"], items[-1]["n"]] if items else None
         previous = scope_previous(payload.get("previous"), items)  # only this page's answers
         return render_surface(dict(payload, items=items, links=links, page=page, pages=pages, rows=rows,
-                                   previous=previous),
+                                   previous=previous, context=page_ctx,
+                                   context_stub=context_stub(ctx) if page != 1 else None),
                               "widget", js, css)
 
-    def fits(items):
-        return len(render(items).encode("utf-8")) + 32 <= max_bytes  # slack for page numbers
+    def size(items, page=1):
+        return len(render(items, page, 2 if page > 1 else 1).encode("utf-8")) + 32  # slack for page numbers
 
     whole = render(payload["items"])
     if len(whole.encode("utf-8")) <= max_bytes:
         return [whole]
-    if not fits([]):
+    if size([], 2) > max_bytes:
         raise ReviewError(f"--max-bytes {max_bytes} is too small for the widget's script and styles "
                           f"({len(render([]).encode('utf-8'))} bytes before any row)")
+    if ctx and size([]) > max_bytes:  # the header alone does not fit: shrink it, never fail
+        full = ctx
+        for step, what in enumerate(TRIM_STEPS, 1):
+            ctx = trim_context(full, step)
+            if ctx is None or size([]) <= max_bytes:
+                print(f"briefing_review: warning: Today header too big for --max-bytes {max_bytes}; "
+                      f"{what}", file=sys.stderr)
+                break
+        if ctx is None:
+            payload = dict(payload, context=None)
+            if len(render(payload["items"]).encode("utf-8")) <= max_bytes:
+                return [render(payload["items"])]
     pages, cur = [], []
+
+    def page_no():
+        return len(pages) + 1
 
     def flush():
         nonlocal cur
-        if cur:  # never emit an empty page
+        if cur or (ctx and not pages):  # never an empty page, except page 1 holding the header
             pages.append(cur)
             cur = []
+
+    def fits(items):
+        return size(items, page_no()) <= max_bytes
 
     for run in section_runs(payload["items"]):
         if fits(cur + run):
@@ -1769,7 +2195,8 @@ def paginate_widget(payload, js, css, max_bytes):
                 print(f"briefing_review: warning: row {item['n']} alone exceeds --max-bytes {max_bytes}; "
                       "it gets its own widget page", file=sys.stderr)
                 pages.append([item])
-    flush()
+    if cur or not pages:
+        pages.append(cur)
     return [render(items, i, len(pages)) for i, items in enumerate(pages, 1)]
 
 

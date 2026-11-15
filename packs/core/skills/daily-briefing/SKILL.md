@@ -179,6 +179,16 @@ sensitivity: private
 ---
 ```
 
+Right under the frontmatter, before any section, write the H1 (`# Daily briefing — <date>`), then the **review link line**, then the **summary paragraph**:
+
+```
+> Review: [answer today's items](../../outputs/briefing-review/<date>.html) · <N> items, <K> carried
+
+<1–3 sentences on the shape of the day: the main time constraint and where the focus goes.>
+```
+
+The link points at the standalone review page, which Step 5b always builds, so it opens from Obsidian as well as from the file system. Write the same summary text into the items file's `context.summary` (Step 3b) so the briefing and the review form agree. Summarize `private` matters one level higher, as everywhere else; never put `sensitive` content in the summary.
+
 Body — the 13 sections, in this exact order with this exact heading text:
 
 ```
@@ -257,13 +267,42 @@ The briefing review form is built from a structured copy of the briefing's actio
 | `carried_from`, `previous` | Carried items only, from Step 2a. |
 | `actions` | Omit to get the kind's default pills. Set it only to *narrow* that list: a § 0 Letter becomes `["do", "done", "defer", "keep"]` (`done` = submitted); a fresh tracker digest becomes `["do", "create_task", "drop"]`. Never add an action the kind does not have, and keep `do` first. |
 
+**The Today header (`context`).** Add a top-level `context` object next to `items`. The review form shows it above the rows, so the form can stand in for the briefing page. It is read-only: it is never answered, exported or applied, and it does not change any item id.
+
+```json
+"context": {
+  "summary": "<the summary paragraph, verbatim>",
+  "summary_sensitivity": "<normal | private | sensitive: the strictest note the summary draws on>",
+  "outcomes": [
+    {"text": "<§ 1 line, wikilinks kept>", "target": "<note path.md, if any>", "item_ids": ["<ids of the review rows this outcome depends on>"],
+     "starter": "<the § 12 starter prompt for this outcome, verbatim>", "sensitivity": "<as items>"}
+  ],
+  "calendar": [
+    {"start": "HH:MM", "end": "HH:MM", "title": "<event>", "prep": "<what to come prepared with>",
+     "people": ["[[Person]]"], "target": "<calendar note path.md, if any>", "sensitivity": "<as items>"},
+    {"all_day": true, "title": "<all-day event>"}
+  ],
+  "calendar_note": "<a gap note such as (no calendar data available …), if § 2 has one>",
+  "signals": [
+    {"kind": "coverage", "text": "<the § 0 coverage warning, without the > and ⚠️>"},
+    {"kind": "notable", "text": "<the one Notable line from the report-back>", "sensitivity": "<as items>"}
+  ]
+}
+```
+
+- **Calendar: today only**, the events of § 2 plus today's entries from § 9 "Upcoming meetings" (once each). Times are local 24-hour `HH:MM`. The next-days tail stays in the Markdown only.
+- **People:** wikilink each attendee who has a person note, and leave out anyone who does not. An event whose `people` are not all resolvable wikilinks is treated as private.
+- **Sensitivity** follows the item rule (inherit from the note; `private` when unknown; never lower it). On the artifact surface, private events show as busy blocks (time only), and the summary is dropped unless the user chose `--redact sensitive`.
+- Every key is optional; leave out what does not apply. The build caps the header (600-character summary, 3 outcomes, 25 events, 5 signals, 200-character `prep`, 2,000-character `starter`).
+- When `context` is missing, the form parses a header from the Markdown (summary paragraph, § 1, § 2, the § 0 coverage warning), so older briefings still get one.
+
 Then validate:
 
 ```
 python3 scripts/briefing_review.py validate <date>
 ```
 
-Exit 0 means the file is good. On exit 1, read the printed problems, fix the items file (duplicate ids, a missing required field, an unknown kind or action, a bad section), and re-run until it passes. Do not continue to Step 4 with a failing file; the review form would be missing rows or refuse to build.
+Exit 0 means the file is good. On exit 1, read the printed problems, fix the items file (duplicate ids, a missing required field, an unknown kind or action, a bad section, a malformed `context` entry), and re-run until it passes. Do not continue to Step 4 with a failing file; the review form would be missing rows or refuse to build.
 
 ## Step 4 — Log
 
@@ -273,9 +312,23 @@ Append one line to `log.md`:
 <datetime-with-tz> — agent:planner — brief — [[Ops/Briefings/<date>]] — daily briefing generated; <N> outcomes, <N> at-risk projects, <N> due trackers.
 ```
 
-## Step 5 — Open in browser via Quartz (default)
+## Step 5 — Decide what opens, then open the briefing
 
-The file is the artifact, and the user wants to read it in the browser (rendered HTML with working wikilinks and graph), not the terminal or Obsidian. Run:
+**What opens is `briefing_open`** in `_config/overrides.md` (a line `briefing_open: <value>` in the frontmatter or the body). `review_surface` (Step 5b) still decides *where* the review opens; the two are independent.
+
+| `briefing_open` | After the briefing is written |
+| --- | --- |
+| `review` | Open the review form only (Step 5b). The briefing is one click away: the form's Today header links to it, and the report gives its path. New vaults are seeded with this value. |
+| `both` | Open the briefing (this step), then the review (Step 5b), so the review is the front tab or panel. |
+| `briefing` | Open the briefing only. Build the review page (Step 5b, `page` only) and give its link in the report. |
+| `none` | Open nothing. Build the review page and report both links. |
+| absent | Behave as `both`, and ask the one-time question in Step 6. |
+
+"Don't open it" or "just write the file" in the request means `none` for this run, without changing the setting.
+
+**Unattended runs open nothing.** A run is unattended when its prompt says so (scheduled tasks say "unattended run") or it was started non-interactively with `claude -p`. A missing terminal alone does not count: Memex Desktop has none. In an unattended run, whatever `briefing_open` says: never open, show or publish anything, and never ask the one-time question. Still build the review page (Step 5b, `page` only), check whether the site answers (the `curl` check in Step 5b), and put exactly one review link in the report and the log line: `http://localhost:{{QUARTZ_PORT}}/review/<date>` when the site answers, else `outputs/briefing-review/<date>.html`. With no review items, report "No review items today" and no review link.
+
+**Opening the briefing** (only for `both` and `briefing`). In Memex Desktop, show the note with `show_artifact` and `path: Ops/Briefings/<date>.md`. Elsewhere, open it in the browser through the local site (rendered HTML with working wikilinks and graph), not the terminal or Obsidian:
 
 ```
 # 1. Ensure Quartz dev server is up on :{{QUARTZ_PORT}}
@@ -294,13 +347,20 @@ open "http://localhost:{{QUARTZ_PORT}}/Ops/Briefings/<date>"
 
 Substitute `<date>` (e.g. `2026-01-15`). URL preserves directory casing and strips `.md`.
 
-Skip this step only if the user explicitly says "don't open it" or "just write the file." Otherwise it's the default.
 
 (Prior versions of this skill opened the briefing in Obsidian via `obsidian://open?vault={{VAULT_NAME}}&file=...` — that was superseded in favor of Quartz/browser. Memory `feedback_open_artifacts_in_browser` is the canonical statement of the default.)
 
 ## Step 5b — Open the review
 
-The review is the form where the user answers every item in the items file: one row per item, action pills (`Alt+1` is always "Do it"), a note field, and a submit step that hands the answers back. Skip this step only when the user said "don't open it" or "just write the file", the same as Step 5.
+The review is the form where the user answers every item in the items file: one row per item, action pills (`Alt+1` is always "Do it"), a note field, and a submit step that hands the answers back. Above the rows, a **Today header** shows the summary, the top outcomes (each with a "Copy starter prompt" button), today's calendar and the signals, so the form can stand in for the briefing page; `Alt+T` collapses it.
+
+**Always build the standalone page first**, whatever happens next, so the briefing's review link line works:
+
+```
+python3 scripts/briefing_review.py build <date>
+```
+
+Then open the review only when `briefing_open` is `review`, `both` or absent, and the run is not unattended (Step 5). For `briefing`, `none` and unattended runs, stop here and report the link. When there are no review items, the form still opens for `review` (it shows the Today header and "Nothing to answer today", with no Submit); for `both`, open only the briefing.
 
 **Pick the surface.** Read `review_surface` from `_config/overrides.md` — a line `review_surface: <value>` in the frontmatter or the body. When the file or the key is absent, the value is `auto`. (Older vaults never received this key in their seeded overrides file, so absence is the normal case.)
 
@@ -326,13 +386,7 @@ curl -s -o /dev/null -w '%{http_code}' "http://localhost:{{QUARTZ_PORT}}/review/
 
 On `200`, `open "http://localhost:{{QUARTZ_PORT}}/review/<date>"`. On anything else, use `page`. Submitting saves the answers to `Inbox/reviews/<date>.json` directly, and the form autosaves drafts as the user types.
 
-**page** — a self-contained file that works from `file://`:
-
-```
-python3 scripts/briefing_review.py build <date>
-```
-
-It prints `outputs/briefing-review/<date>.html`; run `open` on that path. Submitting copies a text export to the clipboard for the user to paste into the chat.
+**page** — the self-contained file built above, which works from `file://`: it is `outputs/briefing-review/<date>.html`; run `open` on that path. Submitting copies a text export to the clipboard for the user to paste into the chat.
 
 **artifact** — only when the user asked for it or set `review_surface: artifact`; it puts briefing content on claude.ai, so it is never the automatic choice.
 
@@ -349,10 +403,12 @@ python3 scripts/briefing_review.py build <date> --surface artifact
 
 After opening, tell the user in one line how to switch: "To use a different review surface, set `review_surface: widget | server | page | artifact` in `_config/overrides.md`."
 
+In Memex Desktop with `both`, show the briefing note first and the review last, so the review is the active panel.
+
 ## Step 6 — Report back
 
 ```
-Briefing generated: Ops/Briefings/<date>.md (opened in browser at http://localhost:{{QUARTZ_PORT}}/Ops/Briefings/<date>).
+Briefing generated: Ops/Briefings/<date>.md (<opened in browser at http://localhost:{{QUARTZ_PORT}}/Ops/Briefings/<date> | not opened>).
 Review: <N> items, <K> carried from <previous date> — <shown inline above | open at http://localhost:{{QUARTZ_PORT}}/review/<date> | opened outputs/briefing-review/<date>.html | private artifact <link>, <W> items withheld as local-only>. Answer there and submit.
 To use a different review surface, set `review_surface: widget | server | page | artifact` in `_config/overrides.md`.
 
@@ -372,6 +428,14 @@ Top 3 outcomes:
 
 Notable: <one bullet for the most consequential at-risk project or surfaced followup, or "nothing surprising">.
 ```
+
+**The one-time question about what opens.** Ask it only when `briefing_open` is absent, the run is not unattended, and this vault has not been asked twice already. Add it as the last line of the report:
+
+> Want the review form to be what opens after each briefing? It now shows the Top 3, calendar and highlights at the top. **review** (recommended) · **both** (today's behaviour) · **briefing** · **none**
+
+- On an answer (now, or later in the conversation; "always open the review" also counts), add one line `briefing_open: <value>` to `_config/overrides.md`. Append it; never rewrite other lines; create the file with a frontmatter block if it is missing. Append a `log.md` line, and say in one sentence how to change it later.
+- With no answer this run, add `briefing_open_asked: <date>` instead, and do not ask again until 7 days after that date.
+- The second time it goes unanswered (a `briefing_open_asked:` line is already there), write `briefing_open: both` with a `log.md` line ("kept today's behaviour after two unanswered asks") and never ask again.
 
 Surface any coverage gap at the top of the chat report-back, before §0 confirmations and the Top
 3. The user must see when the comms capture is partial; never let a successfully written briefing
@@ -418,7 +482,7 @@ Don't recapitulate the whole briefing in chat — the file is the artifact.
 - `shutdown-review` — the end-of-day counterpart that appends to this briefing.
 - [[apply-review]] — applies the answers submitted in the briefing review (Step 5b) and annotates § 0 with what was resolved.
 - `scripts/briefing_review.py` — the review CLI: `id` and `validate` (Step 3b), `carryover` (Step 2a), `build` (Step 5b); `save`, `plan`, `mark` and `annotate` belong to apply-review.
-- `_config/overrides.md` — `review_surface: auto | widget | server | page | artifact` picks where the review opens (absent = `auto`).
+- `_config/overrides.md` — `review_surface: auto | widget | server | page | artifact` picks where the review opens (absent = `auto`); `briefing_open: review | both | briefing | none` picks what opens after the briefing (absent = `both`, and ask once; new vaults are seeded with `review`).
 - `Inbox/reviews/` — saved answers (`<date>.json`) and the apply ledger (`<date>.ledger.json`); a system slot, never triaged as a capture.
 - `session-start` — the lighter-weight pre-flight (5–10 seconds vs. several minutes here).
 - `log-mutation` — the canonical log-append helper.

@@ -354,6 +354,154 @@
 
   function keyLabel(k) { return h("kbd", { text: k }); }
 
+  // ---------------------------------------------------------------- Today header
+
+  const CTX = R.context || null;
+  const TODAY_KEY = "memex-briefing-review:today-collapsed:" + SURFACE;
+
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+
+  function todaySummaryLine(c) {
+    const bits = [];
+    if (c.outcomes) bits.push(plural(c.outcomes, "outcome"));
+    if (c.events) bits.push(plural(c.events, "event"));
+    if (c.signals) bits.push(plural(c.signals, "signal"));
+    return bits.join(" " + DOT + " ");
+  }
+
+  function carriedCount() {
+    return ITEMS.filter(function (it) { return !!it.carried_from; }).length;
+  }
+
+  function focusRowOf(ids) {
+    const id = (ids || []).filter(function (i) { return refs[i]; })[0];
+    if (!id) return;
+    setCurrent(id);
+    refs[id].note.focus();
+    if (refs[id].row.scrollIntoView) refs[id].row.scrollIntoView({ block: "center" });
+  }
+
+  function mouseOnly(btn) {
+    btn.setAttribute("tabindex", "-1");
+    btn.addEventListener("mousedown", function (ev) { ev.preventDefault(); });
+    return btn;
+  }
+
+  function timeLabel(c) {
+    if (c.all_day) return "all day";
+    if (!c.start) return "";
+    return c.start + (c.end ? "\u2013" + c.end : "");
+  }
+
+  function briefingLink() {
+    const label = "Open the full briefing";
+    if (SURFACE === "artifact" || !R.site) return h("span", { class: "rv-today-full", text: "Full briefing: " + (R.briefing || "Ops/Briefings/" + DATE) + ".md" });
+    const href = R.site + "/" + quartzSlug(R.briefing || "Ops/Briefings/" + DATE).split("/").map(encodeURIComponent).join("/");
+    return h("a", { class: "rv-today-full", href: href, target: "_blank", rel: "noopener noreferrer", tabindex: "-1", text: label + " " + ARROW });
+  }
+
+  function renderToday() {
+    if (!CTX) {
+      if (!R.context_stub) return null;
+      const line = todaySummaryLine(R.context_stub);
+      return line ? h("p", { class: "rv-today-stub", text: "Today: " + line + " " + DOT + " see part 1" }) : null;
+    }
+    const outcomes = CTX.outcomes || [], cal = CTX.calendar || [], signals = (CTX.signals || []).slice();
+    const coverage = signals.filter(function (g) { return g.kind === "coverage"; });
+    const others = signals.filter(function (g) { return g.kind !== "coverage"; });
+    const carried = carriedCount();
+    const counts = { outcomes: outcomes.length, events: cal.length, signals: signals.length };
+    let collapsed = !!lsGet(TODAY_KEY);
+    const sec = h("section", { class: "rv-today", "aria-labelledby": "rv-today-h" });
+    const toggle = mouseOnly(h("button", { type: "button", class: "rv-today-toggle", "aria-expanded": "true",
+      title: "Collapse or expand (" + (IS_MAC ? "\u2325" : "Alt") + "+T)" }));
+    const summaryLine = h("span", { class: "rv-today-line" });
+    const head = h("div", { class: "rv-today-head" },
+      h("h2", { class: "rv-today-h", id: "rv-today-h", text: "Today" }), summaryLine, h("span", { class: "rv-spacer" }), toggle);
+    sec.appendChild(head);
+    coverage.forEach(function (g) {
+      sec.appendChild(renderMd(g.text, h("p", { class: "rv-today-coverage", role: "note" }, "\u26a0 ")));
+    });
+    const body = h("div", { class: "rv-today-body" });
+    if (CTX.summary) body.appendChild(renderMd(CTX.summary, h("p", { class: "rv-today-summary" })));
+    const cols = h("div", { class: "rv-today-cols" });
+    if (outcomes.length) {
+      const ol = h("ol", { class: "rv-today-outcomes" });
+      outcomes.forEach(function (o) {
+        const li = h("li", { class: "rv-today-outcome" + ((o.item_ids || []).some(function (i) { return BY_ID[i]; }) ? " rv-linked" : "") });
+        renderMd(o.text, li);
+        if (o.private) li.appendChild(h("span", { class: "rv-kind", text: "private" }));
+        if (o.starter) {
+          const copy = mouseOnly(h("button", { type: "button", class: "rv-chip rv-today-copy", text: "Copy starter prompt" }));
+          copy.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            copyText(o.starter).then(function (ok) {
+              copy.textContent = ok ? CHECK + " Copied" : "Copy failed";
+              setTimeout(function () { copy.textContent = "Copy starter prompt"; }, 2000);
+            });
+          });
+          li.appendChild(copy);
+        }
+        li.addEventListener("click", function (ev) {
+          if (ev.target.closest("a, button")) return;
+          focusRowOf(o.item_ids);
+        });
+        ol.appendChild(li);
+      });
+      cols.appendChild(h("div", { class: "rv-today-col" }, h("h3", { class: "rv-today-sub", text: "Top outcomes" }), ol));
+    }
+    if (cal.length || CTX.calendar_note) {
+      const ul = h("ul", { class: "rv-today-cal" });
+      cal.forEach(function (c) {
+        const li = h("li", { class: "rv-today-event" + (c.busy ? " rv-busy" : "") },
+          h("span", { class: "rv-today-time", text: timeLabel(c) }));
+        const what = renderMd(c.title, h("span", { class: "rv-today-what" }));
+        if (c.private) what.appendChild(h("span", { class: "rv-kind", text: "private" }));
+        if (c.prep) what.appendChild(renderMd(c.prep, h("span", { class: "rv-today-prep" }, " " + DASH + " ")));
+        li.appendChild(what);
+        ul.appendChild(li);
+      });
+      const col = h("div", { class: "rv-today-col" }, h("h3", { class: "rv-today-sub", text: "Calendar" }));
+      if (cal.length) col.appendChild(ul);
+      if (CTX.calendar_note) col.appendChild(renderMd(CTX.calendar_note, h("p", { class: "rv-today-note" })));
+      cols.appendChild(col);
+    }
+    if (cols.childNodes.length) body.appendChild(cols);
+    const notes = others.map(function (g) {
+      const li = renderMd(g.text, h("li"));
+      if (g.private) li.appendChild(h("span", { class: "rv-kind", text: "private" }));
+      return li;
+    });
+    if (carried) notes.push(h("li", { text: plural(carried, "item") + " carried from earlier reviews" }));
+    const hid = R.context_hidden;
+    if (hid) {
+      const bits = [];
+      if (hid.busy) bits.push(plural(hid.busy, "calendar entry", "calendar entries") + " shown as busy");
+      if (hid.outcomes) bits.push(plural(hid.outcomes, "outcome") + " withheld");
+      if (hid.signals) bits.push(plural(hid.signals, "signal") + " withheld");
+      if (hid.summary) bits.push("summary withheld");
+      notes.push(h("li", { class: "rv-today-hidden", text: bits.join(", ") + " (local-only)" }));
+    }
+    if (notes.length) body.appendChild(h("ul", { class: "rv-today-signals" }, notes));
+    body.appendChild(briefingLink());
+    sec.appendChild(body);
+    function apply() {
+      body.hidden = collapsed;
+      sec.setAttribute("data-collapsed", collapsed ? "1" : "0");
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      toggle.textContent = collapsed ? "Show" : "Hide";
+      summaryLine.textContent = collapsed ? todaySummaryLine(counts) : "";
+    }
+    ui.toggleToday = function () {
+      collapsed = !collapsed;
+      if (collapsed) lsSet(TODAY_KEY, 1); else { try { localStorage.removeItem(TODAY_KEY); } catch (e) { /* storage blocked */ } }
+      apply();
+    };
+    toggle.addEventListener("click", ui.toggleToday);
+    apply();
+    return sec;
+  }
+
   function renderHeader() {
     const alt = IS_MAC ? "\u2325" : "Alt", mod = IS_MAC ? "\u2318" : "Ctrl";
     ui.counter = h("b", { text: "0" });
@@ -364,6 +512,12 @@
     const copy = SURFACE === "page" ? null :
       h("button", { type: "button", class: "rv-btn", onclick: onCopy, text: "Copy" });
     const sub = fmtDay(DATE, true) + (PAGED ? " " + DOT + " part " + R.page + " of " + R.pages : "");
+    if (!ITEMS.length && !PAGED) {  // nothing to answer: no progress, no Submit / Reset
+      return h("header", { class: "rv-head" },
+        h("div", { class: "rv-head-row" },
+          h("h1", { class: "rv-title" }, "Briefing review", h("span", { class: "rv-sub", text: sub })),
+          h("div", { class: "rv-spacer" }), ui.status));
+    }
     return h("header", { class: "rv-head" },
       h("div", { class: "rv-head-row" },
         h("h1", { class: "rv-title" }, "Briefing review", h("span", { class: "rv-sub", text: sub })),
@@ -377,6 +531,7 @@
         h("span", null, keyLabel(alt), "+", keyLabel("1"), DASH, keyLabel("9"), " pick"),
         h("span", null, keyLabel(alt), "+", keyLabel("0"), " clear"),
         h("span", null, keyLabel(alt), "+", keyLabel("R"), " reuse yesterday"),
+        CTX ? h("span", null, keyLabel(alt), "+", keyLabel("T"), " today") : null,
         h("span", null, keyLabel(mod), "+", keyLabel("Enter"), " " + SUBMIT_LABEL.toLowerCase())));
   }
 
@@ -487,13 +642,15 @@
     root.appendChild(ui.notice);
     root.appendChild(ui.banner);
     root.appendChild(ui.exportWrap);
+    const today = renderToday();
+    if (today) root.appendChild(today);
     if (R.withheld) {
       root.appendChild(h("p", { class: "rv-withheld", text: R.withheld + (R.withheld === 1 ? " private or sensitive item is" : " private or sensitive items are") +
         " withheld from this page (local-only). Review " + (R.withheld === 1 ? "it" : "them") + " in your vault." }));
     }
-    if (!ITEMS.length) root.appendChild(h("p", { class: "rv-empty", text: "No reviewable items in this briefing." }));
+    if (!ITEMS.length) root.appendChild(h("p", { class: "rv-empty", text: "Nothing to answer today." }));
     root.appendChild(renderBody());
-    root.appendChild(h("div", { class: "rv-foot", text: ITEMS.length + " rows " + DOT + " unanswered rows are left as is" }));
+    if (ITEMS.length) root.appendChild(h("div", { class: "rv-foot", text: ITEMS.length + " rows " + DOT + " unanswered rows are left as is" }));
     ITEMS.forEach(function (it) { syncRow(it.id); });
     updateCounter();
     refreshSubmit();
@@ -535,12 +692,14 @@
   }
 
   function updateCounter() {
+    if (!ui.counter) return;
     const n = countAnswered();
     ui.counter.textContent = String(n);
     ui.bar.style.width = ITEMS.length ? Math.round(100 * n / ITEMS.length) + "%" : "0";
   }
 
   function refreshSubmit() {
+    if (!ui.submit) return;
     const done = !!meta.submittedAt && !meta.dirty;
     ui.submit.textContent = done ? CHECK + " " + DONE_LABEL : (meta.submittedAt ? SUBMIT_LABEL + " again" : SUBMIT_LABEL);
     if (done) ui.submit.setAttribute("data-state", "done"); else ui.submit.removeAttribute("data-state");
@@ -670,6 +829,7 @@
     if (!inRoot) return;
     if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); submit(); return; }
     if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    if (ev.code === "KeyT" && ui.toggleToday) { ev.preventDefault(); ui.toggleToday(); return; }
     const id = rowOf(document.activeElement) || currentId;
     if (!id || !refs[id]) return;
     const digit = /^Digit([0-9])$/.exec(ev.code || "") || /^Numpad([0-9])$/.exec(ev.code || "");
@@ -782,6 +942,7 @@
   }
 
   function submit() {
+    if (!ui.submit) return;  // nothing to answer today
     const n = countAnswered();
     if (SURFACE === "server") return submitServer(n);
     if (SURFACE === "artifact" && remote.connected()) return submitArtifact(n);
@@ -1088,6 +1249,12 @@
     showBanner(ui.banner, "ok", [h("b", { text: CHECK + " " + DONE_LABEL }), " earlier " + DASH + " edit and " + SUBMIT_LABEL.toLowerCase() + " again to change your answers."]);
   }
   root.addEventListener("focusin", onFocusIn);
+  // Note boxes size to their text; re-fit them when the width changes (a pane opened narrow).
+  let resizeTimer = null;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { ITEMS.forEach(function (it) { if (refs[it.id]) autogrow(refs[it.id].note); }); }, 150);
+  });
   document.addEventListener("keydown", onKeyDown);
   if (remote.init) remote.init();
   // A small hook for tests and host bridges.

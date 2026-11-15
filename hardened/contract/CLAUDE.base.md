@@ -16,6 +16,7 @@ Treat `.claude/skills/`, `_schemas/`, `_templates/`, `_workflows/`, `Agents/Prom
 Known override keys (an absent key means the default):
 
 - `review_surface: auto | widget | server | page | artifact` — where `daily-briefing` opens the briefing review form. `auto` (default) uses an inline widget when the session has one, else the local site's `/review/<date>` page when Quartz is up, else a standalone page under `outputs/briefing-review/`. `artifact` publishes a private, redacted claude.ai artifact and is never chosen automatically.
+- `briefing_open: review | both | briefing | none` — what `daily-briefing` opens after writing the briefing: the review form only (`review`, seeded for new vaults), the briefing then the review (`both`, the behaviour when absent), the briefing only, or nothing. Unattended runs open nothing. When absent, the skill asks once (and once more after 7 days if unanswered, then records `both`); `briefing_open_asked: <date>` records an unanswered ask.
 
 ## Dropping files for ingestion
 

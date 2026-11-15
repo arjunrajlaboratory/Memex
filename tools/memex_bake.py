@@ -505,6 +505,10 @@ def _write_seed_files(target: pathlib.Path, answers: dict[str, Any], streams: li
         "Known keys (an absent key means the default):\n\n"
         "- `review_surface: auto` - where the daily briefing opens its review form: "
         "`auto` (default), `widget`, `server`, `page`, or `artifact`.\n"
+        "- `briefing_open` - what opens after the daily briefing: `review` (the review form, "
+        "with the day's outcomes and calendar on top), `both` (the briefing, then the form), "
+        "`briefing`, or `none`.\n\n"
+        "briefing_open: review\n"
     )
     # Seeds are write-once: never clobber an existing file (re-running init with
     # --force must not reset log.md / _config/overrides.md). Existing seeds are
